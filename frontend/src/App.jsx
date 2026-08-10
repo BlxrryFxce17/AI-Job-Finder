@@ -32,6 +32,61 @@ export default function App() {
   const [sendingEmail, setSendingEmail] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
 
+  // Batch Selection
+  const [selectedJobs, setSelectedJobs] = useState([]);
+  const [batchProgress, setBatchProgress] = useState(null);
+
+  const toggleSelectJob = (id) => {
+    setSelectedJobs(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
+  };
+
+  const handleBatchSend = async () => {
+    if (selectedJobs.length === 0) return;
+    setBatchProgress(0);
+    
+    for (let i = 0; i < selectedJobs.length; i++) {
+      const jobId = selectedJobs[i];
+      const job = jobs.find(j => j.id === jobId);
+      if (!job) continue;
+
+      try {
+        const discRes = await fetch(`${API_BASE}/api/discover-email`, {
+           method: 'POST', headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({ company: job.company, jd: job.jd })
+        });
+        const discData = await discRes.json();
+        const discoveredEmail = discData.email || '';
+        
+        const genRes = await fetch(`${API_BASE}/api/generate-email`, {
+           method: 'POST', headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({ company: job.company, role: job.role, jd: job.jd, emailType: 'Cold Outreach / Networking' })
+        });
+        const genData = await genRes.json();
+        
+        if (discoveredEmail && genData.draft) {
+            const sendRes = await fetch(`${API_BASE}/api/send-email`, {
+               method: 'POST', headers: { 'Content-Type': 'application/json' },
+               body: JSON.stringify({ jobId: job.id, draft: genData.draft, recipient: discoveredEmail })
+            });
+            const sendData = await sendRes.json();
+            if (sendData.success) {
+               updateStatus(job.id, 'Sent', discoveredEmail, genData.draft);
+            }
+        }
+      } catch (err) {
+        console.error(err);
+      }
+      setBatchProgress(((i + 1) / selectedJobs.length) * 100);
+    }
+    
+    notify('Batch complete!');
+    setTimeout(() => {
+        setBatchProgress(null);
+        setSelectedJobs([]);
+        loadJobs();
+    }, 2000);
+  };
+
   useEffect(() => { 
     loadJobs(); 
     
@@ -261,19 +316,37 @@ export default function App() {
 
         {tab === 'applications' && (
           <div className="add-job-bar">
-            <input 
-              type="text" 
-              className="form-input flex-grow" 
-              placeholder="e.g. software engineer in new york" 
-              value={fetchQuery}
-              onChange={e => setFetchQuery(e.target.value)}
-            />
-            <button className="btn btn-primary" onClick={handleFetchJobs} disabled={fetching}>
-              {fetching ? <span className="spinner"></span> : 'Auto-Scrape Fresh Jobs ✨'}
-            </button>
-            <button className="btn btn-ghost" onClick={() => setShowAddForm(!showAddForm)}>
-              + Manual Add
-            </button>
+            {selectedJobs.length > 0 ? (
+              <div style={{display: 'flex', alignItems: 'center', width: '100%', gap: '15px'}}>
+                <span style={{fontWeight: 600, color: 'var(--accent)'}}>{selectedJobs.length} selected</span>
+                {batchProgress !== null ? (
+                  <div style={{flex: 1, height: '8px', background: 'var(--surface-4)', borderRadius: '4px', overflow: 'hidden'}}>
+                    <div style={{width: `${batchProgress}%`, height: '100%', background: 'var(--accent)', transition: 'width 0.3s'}} />
+                  </div>
+                ) : (
+                  <button className="btn btn-primary" onClick={handleBatchSend}>
+                    Auto-Apply to Selected 🚀
+                  </button>
+                )}
+                <button className="btn btn-ghost" style={{marginLeft: 'auto'}} onClick={() => setSelectedJobs([])}>Cancel</button>
+              </div>
+            ) : (
+              <>
+                <input 
+                  type="text" 
+                  className="form-input flex-grow" 
+                  placeholder="e.g. software engineer in new york" 
+                  value={fetchQuery}
+                  onChange={e => setFetchQuery(e.target.value)}
+                />
+                <button className="btn btn-primary" onClick={handleFetchJobs} disabled={fetching}>
+                  {fetching ? <span className="spinner"></span> : 'Auto-Scrape Fresh Jobs ✨'}
+                </button>
+                <button className="btn btn-ghost" onClick={() => setShowAddForm(!showAddForm)}>
+                  + Manual Add
+                </button>
+              </>
+            )}
           </div>
         )}
 
@@ -302,6 +375,16 @@ export default function App() {
               <table className="applications-table">
                 <thead>
                   <tr>
+                    <th style={{width: '40px'}}>
+                      <input 
+                        type="checkbox" 
+                        onChange={(e) => {
+                          if (e.target.checked) setSelectedJobs(activeJobs.map(j => j.id));
+                          else setSelectedJobs([]);
+                        }}
+                        checked={activeJobs.length > 0 && selectedJobs.length === activeJobs.length}
+                      />
+                    </th>
                     <th>Company</th>
                     <th>Role</th>
                     <th>Date Found</th>
@@ -312,6 +395,13 @@ export default function App() {
                 <tbody>
                   {activeJobs.map(job => (
                     <tr className="table-row" key={job.id}>
+                      <td>
+                        <input 
+                          type="checkbox" 
+                          checked={selectedJobs.includes(job.id)} 
+                          onChange={() => toggleSelectJob(job.id)} 
+                        />
+                      </td>
                       <td>
                         <div className="company-cell">
                           <div className="company-avatar">{job.company.substring(0,2).toUpperCase()}</div>
