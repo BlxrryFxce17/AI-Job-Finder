@@ -587,7 +587,10 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
 6. OUTPUT STRICTLY the final email content (body only, no signature, no name). No conversational filler, no internal thoughts, no analysis, and NO MARKDOWN BLOCKS (like \`\`\`email).
 7. CRITICAL: DO NOT start your response with "Here is the email..." or "Subject:...". Start IMMEDIATELY with the very first word of the email body.`;
 
+    console.log('[Test Email] Drafting AI content...');
     const response = await callAIWithRetry(prompt);
+    console.log('[Test Email] Draft generated successfully.');
+    
     let draftText = response.text;
     const emailStartMatch = draftText.match(/(?:Here is the email.*?:|Here's the email.*?:|Here is the cold email.*?:|Subject:.*?\n)\n*/i);
     if (emailStartMatch) {
@@ -637,7 +640,9 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
       mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
     }
 
+    console.log('[Test Email] Sending email via Nodemailer to', myEmail, '...');
     await transporter.sendMail(mailOptions);
+    console.log('[Test Email] Sent successfully!');
 
     // Save to Database so it shows in the table
     const testJob = new Job({
@@ -757,7 +762,9 @@ app.post('/api/send-email', async (req, res) => {
       mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
     }
 
+    console.log(`[Batch/Send Email] Sending to ${to} for job ${jobId}...`);
     const info = await transporter.sendMail(mailOptions);
+    console.log(`[Batch/Send Email] Sent successfully! MessageId: ${info.messageId}`);
     res.json({ success: true, tracked: !!baseUrl, message: 'Email sent successfully!', messageId: info.messageId });
   } catch (error) {
     console.error('Error sending email:', error);
@@ -792,7 +799,10 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
 6. OUTPUT STRICTLY the final email content (body only, no signature, no name). No conversational filler, no internal thoughts, no analysis, and NO MARKDOWN BLOCKS (like \`\`\`email).
 7. CRITICAL: DO NOT start your response with "Here is the email..." or "Subject:...". Start IMMEDIATELY with the very first word of the email body.`;
 
+    console.log('[Single Draft] Generating AI draft for', company, '...');
     const response = await callAIWithRetry(prompt);
+    console.log('[Single Draft] Draft generated successfully.');
+    
     let draftText = response.text.trim();
     const emailStartMatch = draftText.match(/(?:Here is the email.*?:|Here's the email.*?:|Here is the cold email.*?:|Subject:.*?\n)\n*/i);
     if (emailStartMatch) {
