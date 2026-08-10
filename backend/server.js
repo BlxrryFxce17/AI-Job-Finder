@@ -57,26 +57,22 @@ const callAIWithRetry = async (prompt, retries = 5, delayMs = 3000) => {
       });
       return { text: response.text };
     } catch (geminiErr) {
-      if (geminiErr.status === 429 || geminiErr.status >= 500) {
-        console.warn(`[Gemini API] Failed (${geminiErr.status}). Falling back to Groq Llama-3...`);
-        try {
-          // 2. Fallback: Groq Llama-3-70b
-          const completion = await groq.chat.completions.create({
-            messages: [{ role: 'user', content: prompt }],
-            model: 'llama-3.1-8b-instant',
-          });
-          return { text: completion.choices[0]?.message?.content || '' };
-        } catch (groqErr) {
-          if (groqErr.status === 429 && i < retries - 1) {
-            console.warn(`[Groq API] Rate Limit. Both AIs exhausted. Waiting ${delayMs/1000}s... (Attempt ${i+1}/${retries})`);
-            await new Promise(res => setTimeout(res, delayMs));
-            delayMs += 3000;
-          } else {
-            throw groqErr; // Total failure
-          }
+      console.warn(`[Gemini API] Failed (${geminiErr.status || geminiErr.message}). Falling back to Groq Llama-3...`);
+      try {
+        // 2. Fallback: Groq Llama-3-70b
+        const completion = await groq.chat.completions.create({
+          messages: [{ role: 'user', content: prompt }],
+          model: 'llama-3.1-8b-instant',
+        });
+        return { text: completion.choices[0]?.message?.content || '' };
+      } catch (groqErr) {
+        if (groqErr.status === 429 && i < retries - 1) {
+          console.warn(`[Groq API] Rate Limit. Both AIs exhausted. Waiting ${delayMs/1000}s... (Attempt ${i+1}/${retries})`);
+          await new Promise(res => setTimeout(res, delayMs));
+          delayMs += 3000;
+        } else {
+          throw groqErr; // Total failure
         }
-      } else {
-        throw geminiErr; // Non-retryable error
       }
     }
   }
