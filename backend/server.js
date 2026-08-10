@@ -82,23 +82,23 @@ const Profile = mongoose.model('Profile', profileSchema);
 const callAIWithRetry = async (prompt, retries = 5, delayMs = 3000) => {
   for (let i = 0; i < retries; i++) {
     try {
-      console.log(`[AI] Attempt ${i + 1}/${retries}: Trying Gemini...`);
-      const response = await gemini.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
+      console.log(`[AI] Attempt ${i + 1}/${retries}: Trying Groq (Llama-3)...`);
+      const completion = await groq.chat.completions.create({
+        messages: [{ role: 'user', content: prompt }],
+        model: 'llama-3.1-8b-instant',
       });
-      return { text: response.text };
-    } catch (geminiErr) {
-      console.warn(`[Gemini API] Failed:`, geminiErr.message || geminiErr);
-      console.log(`[AI] Attempt ${i + 1}/${retries}: Falling back to Groq Llama-3...`);
+      return { text: completion.choices[0]?.message?.content || '' };
+    } catch (groqErr) {
+      console.warn(`[Groq API] Failed:`, groqErr.message || groqErr);
+      console.log(`[AI] Attempt ${i + 1}/${retries}: Falling back to Gemini...`);
       try {
-        const completion = await groq.chat.completions.create({
-          messages: [{ role: 'user', content: prompt }],
-          model: 'llama-3.1-8b-instant',
+        const response = await gemini.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: prompt,
         });
-        return { text: completion.choices[0]?.message?.content || '' };
-      } catch (groqErr) {
-        console.warn(`[Groq API] Failed:`, groqErr.message || groqErr);
+        return { text: response.text };
+      } catch (geminiErr) {
+        console.warn(`[Gemini API] Failed:`, geminiErr.message || geminiErr);
         if (i < retries - 1) {
           console.log(`[AI] Both engines failed. Waiting ${delayMs / 1000}s before retry...`);
           await new Promise(res => setTimeout(res, delayMs));
