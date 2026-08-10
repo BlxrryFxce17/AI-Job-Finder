@@ -13,6 +13,7 @@ const pdfParse = require('pdf-parse');
 const mongoose = require('mongoose');
 const multer = require('multer');
 const { google } = require('googleapis');
+const MailComposer = require('nodemailer/lib/mail-composer');
 
 const upload = multer({ storage: multer.memoryStorage() });
 
