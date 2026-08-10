@@ -154,7 +154,8 @@ app.post('/api/fetch-jobs', async (req, res) => {
   }
 
   try {
-    const url = `https://api.adzuna.com/v1/api/jobs/in/search/1?app_id=${process.env.ADZUNA_APP_ID}&app_key=${process.env.ADZUNA_APP_KEY}&what=${encodeURIComponent(what)}&results_per_page=20`;
+    const page = Math.floor(Math.random() * 5) + 1;
+    const url = `https://api.adzuna.com/v1/api/jobs/in/search/${page}?app_id=${process.env.ADZUNA_APP_ID}&app_key=${process.env.ADZUNA_APP_KEY}&what=${encodeURIComponent(what)}&results_per_page=20`;
     const response = await axios.get(url);
     const apiJobs = response.data.results || [];
 
