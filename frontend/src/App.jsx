@@ -344,49 +344,51 @@ export default function App() {
           </svg>
         </div>
         
-        <div className="brand">
-          <span className="brand-icon">⚡</span>
-          <span>JobFinder</span>
-          <span className="brand-ai">AI</span>
-        </div>
+        <div className="sidebar-scroll-area">
+          <div className="brand">
+            <span className="brand-icon">⚡</span>
+            <span>JobFinder</span>
+            <span className="brand-ai">AI</span>
+          </div>
 
-        <div className="nav-section-title">Menu</div>
-        <ul className="nav-list">
-          {NAV.map(n => (
-            <li className="nav-item" key={n.id}>
-              <div 
-                className={`nav-link ${tab === n.id ? 'active' : ''}`}
-                onClick={() => setTab(n.id)}
-              >
-                <span className="nav-icon">{n.icon}</span>
-                <span>{n.label}</span>
+          <div className="nav-section-title">Menu</div>
+          <ul className="nav-list">
+            {NAV.map(n => (
+              <li className="nav-item" key={n.id}>
+                <div 
+                  className={`nav-link ${tab === n.id ? 'active' : ''}`}
+                  onClick={() => setTab(n.id)}
+                >
+                  <span className="nav-icon">{n.icon}</span>
+                  <span>{n.label}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+
+          <div className="sidebar-stats">
+            <div className="stats-title">Tracking Stats</div>
+            <div className="stat-row">
+              <span className="stat-label">Total Jobs</span>
+              <span className="stat-value total">{jobs.length}</span>
+            </div>
+            <div className="stat-row">
+              <span className="stat-label">Emails Sent</span>
+              <span className="stat-value sent">{jobs.filter(j => j.status === 'Sent' || j.status === 'Opened' || j.status === 'Bounced').length}</span>
+            </div>
+            <div className="stat-row">
+              <span className="stat-label">Opened</span>
+              <span className="stat-value opened">{jobs.filter(j => j.status === 'Opened').length}</span>
+            </div>
+          </div>
+
+          <div className="bottom-widget">
+            <div className="user-info">
+              <div className="avatar" style={{background: 'var(--accent)', color: '#fff'}}>{profile.name.substring(0,1).toUpperCase()}</div>
+              <div className="user-details">
+                <h4>{profile.name}</h4>
+                <p>{profile.title || 'Pro Member'}</p>
               </div>
-            </li>
-          ))}
-        </ul>
-
-        <div className="sidebar-stats">
-          <div className="stats-title">Tracking Stats</div>
-          <div className="stat-row">
-            <span className="stat-label">Total Jobs</span>
-            <span className="stat-value total">{jobs.length}</span>
-          </div>
-          <div className="stat-row">
-            <span className="stat-label">Emails Sent</span>
-            <span className="stat-value sent">{jobs.filter(j => j.status === 'Sent' || j.status === 'Opened' || j.status === 'Bounced').length}</span>
-          </div>
-          <div className="stat-row">
-            <span className="stat-label">Opened</span>
-            <span className="stat-value opened">{jobs.filter(j => j.status === 'Opened').length}</span>
-          </div>
-        </div>
-
-        <div className="bottom-widget">
-          <div className="user-info">
-            <div className="avatar" style={{background: 'var(--accent)', color: '#fff'}}>{profile.name.substring(0,1).toUpperCase()}</div>
-            <div className="user-details">
-              <h4>{profile.name}</h4>
-              <p>{profile.title || 'Pro Member'}</p>
             </div>
           </div>
         </div>
@@ -395,6 +397,9 @@ export default function App() {
       {/* Main Content */}
       <div className="main-content">
         <div className="top-header">
+          <div className="mobile-hamburger" onClick={() => setSidebarOpen(!sidebarOpen)}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+          </div>
           <div className="page-title">
             <h1 style={{textTransform: 'capitalize'}}>{NAV.find(n => n.id === tab)?.label || tab}</h1>
             <p>{activeJobs.length} results found</p>
