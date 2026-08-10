@@ -1,0 +1,27 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@google/genai": "^2.16.0",
+    "axios": "^1.19.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "groq-sdk": "^1.5.0",
+    "imap-simple": "^5.1.0",
+    "mailparser": "^3.9.15",
+    "mongoose": "^9.9.1",
+    "nodemailer": "^9.0.5",
+    "pdf-parse": "^1.1.1"
+  }
+}
