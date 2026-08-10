@@ -439,12 +439,13 @@ app.post('/api/send-email', async (req, res) => {
       }
     });
 
-    const baseUrl = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
+    const baseUrl = process.env.PUBLIC_URL;
     
-    // Generate Tracked Links
-    const trackClick = (url) => `${baseUrl}/api/track-click/${jobId}?url=${encodeURIComponent(url)}`;
+    // Generate Tracked Links only if PUBLIC_URL is set
+    const trackClick = (url) => baseUrl ? `${baseUrl}/api/track-click/${jobId}?url=${encodeURIComponent(url)}` : url;
     const linkedInUrl = trackClick('https://linkedin.com/in/akashv10/');
     const githubUrl = trackClick('https://github.com/BlxrryFxce17');
+    const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${jobId}" width="1" height="1" style="display:none;" />` : '';
     
     // Create HTML Body
     const htmlBody = `
@@ -456,7 +457,7 @@ app.post('/api/send-email', async (req, res) => {
         📞 +91-8073765631<br/>
         🔗 <a href="${linkedInUrl}">LinkedIn</a> | 💻 <a href="${githubUrl}">GitHub</a>
         <br/>
-        <img src="${baseUrl}/api/track-open/${jobId}" width="1" height="1" style="display:none;" />
+        ${trackingPixel}
       </div>
     `;
 
