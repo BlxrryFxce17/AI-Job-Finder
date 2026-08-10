@@ -177,7 +177,12 @@ export default function MobileApp(props) {
                          </div>
                       </div>
                       <div className="mobile-card-footer">
-                        <span className="mobile-card-date">{new Date(job.createdAt || Date.now()).toLocaleDateString()}</span>
+                        <span className="mobile-card-date">
+                          {tab === 'applied'
+                            ? `Sent: ${new Date(job.updatedAt || job.createdAt || Date.now()).toLocaleString([], {year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute:'2-digit'})}`
+                            : `Found: ${new Date(job.createdAt || Date.now()).toLocaleString([], {year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute:'2-digit'})}`
+                          }
+                        </span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <select 
                             className={`status-select badge ${job.status.toLowerCase()}`}

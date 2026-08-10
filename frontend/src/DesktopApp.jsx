@@ -428,7 +428,12 @@ export default function DesktopApp(props) {
                           </div>
                         </td>
                         <td className="role-cell">{job.role}</td>
-                        <td className="date-cell">{new Date(job.createdAt || Date.now()).toLocaleDateString()}</td>
+                        <td className="date-cell">
+                          {tab === 'applied' 
+                            ? new Date(job.updatedAt || job.createdAt || Date.now()).toLocaleString([], {year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute:'2-digit'})
+                            : new Date(job.createdAt || Date.now()).toLocaleString([], {year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute:'2-digit'})
+                          }
+                        </td>
                         <td>
                           <div style={{display: 'flex', alignItems: 'center'}}>
                             <select 
