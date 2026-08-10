@@ -24,6 +24,7 @@ export default function DesktopApp(props) {
     batchProgress, setBatchProgress,
     batchState, setBatchState,
     activeJobs,
+    theme, setTheme,
     notify,
     loadJobs,
     loadProfile,
@@ -164,43 +165,144 @@ export default function DesktopApp(props) {
           </div>
           <div className="page-title">
             <h1 style={{textTransform: 'capitalize'}}>{NAV.find(n => n.id === tab)?.label || tab}</h1>
-            <p>{activeJobs.length} results found</p>
+            {(tab === 'applications' || tab === 'applied') && (
+              <p>{activeJobs.length} results found</p>
+            )}
           </div>
           <div className="header-actions">
-            {tab !== 'resume' && (
-              <select 
-                className="form-input" 
-                style={{width: '140px', padding: '6px 12px', marginRight: '10px'}}
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-              >
-                <option value="All">All Statuses</option>
-                {tab === 'applications' ? (
-                  <>
-                    <option value="Found">Found</option>
-                    <option value="Drafting">Drafting</option>
-                  </>
-                ) : (
-                  <>
-                    <option value="Sent">Sent</option>
-                    <option value="Opened">Opened</option>
-                    <option value="Bounced">Bounced</option>
-                  </>
-                )}
-              </select>
+            <button 
+              className="btn btn-ghost" 
+              style={{ fontSize: '20px', padding: '8px', marginRight: '10px' }}
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
+            >
+              {theme === 'dark' ? '☀️' : '🌙'}
+            </button>
+            {(tab === 'applications' || tab === 'applied') && (
+              <>
+                <select 
+                  className="form-input" 
+                  style={{width: '140px', padding: '6px 12px', marginRight: '10px'}}
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                >
+                  <option value="All">All Statuses</option>
+                  {tab === 'applications' ? (
+                    <>
+                      <option value="Found">Found</option>
+                      <option value="Drafting">Drafting</option>
+                    </>
+                  ) : (
+                    <>
+                      <option value="Sent">Sent</option>
+                      <option value="Opened">Opened</option>
+                      <option value="Bounced">Bounced</option>
+                    </>
+                  )}
+                </select>
+                <div className="search-wrapper">
+                  <span className="search-icon">🔍</span>
+                  <input 
+                    type="text" 
+                    className="search-input" 
+                    placeholder="Search company or role..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                </div>
+              </>
             )}
-            <div className="search-wrapper">
-              <span className="search-icon">🔍</span>
-              <input 
-                type="text" 
-                className="search-input" 
-                placeholder="Search company or role..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
           </div>
         </div>
+
+        {tab === 'analytics' && (
+          <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px', overflowY: 'auto', flex: 1 }}>
+            <h2 style={{ fontSize: '24px', fontWeight: 600 }}>Email Analytics Dashboard</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px' }}>
+              <div style={{ background: 'var(--surface-2)', padding: '20px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
+                <div style={{ fontSize: '14px', color: 'var(--text-2)', marginBottom: '8px' }}>Total Sent</div>
+                <div style={{ fontSize: '32px', fontWeight: 700, color: 'var(--blue)' }}>{jobs.filter(j => j.status === 'Sent' || j.status === 'Opened').length}</div>
+              </div>
+              <div style={{ background: 'var(--surface-2)', padding: '20px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
+                <div style={{ fontSize: '14px', color: 'var(--text-2)', marginBottom: '8px' }}>Total Opened</div>
+                <div style={{ fontSize: '32px', fontWeight: 700, color: 'var(--yellow)' }}>{jobs.filter(j => j.status === 'Opened').length}</div>
+              </div>
+              <div style={{ background: 'var(--surface-2)', padding: '20px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
+                <div style={{ fontSize: '14px', color: 'var(--text-2)', marginBottom: '8px' }}>Links Clicked</div>
+                <div style={{ fontSize: '32px', fontWeight: 700, color: 'var(--purple)' }}>{jobs.reduce((acc, job) => acc + (job.clickedLinks ? job.clickedLinks.length : 0), 0)}</div>
+              </div>
+              <div style={{ background: 'var(--surface-2)', padding: '20px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
+                <div style={{ fontSize: '14px', color: 'var(--text-2)', marginBottom: '8px' }}>Open Rate</div>
+                <div style={{ fontSize: '32px', fontWeight: 700, color: 'var(--green)' }}>
+                  {jobs.filter(j => j.status === 'Sent' || j.status === 'Opened').length > 0 
+                    ? Math.round((jobs.filter(j => j.status === 'Opened').length / jobs.filter(j => j.status === 'Sent' || j.status === 'Opened').length) * 100) + '%'
+                    : '0%'}
+                </div>
+              </div>
+            </div>
+            
+            <h3 style={{ fontSize: '18px', marginTop: '16px' }}>Recently Opened</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {jobs.filter(j => j.status === 'Opened').slice(0, 5).map(job => (
+                <div key={job.id} style={{ background: 'var(--surface-2)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontWeight: 600 }}>{job.company}</div>
+                    <div style={{ fontSize: '13px', color: 'var(--text-2)' }}>{job.role} - {job.emailRecipient}</div>
+                  </div>
+                  <div style={{ color: 'var(--yellow)', fontSize: '13px', fontWeight: 600 }}>Opened</div>
+                </div>
+              ))}
+              {jobs.filter(j => j.status === 'Opened').length === 0 && (
+                <div style={{ color: 'var(--text-3)', fontStyle: 'italic' }}>No emails have been opened yet.</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {tab === 'followups' && (
+          <div style={{ padding: '24px', flex: 1, overflowY: 'auto' }}>
+            <h2 style={{ fontSize: '24px', fontWeight: 600, marginBottom: '24px' }}>Pending Follow Ups</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {jobs.flatMap(job => 
+                (job.followUps || [])
+                  .filter(f => !f.sent)
+                  .map(f => (
+                    <div key={`${job.id}-${f.day}`} style={{ background: 'var(--surface-2)', padding: '20px', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: '18px' }}>{job.company}</div>
+                          <div style={{ fontSize: '14px', color: 'var(--text-2)' }}>Day {f.day} Follow Up</div>
+                        </div>
+                        <button 
+                          className="btn btn-primary"
+                          onClick={async () => {
+                            const res = await fetch(`${API_BASE}/api/send-followup`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                              body: JSON.stringify({ jobId: job.id, day: f.day })
+                            });
+                            if (res.ok) {
+                              const fToUpdate = job.followUps.find(fu => fu.day === f.day);
+                              if(fToUpdate) fToUpdate.sent = true;
+                              setJobs([...jobs]);
+                            }
+                          }}
+                        >
+                          Send Follow Up
+                        </button>
+                      </div>
+                      <div style={{ background: 'var(--surface-3)', padding: '16px', borderRadius: '8px', fontSize: '13px', whiteSpace: 'pre-wrap', color: 'var(--text-2)' }}>
+                        {f.draft}
+                      </div>
+                    </div>
+                  ))
+              )}
+              {jobs.flatMap(j => (j.followUps || []).filter(f => !f.sent)).length === 0 && (
+                <div style={{ color: 'var(--text-3)', fontStyle: 'italic' }}>No pending follow ups at this time.</div>
+              )}
+            </div>
+          </div>
+        )}
 
         {tab === 'applications' && (
           <div className="add-job-bar">
@@ -296,6 +398,15 @@ export default function DesktopApp(props) {
                 <label style={{display: 'block', marginBottom: '8px', color: 'var(--text-2)', fontSize: '13px'}}>GitHub URL</label>
                 <input className="form-input" style={{width: '100%'}} value={profile.github} onChange={e => setProfile({...profile, github: e.target.value})} />
               </div>
+              <div>
+                <label style={{display: 'block', marginBottom: '8px', color: 'var(--text-2)', fontSize: '13px'}}>Custom AI Tone</label>
+                <select className="form-input" style={{width: '100%'}} value={profile.tone || 'Professional'} onChange={e => setProfile({...profile, tone: e.target.value})}>
+                  <option value="Professional">Professional & Formal</option>
+                  <option value="Confident & Direct">Confident & Direct</option>
+                  <option value="Enthusiastic & Friendly">Enthusiastic & Friendly</option>
+                  <option value="Short & Punchy">Short & Punchy</option>
+                </select>
+              </div>
               <button type="submit" className="btn btn-primary" style={{alignSelf: 'flex-start', marginTop: '8px'}} disabled={savingProfile}>
                 {savingProfile ? <span className="spinner"></span> : 'Save Changes'}
               </button>
@@ -329,6 +440,26 @@ export default function DesktopApp(props) {
                 <p style={{fontSize: '12px', color: 'var(--text-3)', marginTop: '12px'}}>
                   Uploading a new PDF will automatically extract and parse the text for the AI context.
                 </p>
+                {profile.skills && profile.skills.length > 0 && (
+                  <div style={{ marginTop: '20px' }}>
+                    <div style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '8px' }}>Extracted Skills (Level: {profile.experienceLevel})</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                      {profile.skills.map((skill, idx) => (
+                        <div key={idx} style={{ background: 'var(--accent-glow)', color: 'var(--accent)', padding: '4px 10px', borderRadius: '12px', fontSize: '12px', border: '1px solid var(--accent)' }}>
+                          {skill}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {profile.achievements && profile.achievements.length > 0 && (
+                  <div style={{ marginTop: '20px' }}>
+                    <div style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '8px' }}>Top Achievements</div>
+                    <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '13px', color: 'var(--text-1)' }}>
+                      {profile.achievements.map((ach, idx) => <li key={idx} style={{marginBottom: '4px'}}>{ach}</li>)}
+                    </ul>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -384,7 +515,7 @@ export default function DesktopApp(props) {
               </button>
             </form>
           </div>
-        ) : (
+        ) : (tab === 'applications' || tab === 'applied') ? (
           <div className="table-section">
             <div className="table-wrapper">
               {loading ? (
@@ -494,7 +625,7 @@ export default function DesktopApp(props) {
               )}
             </div>
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* Show Mail Modal */}

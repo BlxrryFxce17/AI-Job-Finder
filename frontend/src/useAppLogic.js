@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 
 export const NAV = [
+  { id: 'analytics', label: 'Analytics Dashboard', icon: '📊' },
   { id: 'applications', label: 'My Applications', icon: '⚡' },
   { id: 'applied', label: 'Mail Applied Jobs', icon: '📬' },
+  { id: 'followups', label: 'Follow Ups', icon: '🔄' },
   { id: 'single_drafter', label: 'Single Mail Drafter', icon: '✉️' },
   { id: 'resume', label: 'Profile Settings', icon: '⚙️' },
 ];
@@ -11,6 +13,12 @@ export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 export function useAppLogic() {
   const [token, setToken] = useState(localStorage.getItem('token') || null);
+  const [theme, setTheme] = useState(localStorage.getItem('theme') || 'dark');
+  
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
+  }, [theme]);
   
   const [tab, setTab] = useState('applications');
   const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth > 768);
@@ -362,6 +370,7 @@ export function useAppLogic() {
     completeTutorial,
     batchState, setBatchState,
     activeJobs,
+    theme, setTheme,
     
     notify,
     loadJobs,
