@@ -605,7 +605,7 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
 4. THE FLEX: ALWAYS include this exact postscript right before the sign-off: "P.S. I'm highly passionate about automation and software engineering—in fact, I built the AI web-scraper and autonomous agent that found this job and drafted this email!"
 5. THE RESUME LINK: You MUST include the exact phrase "You can view my CV here." somewhere naturally towards the end of the email (before the postscript). DO NOT add any URLs, colons, or markdown links after this phrase. Just the exact phrase and a period. 
 6. OUTPUT STRICTLY the final email content (body only, no signature, no name). No conversational filler, no internal thoughts, no analysis, and NO MARKDOWN BLOCKS (like \`\`\`email).
-7. CRITICAL: DO NOT start your response with "Here is the email..." or "Subject:...". Start IMMEDIATELY with the very first word of the email body.`;
+7. CRITICAL: The very first word of your output MUST be "Dear", "Hi", or the start of the email body. NEVER write "I have crafted...", "Here is the email...", or any conversational intro. Any intro text will break our automated pipeline.`;
 
     console.log('[Test Email] Drafting AI content...');
     const response = await callAIWithRetry(prompt);
@@ -711,7 +711,7 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
 4. THE FLEX: ALWAYS include this exact postscript right before the sign-off: "P.S. I'm highly passionate about automation and software engineering—in fact, I built the AI web-scraper and autonomous agent that found this job and drafted this email!"
 5. THE RESUME LINK: You MUST include the exact phrase "You can view my CV here." somewhere naturally towards the end of the email (before the postscript). DO NOT add any URLs, colons, or markdown links after this phrase. Just the exact phrase and a period. 
 6. OUTPUT STRICTLY the final email content (body only, no signature, no name). No conversational filler, no internal thoughts, no analysis, and NO MARKDOWN BLOCKS (like \`\`\`email).
-7. CRITICAL: DO NOT start your response with "Here is the email..." or "Subject:...". Start IMMEDIATELY with the very first word of the email body.`;
+7. CRITICAL: The very first word of your output MUST be "Dear", "Hi", or the start of the email body. NEVER write "I have crafted...", "Here is the email...", or any conversational intro. Any intro text will break our automated pipeline.`;
 
     const response = await callAIWithRetry(prompt);
 
@@ -817,7 +817,7 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
 4. THE FLEX: ALWAYS include this exact postscript right before the sign-off: "P.S. I'm highly passionate about automation and software engineering—in fact, I built the AI web-scraper and autonomous agent that found this job and drafted this email!"
 5. THE RESUME LINK: You MUST include the exact phrase "You can view my CV here." somewhere naturally towards the end of the email (before the postscript). DO NOT add any URLs, colons, or markdown links after this phrase. Just the exact phrase and a period. 
 6. OUTPUT STRICTLY the final email content (body only, no signature, no name). No conversational filler, no internal thoughts, no analysis, and NO MARKDOWN BLOCKS (like \`\`\`email).
-7. CRITICAL: DO NOT start your response with "Here is the email..." or "Subject:...". Start IMMEDIATELY with the very first word of the email body.`;
+7. CRITICAL: The very first word of your output MUST be "Dear", "Hi", or the start of the email body. NEVER write "I have crafted...", "Here is the email...", or any conversational intro. Any intro text will break our automated pipeline.`;
 
     console.log('[Single Draft] Generating AI draft for', company, '...');
     const response = await callAIWithRetry(prompt);
