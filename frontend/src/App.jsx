@@ -68,7 +68,7 @@ export default function App() {
             });
             const sendData = await sendRes.json();
             if (sendData.success) {
-               updateStatus(job.id, 'Sent', discoveredEmail, genData.draft);
+               updateStatus(job.id, 'Sent', discoveredEmail, genData.draft, sendData.tracked);
                setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Successfully sent! 🚀`] }));
             } else {
                setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Failed to send.`] }));
@@ -147,11 +147,12 @@ export default function App() {
     } catch { notify('Failed to add job', 'error'); }
   };
 
-  const updateStatus = async (id, status, emailRecipient = null, emailDraft = null) => {
+  const updateStatus = async (id, status, emailRecipient = null, emailDraft = null, tracked = null) => {
     try {
       const body = { status };
       if (emailRecipient) body.emailRecipient = emailRecipient;
       if (emailDraft) body.emailDraft = emailDraft;
+      if (tracked !== null) body.tracked = tracked;
 
       const r = await fetch(`${API_BASE}/api/jobs/${id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -420,6 +421,11 @@ export default function App() {
                           <option value="Opened">Opened</option>
                           <option value="Bounced">Bounced</option>
                         </select>
+                        {job.tracked && (
+                          <span style={{fontSize: '14px', marginLeft: '6px', cursor: 'help'}} title="Link Tracking Enabled">
+                            🎯
+                          </span>
+                        )}
                       </td>
                       <td>
                         <div className="flex gap-2">

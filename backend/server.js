@@ -42,7 +42,8 @@ const jobSchema = new mongoose.Schema({
   location: { type: String, default: '' },
   emailDraft: { type: String, default: '' },
   emailRecipient: { type: String, default: '' },
-  failedEmails: { type: [String], default: [] }
+  failedEmails: { type: [String], default: [] },
+  tracked: { type: Boolean, default: false }
 }, { timestamps: true });
 
 const Job = mongoose.model('Job', jobSchema);
@@ -116,7 +117,7 @@ app.post('/api/jobs', async (req, res) => {
 
 app.put('/api/jobs/:id', async (req, res) => {
   const { id } = req.params;
-  const { status, emailRecipient, emailDraft } = req.body;
+  const { status, emailRecipient, emailDraft, tracked } = req.body;
 
   try {
     const job = await Job.findOne({ id });
@@ -125,6 +126,7 @@ app.put('/api/jobs/:id', async (req, res) => {
     if (status) job.status = status;
     if (emailRecipient) job.emailRecipient = emailRecipient;
     if (emailDraft) job.emailDraft = emailDraft;
+    if (tracked !== undefined) job.tracked = tracked;
     
     await job.save();
     res.json(job);
@@ -477,7 +479,7 @@ app.post('/api/send-email', async (req, res) => {
     }
 
     const info = await transporter.sendMail(mailOptions);
-    res.json({ success: true, message: 'Email sent successfully!', messageId: info.messageId });
+    res.json({ success: true, tracked: !!baseUrl, message: 'Email sent successfully!', messageId: info.messageId });
   } catch (error) {
     console.error('Error sending email:', error);
     res.status(500).json({ error: 'Failed to send email. Check credentials.' });
