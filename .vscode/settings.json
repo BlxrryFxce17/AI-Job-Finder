@@ -11,5 +11,6 @@
         "RAPIDAPI",
         "Serper",
         "SERPER"
-    ]
+    ],
+    "git.ignoreLimitWarning": true
 }
