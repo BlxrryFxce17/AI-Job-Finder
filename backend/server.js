@@ -720,7 +720,7 @@ app.post('/api/send-email', requireAuth, async (req, res) => {
     const mailOptions = {
       from: user.email || process.env.EMAIL_USER,
       to,
-      subject: subject || 'Job Application',
+      subject: subject || (job ? `Application for ${job.role} - ${profile.name}` : 'Job Application'),
       html: htmlBody,
       attachments: []
     };
@@ -809,7 +809,7 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
     const mailOptions = {
       from: user.email || process.env.EMAIL_USER,
       to: recipientEmail,
-      subject: `Application for ${role}`,
+      subject: `Application for ${role} - ${profile.name}`,
       html: htmlBody,
       attachments: []
     };
