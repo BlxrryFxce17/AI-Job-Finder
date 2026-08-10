@@ -98,6 +98,7 @@ export default function App() {
         setBatchProgress(null);
         setSelectedJobs([]);
         setBatchState(prev => ({ ...prev, active: false }));
+        setTab('applied');
         loadJobs();
     }, 3000);
   };
@@ -228,6 +229,7 @@ export default function App() {
         notify('Email sent successfully!');
         setPanelOpen(false);
         updateStatus(selJobId, 'Sent', recipient, draft);
+        setTab('applied');
       } else {
         notify(d.error || 'Failed to send', 'error');
       }
@@ -346,7 +348,7 @@ export default function App() {
       <div className="main-content">
         <div className="top-header">
           <div className="page-title">
-            <h1 style={{textTransform: 'capitalize'}}>{tab.replace('-', ' ')}</h1>
+            <h1 style={{textTransform: 'capitalize'}}>{NAV.find(n => n.id === tab)?.label || tab}</h1>
             <p>{activeJobs.length} results found</p>
           </div>
           <div className="header-actions">
