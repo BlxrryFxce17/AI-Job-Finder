@@ -50,28 +50,29 @@ const Job = mongoose.model('Job', jobSchema);
 const callAIWithRetry = async (prompt, retries = 5, delayMs = 3000) => {
   for (let i = 0; i < retries; i++) {
     try {
-      // 1. Primary: Gemini 2.5 Flash
+      console.log(`[AI] Attempt ${i + 1}/${retries}: Trying Gemini...`);
       const response = await gemini.models.generateContent({
         model: 'gemini-2.5-flash',
         contents: prompt,
       });
       return { text: response.text };
     } catch (geminiErr) {
-      console.warn(`[Gemini API] Failed (${geminiErr.status || geminiErr.message}). Falling back to Groq Llama-3...`);
+      console.warn(`[Gemini API] Failed:`, geminiErr.message || geminiErr);
+      console.log(`[AI] Attempt ${i + 1}/${retries}: Falling back to Groq Llama-3...`);
       try {
-        // 2. Fallback: Groq Llama-3-70b
         const completion = await groq.chat.completions.create({
           messages: [{ role: 'user', content: prompt }],
           model: 'llama-3.1-8b-instant',
         });
         return { text: completion.choices[0]?.message?.content || '' };
       } catch (groqErr) {
-        if (groqErr.status === 429 && i < retries - 1) {
-          console.warn(`[Groq API] Rate Limit. Both AIs exhausted. Waiting ${delayMs/1000}s... (Attempt ${i+1}/${retries})`);
+        console.warn(`[Groq API] Failed:`, groqErr.message || groqErr);
+        if (i < retries - 1) {
+          console.log(`[AI] Both engines failed. Waiting ${delayMs / 1000}s before retry...`);
           await new Promise(res => setTimeout(res, delayMs));
           delayMs += 3000;
         } else {
-          throw groqErr; // Total failure
+          throw new Error(`All AI engines failed after ${retries} attempts.`);
         }
       }
     }
@@ -475,7 +476,7 @@ app.post('/api/send-email', async (req, res) => {
     }
 
     const info = await transporter.sendMail(mailOptions);
-    res.json({ message: 'Email sent successfully!', messageId: info.messageId });
+    res.json({ success: true, message: 'Email sent successfully!', messageId: info.messageId });
   } catch (error) {
     console.error('Error sending email:', error);
     res.status(500).json({ error: 'Failed to send email. Check credentials.' });
