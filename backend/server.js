@@ -164,25 +164,44 @@ app.get('/api/auth/google/callback', async (req, res) => {
   }
 });
 
-async function createTransporter(profile) {
+async function sendEmailViaAPI(profile, mailOptions) {
   const userEmail = profile.emailUser || process.env.EMAIL_USER;
   
   if (profile.googleRefreshToken) {
-    return nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        type: 'OAuth2',
-        user: userEmail,
-        clientId: process.env.GOOGLE_CLIENT_ID,
-        clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-        refreshToken: profile.googleRefreshToken,
-      }
+    // Render blocks SMTP ports 25, 465, 587. We MUST use the Gmail API (Port 443 HTTP)
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET
+    );
+    oauth2Client.setCredentials({ refresh_token: profile.googleRefreshToken });
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+    
+    // Compile raw MIME string
+    const mail = new MailComposer(mailOptions);
+    const messageBuffer = await mail.compile().build();
+    
+    // Base64URL encode the message
+    const encodedMessage = messageBuffer
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+      
+    const res = await gmail.users.messages.send({
+      userId: 'me',
+      requestBody: {
+        raw: encodedMessage,
+      },
     });
+    return { messageId: res.data.id };
   } else {
-    return nodemailer.createTransport({
+    // Fallback to SMTP if using App Passwords (will hang on Render Free)
+    console.warn('[Warning] No Google Refresh Token found. Falling back to SMTP which may be blocked on Render Free Tier.');
+    const transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: { user: userEmail, pass: process.env.EMAIL_PASS }
     });
+    return await transporter.sendMail(mailOptions);
   }
 }
 
@@ -494,7 +513,7 @@ app.get('/api/check-bounces', async (req, res) => {
 
             if (newEmail) {
               const profile = await getProfile();
-              const transporter = await createTransporter(profile);
+              // Transporter replaced by sendEmailViaAPI
 
               const baseUrl = process.env.PUBLIC_URL;
               const trackClick = (url) => baseUrl ? `${baseUrl}/api/track-click/${job.id}?url=${encodeURIComponent(url)}` : url;
@@ -533,7 +552,7 @@ app.get('/api/check-bounces', async (req, res) => {
               if (!baseUrl && profile.resumePdf) {
                 mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
               }
-              await transporter.sendMail(mailOptions);
+              await sendEmailViaAPI(profile, mailOptions);
               job.emailRecipient = newEmail;
               console.log(`[Auto-Retry] Resent ${job.company} to ${newEmail}`);
             } else {
@@ -599,7 +618,7 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
     draftText = draftText.trim();
 
     // Send
-    const transporter = await createTransporter(profile);
+    // Transporter replaced by sendEmailViaAPI
 
     // Generate Tracked Links only if PUBLIC_URL is set
     const baseUrl = process.env.PUBLIC_URL;
@@ -641,7 +660,7 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
     }
 
     console.log('[Test Email] Sending email via Nodemailer to', myEmail, '...');
-    await transporter.sendMail(mailOptions);
+    await sendEmailViaAPI(profile, mailOptions);
     console.log('[Test Email] Sent successfully!');
 
     // Save to Database so it shows in the table
@@ -719,7 +738,7 @@ app.post('/api/send-email', async (req, res) => {
   try {
     const job = await Job.findOne({ id: jobId });
     const profile = await getProfile();
-    const transporter = await createTransporter(profile);
+    // Transporter replaced by sendEmailViaAPI
     const baseUrl = process.env.PUBLIC_URL;
 
     // Generate Tracked Links only if PUBLIC_URL is set
@@ -763,7 +782,7 @@ app.post('/api/send-email', async (req, res) => {
     }
 
     console.log(`[Batch/Send Email] Sending to ${to} for job ${jobId}...`);
-    const info = await transporter.sendMail(mailOptions);
+    const info = await sendEmailViaAPI(profile, mailOptions);
     console.log(`[Batch/Send Email] Sent successfully! MessageId: ${info.messageId}`);
     res.json({ success: true, tracked: !!baseUrl, message: 'Email sent successfully!', messageId: info.messageId });
   } catch (error) {
@@ -838,7 +857,7 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
       </div>
     `;
 
-    const transporter = await createTransporter(profile);
+    // Transporter replaced by sendEmailViaAPI
     const mailOptions = {
       from: profile.emailUser || process.env.EMAIL_USER,
       to: recipientEmail,
@@ -851,7 +870,7 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
       mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
     }
 
-    await transporter.sendMail(mailOptions);
+    await sendEmailViaAPI(profile, mailOptions);
 
     const newJob = new Job({
       id: jobId,
