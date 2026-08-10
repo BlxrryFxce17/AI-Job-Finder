@@ -330,7 +330,18 @@ export default function App() {
       {/* Sidebar */}
       <div className={`sidebar ${sidebarOpen ? '' : 'collapsed'}`}>
         <div className="sidebar-toggle-btn" onClick={() => setSidebarOpen(!sidebarOpen)}>
-          {sidebarOpen ? '◀' : '▶'}
+          <svg 
+            width="16" height="16" 
+            viewBox="0 0 24 24" 
+            fill="none" 
+            stroke="currentColor" 
+            strokeWidth="2.5" 
+            strokeLinecap="round" 
+            strokeLinejoin="round"
+            style={{ transform: sidebarOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.3s' }}
+          >
+            <polyline points="9 18 15 12 9 6"></polyline>
+          </svg>
         </div>
         
         <div className="brand">
