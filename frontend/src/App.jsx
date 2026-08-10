@@ -12,7 +12,7 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 export default function App() {
   const [tab, setTab] = useState('applications');
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth > 768);
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -327,6 +327,12 @@ export default function App() {
         </div>
       )}
 
+      {/* Sidebar Overlay (Mobile Only) */}
+      <div 
+        className={`sidebar-overlay ${sidebarOpen ? 'open' : ''}`} 
+        onClick={() => setSidebarOpen(false)}
+      ></div>
+
       {/* Sidebar */}
       <div className={`sidebar ${sidebarOpen ? '' : 'collapsed'}`}>
         <div className="sidebar-toggle-btn" onClick={() => setSidebarOpen(!sidebarOpen)}>
@@ -504,7 +510,7 @@ export default function App() {
           <div className="profile-section" style={{padding: '24px', background: 'var(--surface-2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', flex: 1, overflowY: 'auto', margin: '20px 28px'}}>
             <h2 style={{fontSize: '20px', marginBottom: '20px', color: 'var(--text-1)'}}>Personal Information</h2>
             <form onSubmit={handleProfileSave} style={{display: 'flex', flexDirection: 'column', gap: '16px', maxWidth: '600px'}}>
-              <div style={{display: 'flex', gap: '16px'}}>
+              <div className="form-row">
                 <div style={{flex: 1}}>
                   <label style={{display: 'block', marginBottom: '8px', color: 'var(--text-2)', fontSize: '13px'}}>Full Name</label>
                   <input className="form-input" style={{width: '100%'}} value={profile.name} onChange={e => setProfile({...profile, name: e.target.value})} />
@@ -591,7 +597,7 @@ export default function App() {
               }
               setFetching(false);
             }} style={{display: 'flex', flexDirection: 'column', gap: '16px', maxWidth: '800px'}}>
-              <div style={{display: 'flex', gap: '16px'}}>
+              <div className="form-row">
                 <div style={{flex: 1}}>
                   <label style={{display: 'block', marginBottom: '8px', color: 'var(--text-2)', fontSize: '13px'}}>Company Name</label>
                   <input name="company" required className="form-input" style={{width: '100%'}} placeholder="e.g. Google" />

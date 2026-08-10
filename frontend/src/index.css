@@ -270,6 +270,27 @@ body {
 }
 .mobile-hamburger:hover { color: white; }
 
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  z-index: 999;
+  opacity: 0;
+  transition: opacity 0.3s;
+  pointer-events: none;
+}
+.sidebar-overlay.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.form-row {
+  display: flex;
+  gap: 16px;
+}
+
 /* Top Header */
 .top-header {
   padding: 24px 32px;
@@ -558,7 +579,11 @@ input[type="checkbox"]:checked::after {
   
   .sidebar-toggle-btn { display: none; }
   .mobile-hamburger { display: block; cursor: pointer; }
+  .sidebar-overlay { display: block; }
   
+  .form-row { flex-direction: column; }
+  .profile-section { margin: 10px !important; padding: 16px !important; }
+
   .top-header { 
     flex-direction: column; 
     align-items: flex-start; 
