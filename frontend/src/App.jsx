@@ -35,6 +35,7 @@ export default function App() {
   // Batch Selection
   const [selectedJobs, setSelectedJobs] = useState([]);
   const [batchProgress, setBatchProgress] = useState(null);
+  const [batchState, setBatchState] = useState({ active: false, currentIndex: 0, total: 0, currentJob: null, logs: [] });
 
   const toggleSelectJob = (id) => {
     setSelectedJobs(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
@@ -43,13 +44,17 @@ export default function App() {
   const handleBatchSend = async () => {
     if (selectedJobs.length === 0) return;
     setBatchProgress(0);
+    setBatchState({ active: true, currentIndex: 0, total: selectedJobs.length, currentJob: null, logs: [] });
     
     for (let i = 0; i < selectedJobs.length; i++) {
       const jobId = selectedJobs[i];
       const job = jobs.find(j => j.id === jobId);
       if (!job) continue;
 
+      setBatchState(prev => ({ ...prev, currentIndex: i + 1, currentJob: job, logs: [...prev.logs, `[${job.company}] Starting processing...`] }));
+
       try {
+        setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Discovering HR email...`] }));
         const discRes = await fetch(`${API_BASE}/api/discover-email`, {
            method: 'POST', headers: { 'Content-Type': 'application/json' },
            body: JSON.stringify({ company: job.company, jd: job.jd })
@@ -57,6 +62,7 @@ export default function App() {
         const discData = await discRes.json();
         const discoveredEmail = discData.email || '';
         
+        setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Found email: ${discoveredEmail || 'None'}. Drafting...`] }));
         const genRes = await fetch(`${API_BASE}/api/generate-email`, {
            method: 'POST', headers: { 'Content-Type': 'application/json' },
            body: JSON.stringify({ company: job.company, role: job.role, jd: job.jd, emailType: 'Cold Outreach / Networking' })
@@ -64,6 +70,7 @@ export default function App() {
         const genData = await genRes.json();
         
         if (discoveredEmail && genData.draft) {
+            setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Draft ready. Sending...`] }));
             const sendRes = await fetch(`${API_BASE}/api/send-email`, {
                method: 'POST', headers: { 'Content-Type': 'application/json' },
                body: JSON.stringify({ jobId: job.id, draft: genData.draft, recipient: discoveredEmail })
@@ -71,20 +78,28 @@ export default function App() {
             const sendData = await sendRes.json();
             if (sendData.success) {
                updateStatus(job.id, 'Sent', discoveredEmail, genData.draft);
+               setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Successfully sent! 🚀`] }));
+            } else {
+               setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Failed to send.`] }));
             }
+        } else {
+            setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Skipped (no email or draft).`] }));
         }
       } catch (err) {
         console.error(err);
+        setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Error occurred: ${err.message}`] }));
       }
       setBatchProgress(((i + 1) / selectedJobs.length) * 100);
     }
     
+    setBatchState(prev => ({ ...prev, logs: [...prev.logs, `Batch complete! Closing in 3 seconds...`] }));
     notify('Batch complete!');
     setTimeout(() => {
         setBatchProgress(null);
         setSelectedJobs([]);
+        setBatchState(prev => ({ ...prev, active: false }));
         loadJobs();
-    }, 2000);
+    }, 3000);
   };
 
   useEffect(() => { 
@@ -231,6 +246,40 @@ export default function App() {
 
   return (
     <div className="dashboard-container">
+      {/* Batch Overlay Splash Screen */}
+      {batchState.active && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(9, 9, 11, 0.95)', backdropFilter: 'blur(10px)',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 9999,
+          color: 'var(--text-1)'
+        }}>
+          <h2 style={{fontSize: '28px', fontWeight: '700', marginBottom: '10px', color: 'var(--accent)'}}>
+            Auto-Applying... ({batchState.currentIndex} / {batchState.total})
+          </h2>
+          {batchState.currentJob && (
+            <div style={{marginBottom: '30px', fontSize: '18px', color: 'var(--text-2)'}}>
+              Current Target: <span style={{fontWeight: '600', color: 'var(--text-1)'}}>{batchState.currentJob.company}</span> - {batchState.currentJob.role}
+            </div>
+          )}
+          
+          <div style={{width: '600px', height: '10px', background: 'var(--surface-3)', borderRadius: '5px', overflow: 'hidden', marginBottom: '30px'}}>
+            <div style={{width: `${(batchState.currentIndex / batchState.total) * 100}%`, height: '100%', background: 'var(--accent)', transition: 'width 0.3s ease-out'}} />
+          </div>
+
+          <div style={{
+            background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+            padding: '24px', width: '600px', height: '300px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px',
+            boxShadow: '0 10px 30px rgba(0,0,0,0.5)'
+          }}>
+            {batchState.logs.map((log, idx) => (
+              <div key={idx} style={{fontFamily: 'monospace', fontSize: '13px', color: 'var(--text-2)'}}>
+                <span style={{color: 'var(--accent)', marginRight: '8px'}}>&gt;</span> {log}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Toast Notification */}
       {toast && (
         <div className={`toast ${toast.type}`}>
