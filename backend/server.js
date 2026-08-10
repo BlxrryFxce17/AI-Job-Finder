@@ -191,8 +191,7 @@ app.get('/api/auth/google/callback', async (req, res) => {
     const token = jwt.sign({ id: user._id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
     
     // Redirect back to frontend
-    const isProd = process.env.NODE_ENV === 'production';
-    const redirectUrl = isProd && process.env.PUBLIC_URL ? process.env.PUBLIC_URL : 'http://localhost:5173';
+    const redirectUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     res.redirect(`${redirectUrl}/?token=${token}`); 
   } catch (err) {
     console.error('OAuth callback error:', err);
