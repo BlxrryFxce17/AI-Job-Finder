@@ -51,7 +51,7 @@ export default function MobileApp(props) {
           </div>
           <div style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '16px', width: '100%', height: '250px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {batchState.logs.map((log, idx) => (
-              <div key={idx} style={{ fontFamily: 'monospace', fontSize: '12px', color: 'var(--text-2)' }}>
+              <div key={idx} className="log-item" style={{ fontFamily: 'monospace', fontSize: '12px', color: 'var(--text-2)' }}>
                 <span style={{ color: 'var(--accent)', marginRight: '6px' }}>&gt;</span> {log}
               </div>
             ))}

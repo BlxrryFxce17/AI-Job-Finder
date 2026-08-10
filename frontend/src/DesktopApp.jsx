@@ -68,7 +68,7 @@ export default function DesktopApp(props) {
             boxShadow: '0 10px 30px rgba(0,0,0,0.5)'
           }}>
             {batchState.logs.map((log, idx) => (
-              <div key={idx} style={{fontFamily: 'monospace', fontSize: '13px', color: 'var(--text-2)'}}>
+              <div key={idx} className="log-item" style={{fontFamily: 'monospace', fontSize: '13px', color: 'var(--text-2)'}}>
                 <span style={{color: 'var(--accent)', marginRight: '8px'}}>&gt;</span> {log}
               </div>
             ))}
