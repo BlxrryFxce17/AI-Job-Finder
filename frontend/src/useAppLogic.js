@@ -10,6 +10,8 @@ export const NAV = [
 export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 export function useAppLogic() {
+  const [token, setToken] = useState(localStorage.getItem('token') || null);
+  
   const [tab, setTab] = useState('applications');
   const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth > 768);
   const [jobs, setJobs] = useState([]);
@@ -40,9 +42,53 @@ export function useAppLogic() {
     setTimeout(() => setToast(null), 3000);
   };
 
+  // Helper for authenticated fetch
+  const apiFetch = async (url, options = {}) => {
+    const headers = { ...options.headers };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(url, { ...options, headers });
+    if (res.status === 401) {
+      logout();
+      throw new Error('Unauthorized');
+    }
+    return res;
+  };
+
+  const logout = () => {
+    localStorage.removeItem('token');
+    setToken(null);
+  };
+
+  const [showTutorial, setShowTutorial] = useState(() => {
+    return localStorage.getItem('token') && !localStorage.getItem('tutorialSeen');
+  });
+
+  const completeTutorial = () => {
+    localStorage.setItem('tutorialSeen', 'true');
+    setShowTutorial(false);
+    setTab('resume');
+  };
+
+  useEffect(() => {
+    // Check for token in URL parameters (OAuth callback)
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlToken = urlParams.get('token');
+    if (urlToken) {
+      localStorage.setItem('token', urlToken);
+      setToken(urlToken);
+      if (!localStorage.getItem('tutorialSeen')) {
+        setShowTutorial(true);
+      } else {
+        setTab('resume'); // Redirect to profile page on fresh login
+      }
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
+
   const loadJobs = async () => {
+    if (!token) return;
     try {
-      const r = await fetch(`${API_BASE}/api/jobs`);
+      const r = await apiFetch(`${API_BASE}/api/jobs`);
       const d = await r.json();
       setJobs(d);
     } catch { notify('Cannot reach backend', 'error'); }
@@ -50,21 +96,26 @@ export function useAppLogic() {
   };
 
   const loadProfile = async () => {
+    if (!token) return;
     try {
-      const r = await fetch(`${API_BASE}/api/profile`);
+      const r = await apiFetch(`${API_BASE}/api/profile`);
       const p = await r.json();
       setProfile(p);
     } catch (err) { }
   };
 
   useEffect(() => { 
-    loadJobs(); 
-    loadProfile();
-    
-    // Auto-refresh jobs every 5 seconds for real-time tracking updates
-    const trackingInterval = setInterval(loadJobs, 5000);
-    return () => clearInterval(trackingInterval);
-  }, []);
+    if (token) {
+      loadJobs(); 
+      loadProfile();
+      
+      // Auto-refresh jobs every 5 seconds for real-time tracking updates
+      const trackingInterval = setInterval(loadJobs, 5000);
+      return () => clearInterval(trackingInterval);
+    } else {
+      setLoading(false);
+    }
+  }, [token]);
 
   useEffect(() => {
     setStatusFilter('All');
@@ -73,8 +124,9 @@ export function useAppLogic() {
   // Bounce Checker Polling
   useEffect(() => {
     const checkBounces = async () => {
+      if (!token) return;
       try {
-        const r = await fetch(`${API_BASE}/api/check-bounces`);
+        const r = await apiFetch(`${API_BASE}/api/check-bounces`);
         const d = await r.json();
         if (d.newBounces > 0) {
           notify(`Detected ${d.newBounces} bounced email(s)!`, 'error');
@@ -82,9 +134,11 @@ export function useAppLogic() {
         }
       } catch (err) { }
     };
-    const interval = setInterval(checkBounces, 30000);
-    return () => clearInterval(interval);
-  }, []);
+    if (token) {
+      const interval = setInterval(checkBounces, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [token]);
 
   const toggleSelectJob = (id) => {
     setSelectedJobs(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
@@ -97,7 +151,7 @@ export function useAppLogic() {
       if (emailDraft) body.emailDraft = emailDraft;
       if (tracked !== null) body.tracked = tracked;
 
-      const r = await fetch(`${API_BASE}/api/jobs/${id}`, {
+      const r = await apiFetch(`${API_BASE}/api/jobs/${id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
@@ -120,7 +174,7 @@ export function useAppLogic() {
 
       try {
         setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Discovering HR email...`] }));
-        const discRes = await fetch(`${API_BASE}/api/discover-email`, {
+        const discRes = await apiFetch(`${API_BASE}/api/discover-email`, {
            method: 'POST', headers: { 'Content-Type': 'application/json' },
            body: JSON.stringify({ company: job.company, jd: job.jd })
         });
@@ -128,7 +182,7 @@ export function useAppLogic() {
         const discoveredEmail = discData.email || '';
         
         setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Found email: ${discoveredEmail || 'None'}. Drafting...`] }));
-        const genRes = await fetch(`${API_BASE}/api/generate-email`, {
+        const genRes = await apiFetch(`${API_BASE}/api/generate-email`, {
            method: 'POST', headers: { 'Content-Type': 'application/json' },
            body: JSON.stringify({ company: job.company, role: job.role, jd: job.jd, emailType: 'Cold Outreach / Networking' })
         });
@@ -136,7 +190,7 @@ export function useAppLogic() {
         
         if (discoveredEmail && genData.draft) {
             setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Draft ready. Sending...`] }));
-            const sendRes = await fetch(`${API_BASE}/api/send-email`, {
+            const sendRes = await apiFetch(`${API_BASE}/api/send-email`, {
                method: 'POST', headers: { 'Content-Type': 'application/json' },
                body: JSON.stringify({ jobId: job.id, body: genData.draft, to: discoveredEmail })
             });
@@ -172,7 +226,7 @@ export function useAppLogic() {
     e.preventDefault();
     setSavingProfile(true);
     try {
-      const r = await fetch(`${API_BASE}/api/profile`, {
+      const r = await apiFetch(`${API_BASE}/api/profile`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(profile)
       });
@@ -189,8 +243,8 @@ export function useAppLogic() {
     formData.append('resume', e.target.files[0]);
     notify('Uploading & Parsing Resume...', 'info');
     try {
-      const r = await fetch(`${API_BASE}/api/profile/resume`, {
-        method: 'POST', body: formData
+      const r = await apiFetch(`${API_BASE}/api/profile/resume`, {
+        method: 'POST', body: formData // don't set Content-Type header so browser sets multipart/form-data with boundary
       });
       const data = await r.json();
       if (data.success) {
@@ -205,7 +259,7 @@ export function useAppLogic() {
   const handleAddJob = async e => {
     e.preventDefault();
     try {
-      const r = await fetch(`${API_BASE}/api/jobs`, {
+      const r = await apiFetch(`${API_BASE}/api/jobs`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newJob),
       });
@@ -219,7 +273,7 @@ export function useAppLogic() {
 
   const handleDelete = async (id) => {
     try {
-      await fetch(`${API_BASE}/api/jobs/${id}`, { method: 'DELETE' });
+      await apiFetch(`${API_BASE}/api/jobs/${id}`, { method: 'DELETE' });
       setJobs(p => p.filter(j => j.id !== id));
       notify('Job deleted');
     } catch { notify('Failed to delete job', 'error'); }
@@ -232,7 +286,7 @@ export function useAppLogic() {
     }
     setFetching(true);
     try {
-      const r = await fetch(`${API_BASE}/api/fetch-jobs`, {
+      const r = await apiFetch(`${API_BASE}/api/fetch-jobs`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ queries: fetchQueries })
       });
@@ -259,7 +313,7 @@ export function useAppLogic() {
     setTestingEmail(true);
     notify('Drafting and sending test email...', 'info');
     try {
-      const r = await fetch(`${API_BASE}/api/test-email`, { method: 'POST' });
+      const r = await apiFetch(`${API_BASE}/api/test-email`, { method: 'POST' });
       const d = await r.json();
       if (d.success) {
         notify('Test email sent to your inbox!');
@@ -284,6 +338,7 @@ export function useAppLogic() {
   );
 
   return {
+    token, logout, apiFetch, // Exposed new auth-related properties
     tab, setTab,
     sidebarOpen, setSidebarOpen,
     jobs, setJobs,
@@ -303,6 +358,8 @@ export function useAppLogic() {
     savingProfile, setSavingProfile,
     selectedJobs, setSelectedJobs,
     batchProgress, setBatchProgress,
+    showTutorial,
+    completeTutorial,
     batchState, setBatchState,
     activeJobs,
     

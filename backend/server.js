@@ -21,7 +21,8 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Initialize AI Engines
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
@@ -45,9 +46,23 @@ if (process.env.MONGO_URI) {
   console.error('❌ MONGO_URI is missing from .env! App will not work without it.');
 }
 
+const jwt = require('jsonwebtoken');
+
+// Mongoose User Schema
+const userSchema = new mongoose.Schema({
+  email: { type: String, required: true, unique: true },
+  name: { type: String },
+  googleRefreshToken: { type: String, default: '' },
+  googleAccessToken: { type: String, default: '' },
+  googleTokenExpiry: { type: Number, default: 0 }
+}, { timestamps: true });
+
+const User = mongoose.model('User', userSchema);
+
 // Mongoose Job Schema
 const jobSchema = new mongoose.Schema({
-  id: { type: String, required: true, unique: true },
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  id: { type: String, required: true },
   company: { type: String, required: true },
   role: { type: String, required: true },
   jd: { type: String, default: '' },
@@ -64,6 +79,7 @@ const jobSchema = new mongoose.Schema({
 const Job = mongoose.model('Job', jobSchema);
 
 const profileSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
   name: { type: String, default: '' },
   title: { type: String, default: '' },
   phone: { type: String, default: '' },
@@ -71,11 +87,7 @@ const profileSchema = new mongoose.Schema({
   github: { type: String, default: '' },
   resumeText: { type: String, default: '' },
   resumeFilename: { type: String, default: '' },
-  resumePdf: { type: Buffer },
-  emailUser: { type: String, default: '' },
-  googleRefreshToken: { type: String, default: '' },
-  googleAccessToken: { type: String, default: '' },
-  googleTokenExpiry: { type: Number, default: 0 }
+  resumePdf: { type: Buffer }
 });
 
 const Profile = mongoose.model('Profile', profileSchema);
@@ -112,18 +124,30 @@ const callAIWithRetry = async (prompt, retries = 5, delayMs = 3000) => {
   }
 };
 
-async function getProfile() {
+const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-replace-in-prod';
+
+const requireAuth = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.status(401).json({ error: 'No authorization header' });
+  const token = authHeader.split(' ')[1];
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    req.user = payload;
+    next();
+  } catch (err) {
+    res.status(401).json({ error: 'Invalid token' });
+  }
+};
+
+async function getProfile(userId) {
   if (mongoose.connection.readyState !== 1) return null;
-  let profile = await Profile.findOne();
+  let profile = await Profile.findOne({ userId });
   if (!profile) {
-    profile = new Profile();
+    profile = new Profile({ userId });
     await profile.save();
   }
   return profile;
 }
-
-// Call on startup once DB connects
-mongoose.connection.once('open', () => getProfile());
 
 // OAuth2 Endpoints
 app.get('/api/auth/google', (req, res) => {
@@ -144,37 +168,48 @@ app.get('/api/auth/google/callback', async (req, res) => {
   
   try {
     const { tokens } = await oauth2Client.getToken(code);
-    const profile = await getProfile();
-    profile.googleRefreshToken = tokens.refresh_token || profile.googleRefreshToken;
-    profile.googleAccessToken = tokens.access_token;
-    profile.googleTokenExpiry = tokens.expiry_date;
     
     // Automatically fetch their email address
     oauth2Client.setCredentials(tokens);
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
     const profileRes = await gmail.users.getProfile({ userId: 'me' });
-    profile.emailUser = profileRes.data.emailAddress;
+    const email = profileRes.data.emailAddress;
     
-    await profile.save();
+    let user = await User.findOne({ email });
+    if (!user) {
+      user = new User({ email });
+    }
+    user.googleRefreshToken = tokens.refresh_token || user.googleRefreshToken;
+    user.googleAccessToken = tokens.access_token;
+    user.googleTokenExpiry = tokens.expiry_date;
+    await user.save();
+    
+    // Create profile if it doesn't exist
+    await getProfile(user._id);
+    
+    // Generate JWT
+    const token = jwt.sign({ id: user._id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
     
     // Redirect back to frontend
-    res.redirect('http://localhost:5173/'); 
+    const isProd = process.env.NODE_ENV === 'production';
+    const redirectUrl = isProd && process.env.PUBLIC_URL ? process.env.PUBLIC_URL : 'http://localhost:5173';
+    res.redirect(`${redirectUrl}/?token=${token}`); 
   } catch (err) {
     console.error('OAuth callback error:', err);
     res.status(500).send('Authentication failed');
   }
 });
 
-async function sendEmailViaAPI(profile, mailOptions) {
-  const userEmail = profile.emailUser || process.env.EMAIL_USER;
+async function sendEmailViaAPI(user, mailOptions) {
+  const userEmail = user.email || process.env.EMAIL_USER;
   
-  if (profile.googleRefreshToken) {
+  if (user.googleRefreshToken) {
     // Render blocks SMTP ports 25, 465, 587. We MUST use the Gmail API (Port 443 HTTP)
     const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET
     );
-    oauth2Client.setCredentials({ refresh_token: profile.googleRefreshToken });
+    oauth2Client.setCredentials({ refresh_token: user.googleRefreshToken });
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
     
     // Compile raw MIME string
@@ -208,34 +243,54 @@ async function sendEmailViaAPI(profile, mailOptions) {
 
 // Endpoints
 
-app.get('/api/profile', async (req, res) => {
+app.get('/api/profile', requireAuth, async (req, res) => {
   try {
-    const profile = await getProfile();
-    res.json(profile || {});
+    const profile = await getProfile(req.user.id);
+    const user = await User.findById(req.user.id);
+    const profileObj = profile.toObject();
+    delete profileObj.resumePdf; // Don't send raw PDF binary to frontend
+    
+    const responseData = {
+      ...profileObj,
+      emailUser: user.email // Attach email from user model for frontend
+    };
+    res.json(responseData || {});
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch profile' });
   }
 });
 
-app.put('/api/profile', async (req, res) => {
+app.put('/api/profile', requireAuth, async (req, res) => {
   try {
-    const profile = await getProfile();
-    Object.assign(profile, req.body);
+    const profile = await getProfile(req.user.id);
+    
+    // Safely update only allowed fields
+    const allowedFields = ['name', 'title', 'phone', 'linkedin', 'github'];
+    for (const field of allowedFields) {
+      if (req.body[field] !== undefined) {
+        profile[field] = req.body[field];
+      }
+    }
+    
     await profile.save();
-    res.json(profile);
+    const user = await User.findById(req.user.id);
+    const profileObj = profile.toObject();
+    delete profileObj.resumePdf;
+    res.json({ ...profileObj, emailUser: user.email });
   } catch (err) {
+    console.error('Profile Update Error:', err);
     res.status(500).json({ error: 'Failed to update profile' });
   }
 });
 
-app.post('/api/profile/resume', upload.single('resume'), async (req, res) => {
+app.post('/api/profile/resume', requireAuth, upload.single('resume'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
     const dataBuffer = req.file.buffer;
     const data = await pdfParse(dataBuffer);
 
-    const profile = await getProfile();
+    const profile = await getProfile(req.user.id);
     profile.resumeText = data.text;
     profile.resumeFilename = req.file.originalname;
     profile.resumePdf = dataBuffer;
@@ -253,7 +308,9 @@ app.post('/api/profile/resume', upload.single('resume'), async (req, res) => {
 
 app.get('/api/profile/resume-pdf', async (req, res) => {
   try {
-    const profile = await getProfile();
+    const { userId } = req.query;
+    if (!userId) return res.status(400).send('Missing userId');
+    const profile = await Profile.findOne({ userId });
     if (!profile || !profile.resumePdf) {
       return res.status(404).send('No resume uploaded.');
     }
@@ -265,18 +322,18 @@ app.get('/api/profile/resume-pdf', async (req, res) => {
   }
 });
 
-app.get('/api/jobs', async (req, res) => {
+app.get('/api/jobs', requireAuth, async (req, res) => {
   try {
-    const jobs = await Job.find().sort({ createdAt: -1 });
+    const jobs = await Job.find({ userId: req.user.id }).sort({ createdAt: -1 });
     res.json(jobs);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch jobs' });
   }
 });
 
-app.post('/api/jobs', async (req, res) => {
+app.post('/api/jobs', requireAuth, async (req, res) => {
   try {
-    const job = new Job({ ...req.body, id: Date.now().toString() });
+    const job = new Job({ ...req.body, id: Date.now().toString(), userId: req.user.id });
     await job.save();
     res.json(job);
   } catch (err) {
@@ -284,12 +341,12 @@ app.post('/api/jobs', async (req, res) => {
   }
 });
 
-app.put('/api/jobs/:id', async (req, res) => {
+app.put('/api/jobs/:id', requireAuth, async (req, res) => {
   const { id } = req.params;
   const { status, emailRecipient, emailDraft, tracked } = req.body;
 
   try {
-    const job = await Job.findOne({ id });
+    const job = await Job.findOne({ id, userId: req.user.id });
     if (!job) return res.status(404).json({ error: 'Job not found' });
 
     if (status) job.status = status;
@@ -304,9 +361,9 @@ app.put('/api/jobs/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/jobs/:id', async (req, res) => {
+app.delete('/api/jobs/:id', requireAuth, async (req, res) => {
   try {
-    await Job.deleteOne({ id: req.params.id });
+    await Job.deleteOne({ id: req.params.id, userId: req.user.id });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to delete job' });
@@ -314,7 +371,7 @@ app.delete('/api/jobs/:id', async (req, res) => {
 });
 
 // Auto-Fetch Jobs via Adzuna API
-app.post('/api/fetch-jobs', async (req, res) => {
+app.post('/api/fetch-jobs', requireAuth, async (req, res) => {
   let queries = req.body.queries || [];
   if (!Array.isArray(queries) || queries.length === 0) {
     queries = [req.body.query || 'junior software developer, fresher software engineer, entry level developer'];
@@ -341,9 +398,10 @@ app.post('/api/fetch-jobs', async (req, res) => {
           const jd = job.description || 'No description available';
     
           // Avoid duplicates
-          const exists = await Job.findOne({ company, role });
+          const exists = await Job.findOne({ company, role, userId: req.user.id });
           if (!exists) {
             const newJob = new Job({
+              userId: req.user.id,
               id: job.id || Date.now().toString() + Math.random(),
               company: company,
               role: role,
@@ -450,7 +508,7 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = []) {
 }
 
 // Email Discovery Engine API
-app.post('/api/discover-email', async (req, res) => {
+app.post('/api/discover-email', requireAuth, async (req, res) => {
   const { company, jd, failedEmails = [] } = req.body;
   if (!company) return res.status(400).json({ error: 'Company name required' });
   const domain = company.toLowerCase().replace(/[^a-z0-9]/g, '') + '.com';
@@ -459,127 +517,17 @@ app.post('/api/discover-email', async (req, res) => {
   res.json(result);
 });
 
-// IMAP Bounce Checker
-app.get('/api/check-bounces', async (req, res) => {
-  const profile = await getProfile();
-  const userEmail = profile?.emailUser || process.env.EMAIL_USER;
-  const userPass = process.env.EMAIL_PASS;
-  
-  // NOTE: IMAP simple might not support OAuth2 natively in this configuration. 
-  // We'll keep using process.env for IMAP unless they use app passwords, 
-  // but for now, we just skip check-bounces if no pass is provided.
-  if (!userPass && !profile?.googleRefreshToken) {
-    return res.status(500).json({ error: 'IMAP requires App Password or OAuth2 (OAuth2 IMAP not fully implemented)' });
-  }
-
-  const config = {
-    imap: {
-      user: process.env.EMAIL_USER,
-      password: process.env.EMAIL_PASS,
-      host: 'imap.gmail.com',
-      port: 993,
-      tls: true,
-      tlsOptions: { rejectUnauthorized: false },
-      authTimeout: 3000
-    }
-  };
-
-  try {
-    const connection = await imaps.connect(config);
-    await connection.openBox('INBOX');
-
-    // Search for unread emails from Mailer Daemon
-    const searchCriteria = ['UNSEEN', ['FROM', 'mailer-daemon@googlemail.com']];
-    const fetchOptions = { bodies: [''], markSeen: true }; const messages = await connection.search(searchCriteria, fetchOptions);
-    let newBouncesCount = 0;
-
-    for (const item of messages) {
-      const all = item.parts.find(p => p.which === '');
-      const mail = await simpleParser(all.body);
-
-      const text = mail.text || '';
-      const match = text.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})/g);
-
-      if (match) {
-        for (const email of match) {
-          const job = await Job.findOne({ emailRecipient: email, status: 'Sent' });
-          if (job) {
-            if (!job.failedEmails.includes(email)) {
-              job.failedEmails.push(email);
-            }
-
-            // Auto Retry
-            const domain = job.company.toLowerCase().replace(/[^a-z0-9]/g, '') + '.com';
-            const { email: newEmail } = await discoverEmailForJob(job.company, domain, job.jd, job.failedEmails);
-
-            if (newEmail) {
-              const profile = await getProfile();
-              // Transporter replaced by sendEmailViaAPI
-
-              const baseUrl = process.env.PUBLIC_URL;
-              const trackClick = (url) => baseUrl ? `${baseUrl}/api/track-click/${job.id}?url=${encodeURIComponent(url)}` : url;
-              const linkedInUrl = trackClick(profile.linkedin);
-              const githubUrl = trackClick(profile.github);
-              const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${job.id}" width="1" height="1" style="display:none;" />` : '';
-
-              let formattedDraft = job.emailDraft.replace(/\n/g, '<br/>');
-              if (baseUrl) {
-                const resumeLinkUrl = trackClick(`${baseUrl}/api/profile/resume-pdf`);
-                formattedDraft = formattedDraft.replace('You can view my CV here.', `<a href="${resumeLinkUrl}">You can view my CV here.</a>`);
-              } else {
-                formattedDraft = formattedDraft.replace('You can view my CV here.', 'I have attached my CV to this email for your reference.');
-              }
-
-              const htmlBody = `
-                <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
-                  ${formattedDraft}
-                  <br/><br/>
-                  <b>${profile.name}</b><br/>
-                  ${profile.title}<br/>
-                  📞 ${profile.phone}<br/>
-                  🔗 <a href="${linkedInUrl}">LinkedIn</a> | 💻 <a href="${githubUrl}">GitHub</a>
-                  <br/>
-                  ${trackingPixel}
-                </div>
-              `;
-
-              const mailOptions = {
-                from: process.env.EMAIL_USER,
-                to: newEmail,
-                subject: `Application for ${job.role}`,
-                html: htmlBody,
-                attachments: []
-              };
-              if (!baseUrl && profile.resumePdf) {
-                mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
-              }
-              await sendEmailViaAPI(profile, mailOptions);
-              job.emailRecipient = newEmail;
-              console.log(`[Auto-Retry] Resent ${job.company} to ${newEmail}`);
-            } else {
-              job.status = 'Bounced';
-              job.emailRecipient = '';
-              console.log(`[Auto-Retry] Failed for ${job.company} - no more fallbacks`);
-            }
-            await job.save();
-            newBouncesCount++;
-          }
-        }
-      }
-    }
-
-    connection.end();
-    res.json({ message: `Checked bounces`, newBounces: newBouncesCount });
-  } catch (err) {
-    console.error('IMAP Error:', err.message);
-    res.status(500).json({ error: 'IMAP connection failed' });
-  }
+// IMAP Bounce Checker (Disabled for OAuth2 Multi-Tenant)
+app.get('/api/check-bounces', requireAuth, async (req, res) => {
+  // TODO: Refactor to use Gmail API instead of IMAP with App Passwords
+  res.json({ newBounces: 0 });
 });
 
-app.post('/api/test-email', async (req, res) => {
+app.post('/api/test-email', requireAuth, async (req, res) => {
   try {
-    const profile = await getProfile();
-    const myEmail = process.env.EMAIL_USER;
+    const user = await User.findById(req.user.id);
+    const profile = await getProfile(req.user.id);
+    const myEmail = user.email || process.env.EMAIL_USER;
     if (!myEmail) return res.status(500).json({ error: 'EMAIL_USER not configured in backend' });
 
     const company = "TestCorp";
@@ -618,9 +566,6 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
     }
     draftText = draftText.trim();
 
-    // Send
-    // Transporter replaced by sendEmailViaAPI
-
     // Generate Tracked Links only if PUBLIC_URL is set
     const baseUrl = process.env.PUBLIC_URL;
     const testJobId = Date.now().toString();
@@ -629,7 +574,7 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
 
     let formattedDraft = draftText.replace(/\n/g, '<br/>');
     if (baseUrl) {
-      const resumeLinkUrl = trackClick(`${baseUrl}/api/profile/resume-pdf`);
+      const resumeLinkUrl = trackClick(`${baseUrl}/api/profile/resume-pdf?userId=${req.user.id}`);
       formattedDraft = formattedDraft.replace('You can view my CV here.', `<a href="${resumeLinkUrl}">You can view my CV here.</a>`);
     } else {
       formattedDraft = formattedDraft.replace('You can view my CV here.', 'I have attached my CV to this email for your reference.');
@@ -660,12 +605,13 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
       mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
     }
 
-    console.log('[Test Email] Sending email via Nodemailer to', myEmail, '...');
-    await sendEmailViaAPI(profile, mailOptions);
+    console.log('[Test Email] Sending email via API to', myEmail, '...');
+    await sendEmailViaAPI(user, mailOptions);
     console.log('[Test Email] Sent successfully!');
 
     // Save to Database so it shows in the table
     const testJob = new Job({
+      userId: req.user.id,
       id: testJobId,
       company: company,
       role: role,
@@ -684,7 +630,7 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
   }
 });
 
-app.post('/api/generate-email', async (req, res) => {
+app.post('/api/generate-email', requireAuth, async (req, res) => {
   const { company, role, type, jd } = req.body;
 
   if (!process.env.GEMINI_API_KEY) {
@@ -692,7 +638,7 @@ app.post('/api/generate-email', async (req, res) => {
   }
 
   try {
-    const profile = await getProfile();
+    const profile = await getProfile(req.user.id);
     const prompt = `You are an elite, highly persuasive software engineer ("${profile.name}") writing a cold email to the hiring manager at ${company} for the "${role}" position. 
 Context: ${type}
 Here is the official Job Description:
@@ -733,13 +679,14 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
   }
 });
 
-app.post('/api/send-email', async (req, res) => {
+app.post('/api/send-email', requireAuth, async (req, res) => {
   const { jobId, to, subject, body } = req.body;
 
   try {
-    const job = await Job.findOne({ id: jobId });
-    const profile = await getProfile();
-    // Transporter replaced by sendEmailViaAPI
+    const job = await Job.findOne({ id: jobId, userId: req.user.id });
+    const profile = await getProfile(req.user.id);
+    const user = await User.findById(req.user.id);
+    
     const baseUrl = process.env.PUBLIC_URL;
 
     // Generate Tracked Links only if PUBLIC_URL is set
@@ -750,7 +697,7 @@ app.post('/api/send-email', async (req, res) => {
 
     let formattedDraft = body.replace(/\n/g, '<br/>');
     if (baseUrl) {
-      const resumeLinkUrl = trackClick(`${baseUrl}/api/profile/resume-pdf`);
+      const resumeLinkUrl = trackClick(`${baseUrl}/api/profile/resume-pdf?userId=${req.user.id}`);
       formattedDraft = formattedDraft.replace('You can view my CV here.', `<a href="${resumeLinkUrl}">You can view my CV here.</a>`);
     } else {
       formattedDraft = formattedDraft.replace('You can view my CV here.', 'I have attached my CV to this email for your reference.');
@@ -771,7 +718,7 @@ app.post('/api/send-email', async (req, res) => {
     `;
 
     const mailOptions = {
-      from: process.env.EMAIL_USER,
+      from: user.email || process.env.EMAIL_USER,
       to,
       subject: subject || 'Job Application',
       html: htmlBody,
@@ -783,7 +730,7 @@ app.post('/api/send-email', async (req, res) => {
     }
 
     console.log(`[Batch/Send Email] Sending to ${to} for job ${jobId}...`);
-    const info = await sendEmailViaAPI(profile, mailOptions);
+    const info = await sendEmailViaAPI(user, mailOptions);
     console.log(`[Batch/Send Email] Sent successfully! MessageId: ${info.messageId}`);
     res.json({ success: true, tracked: !!baseUrl, message: 'Email sent successfully!', messageId: info.messageId });
   } catch (error) {
@@ -793,11 +740,12 @@ app.post('/api/send-email', async (req, res) => {
 });
 
 // Single Mail Drafter Endpoint
-app.post('/api/single-draft', async (req, res) => {
+app.post('/api/single-draft', requireAuth, async (req, res) => {
   const { company, role, jd, recipientEmail } = req.body;
   
   try {
-    const profile = await getProfile();
+    const profile = await getProfile(req.user.id);
+    const user = await User.findById(req.user.id);
     
     const prompt = `You are an elite, highly persuasive software engineer ("${profile.name}") writing a cold email to the hiring manager at ${company} for the "${role}" position. 
 Context: Cold Outreach / Networking
@@ -837,7 +785,7 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
     const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${jobId}" width="1" height="1" style="display:none;" />` : '';
 
     if (baseUrl) {
-      const resumeLinkUrl = trackClick(`${baseUrl}/api/profile/resume-pdf`);
+      const resumeLinkUrl = trackClick(`${baseUrl}/api/profile/resume-pdf?userId=${req.user.id}`);
       formattedDraft = formattedDraft.replace('You can view my CV here.', `<a href="${resumeLinkUrl}">You can view my CV here.</a>`);
     } else {
       formattedDraft = formattedDraft.replace('You can view my CV here.', 'I have attached my CV to this email for your reference.');
@@ -858,9 +806,8 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
       </div>
     `;
 
-    // Transporter replaced by sendEmailViaAPI
     const mailOptions = {
-      from: profile.emailUser || process.env.EMAIL_USER,
+      from: user.email || process.env.EMAIL_USER,
       to: recipientEmail,
       subject: `Application for ${role}`,
       html: htmlBody,
@@ -871,9 +818,10 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
       mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
     }
 
-    await sendEmailViaAPI(profile, mailOptions);
+    await sendEmailViaAPI(user, mailOptions);
 
     const newJob = new Job({
+      userId: req.user.id,
       id: jobId,
       company: company,
       role: role,

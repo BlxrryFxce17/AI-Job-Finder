@@ -149,7 +149,7 @@ export default function DesktopApp(props) {
               <div className="avatar" style={{background: 'var(--accent)', color: '#fff'}}>{profile.name.substring(0,1).toUpperCase()}</div>
               <div className="user-details">
                 <h4>{profile.name}</h4>
-                <p>{profile.title || 'Pro Member'}</p>
+                <p>{profile.title || 'User'}</p>
               </div>
             </div>
           </div>
@@ -264,6 +264,14 @@ export default function DesktopApp(props) {
 
         {tab === 'resume' ? (
           <div className="profile-section" style={{padding: '24px', background: 'var(--surface-2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', flex: 1, overflowY: 'auto', margin: '20px 28px'}}>
+            <div style={{ background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.3)', padding: '16px', borderRadius: '8px', marginBottom: '24px' }}>
+              <h3 style={{ color: '#60a5fa', margin: '0 0 8px 0', fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '20px' }}>📄</span> Action Required: Upload Your Resume
+              </h3>
+              <p style={{ color: 'var(--text-2)', fontSize: '14px', margin: 0, lineHeight: '1.5' }}>
+                The AI Email Drafter relies heavily on your resume to accurately draft highly-personalized outreach. Please <strong>upload your latest PDF resume</strong> and fill out your personal details below to get the best results from the AI!
+              </p>
+            </div>
             <h2 style={{fontSize: '20px', marginBottom: '20px', color: 'var(--text-1)'}}>Personal Information</h2>
             <form onSubmit={handleProfileSave} style={{display: 'flex', flexDirection: 'column', gap: '16px', maxWidth: '600px'}}>
               <div className="form-row">
@@ -303,7 +311,7 @@ export default function DesktopApp(props) {
                     <div style={{display: 'flex', alignItems: 'center', gap: '12px'}}>
                       <div style={{background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80', padding: '6px 12px', borderRadius: '4px', fontSize: '13px', fontWeight: 'bold'}}>✓ Connected</div>
                       <span style={{color: 'var(--text-1)'}}>{profile.emailUser}</span>
-                      <a href={`${API_BASE}/api/auth/google`} className="btn btn-ghost" style={{marginLeft: 'auto'}}>Reconnect</a>
+                      <button onClick={() => { localStorage.removeItem('token'); window.location.href = '/'; }} type="button" className="btn btn-ghost" style={{marginLeft: 'auto'}}>Logout</button>
                     </div>
                   ) : (
                     <a href={`${API_BASE}/api/auth/google`} className="btn btn-primary" style={{display: 'inline-block', textDecoration: 'none'}}>Sign in with Google</a>

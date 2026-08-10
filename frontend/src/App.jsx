@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useAppLogic } from './useAppLogic';
 import DesktopApp from './DesktopApp';
 import MobileApp from './MobileApp';
+import Login from './Login';
+import TutorialModal from './TutorialModal';
 import './index.css';
 
 export default function App() {
@@ -15,5 +17,14 @@ export default function App() {
 
   const logic = useAppLogic();
 
-  return isMobile ? <MobileApp {...logic} /> : <DesktopApp {...logic} />;
+  if (!logic.token) {
+    return <Login />;
+  }
+
+  return (
+    <>
+      {logic.showTutorial && <TutorialModal onComplete={logic.completeTutorial} />}
+      {isMobile ? <MobileApp {...logic} /> : <DesktopApp {...logic} />}
+    </>
+  );
 }

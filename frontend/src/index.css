@@ -995,3 +995,24 @@ input[type="checkbox"]:checked::after {
   font-weight: 500;
 }
 
+/* Login Screen */
+.login-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  width: 100vw;
+  background: var(--surface-1);
+  background-image: radial-gradient(circle at top right, rgba(99,102,241,0.1), transparent 40%),
+                    radial-gradient(circle at bottom left, rgba(236,72,153,0.1), transparent 40%);
+}
+
+.login-card {
+  max-width: 450px;
+  width: 90%;
+  padding: 3rem 2.5rem;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}

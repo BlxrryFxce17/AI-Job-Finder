@@ -67,10 +67,15 @@ export default function MobileApp(props) {
         
         {/* Top Header */}
         <div className="mobile-header">
-          <div className="mobile-brand">
-            <span className="brand-icon">⚡</span>
-            <span>JobFinder</span>
-            <span className="brand-ai">AI</span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+            <div className="mobile-brand">
+              <span className="brand-icon">⚡</span>
+              <span>JobFinder</span>
+              <span className="brand-ai">AI</span>
+            </div>
+            <button onClick={() => { window.location.href = '/logout'; }} style={{ background: 'none', border: 'none', color: 'var(--error)', fontSize: '12px', cursor: 'pointer' }}>
+              Logout
+            </button>
           </div>
           <h1 className="mobile-page-title">{NAV.find(n => n.id === tab)?.label || tab}</h1>
           {tab !== 'resume' && tab !== 'single_drafter' && (
@@ -215,6 +220,14 @@ export default function MobileApp(props) {
 
         {tab === 'resume' && (
           <div className="mobile-form-section">
+            <div style={{ background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.3)', padding: '12px', borderRadius: '8px', marginBottom: '20px' }}>
+              <h3 style={{ color: '#60a5fa', margin: '0 0 6px 0', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '18px' }}>📄</span> Action Required: Upload Resume
+              </h3>
+              <p style={{ color: 'var(--text-2)', fontSize: '13px', margin: 0, lineHeight: '1.4' }}>
+                The AI Email Drafter relies heavily on your resume. Please <strong>upload your latest PDF resume</strong> below to get the best results from the AI!
+              </p>
+            </div>
             <h2 className="mobile-section-title">Personal Info</h2>
             <form onSubmit={handleProfileSave} className="mobile-form">
               <label className="mobile-label">Full Name</label>
@@ -243,7 +256,7 @@ export default function MobileApp(props) {
               {profile.emailUser ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   <div style={{ display: 'inline-flex', alignItems: 'center', background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80', padding: '6px 12px', borderRadius: '4px', fontSize: '13px', fontWeight: 'bold' }}>✓ {profile.emailUser}</div>
-                  <a href={`${API_BASE}/api/auth/google`} className="btn btn-ghost" style={{ textAlign: 'center' }}>Reconnect</a>
+                  <button onClick={() => { localStorage.removeItem('token'); window.location.href = '/'; }} type="button" className="btn btn-ghost" style={{ textAlign: 'center' }}>Logout</button>
                 </div>
               ) : (
                 <a href={`${API_BASE}/api/auth/google`} className="btn btn-primary" style={{ display: 'block', textAlign: 'center', textDecoration: 'none' }}>Sign in with Google</a>
