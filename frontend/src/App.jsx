@@ -694,7 +694,7 @@ export default function App() {
                         </td>
                         <td>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-start' }}>
-                            <button className="btn btn-ghost" onClick={() => job.url ? window.open(job.url, '_blank') : alert('No URL available for this job')} style={{padding: '4px 10px', fontSize: '11px'}}>
+                            <button className="btn btn-ghost" onClick={() => job.applyLink ? window.open(job.applyLink, '_blank') : alert('No URL available for this job')} style={{padding: '4px 10px', fontSize: '11px'}}>
                               View Job
                             </button>
                             {(job.emailDraft || job.status === 'Sent' || job.status === 'Opened') && (
