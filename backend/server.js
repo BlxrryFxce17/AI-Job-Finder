@@ -14,6 +14,7 @@ const mongoose = require('mongoose');
 const multer = require('multer');
 const { google } = require('googleapis');
 const MailComposer = require('nodemailer/lib/mail-composer');
+const cron = require('node-cron');
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -73,7 +74,15 @@ const jobSchema = new mongoose.Schema({
   emailRecipient: { type: String, default: '' },
   failedEmails: { type: [String], default: [] },
   tracked: { type: Boolean, default: false },
-  clickedLinks: { type: [String], default: [] }
+  clickedLinks: [{
+    link: String,
+    timestamp: Date
+  }],
+  followUps: [{
+    draft: String,
+    day: Number,
+    sent: { type: Boolean, default: false }
+  }]
 }, { timestamps: true });
 
 const Job = mongoose.model('Job', jobSchema);
@@ -86,8 +95,11 @@ const profileSchema = new mongoose.Schema({
   linkedin: { type: String, default: '' },
   github: { type: String, default: '' },
   resumeText: { type: String, default: '' },
-  resumeFilename: { type: String, default: '' },
-  resumePdf: { type: Buffer }
+  resumePdf: { type: Buffer },
+  skills: { type: [String], default: [] },
+  achievements: { type: [String], default: [] },
+  experienceLevel: { type: String, default: '' },
+  tone: { type: String, default: 'Professional' }
 });
 
 const Profile = mongoose.model('Profile', profileSchema);
@@ -264,7 +276,7 @@ app.put('/api/profile', requireAuth, async (req, res) => {
     const profile = await getProfile(req.user.id);
     
     // Safely update only allowed fields
-    const allowedFields = ['name', 'title', 'phone', 'linkedin', 'github'];
+    const allowedFields = ['name', 'title', 'phone', 'linkedin', 'github', 'tone'];
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) {
         profile[field] = req.body[field];
@@ -291,6 +303,29 @@ app.post('/api/profile/resume', requireAuth, upload.single('resume'), async (req
 
     const profile = await getProfile(req.user.id);
     profile.resumeText = data.text;
+    
+    try {
+      console.log('[Resume Parse] Extracting skills with AI...');
+      const prompt = `Extract the core skills (max 10), top 3 achievements, and experience level (e.g., Junior, Mid, Senior) from this resume text. 
+Return ONLY a valid JSON object with the following structure:
+{"skills": ["skill1", "skill2"], "achievements": ["achievement1", "achievement2"], "experienceLevel": "Senior"}
+Resume text:
+${data.text.substring(0, 4000)}
+`;
+      const response = await callAIWithRetry(prompt, 3, 2000);
+      let jsonStr = response.text;
+      const match = jsonStr.match(/```(?:json)?([\s\S]*?)```/);
+      if (match) jsonStr = match[1].trim();
+      const parsedData = JSON.parse(jsonStr);
+      
+      profile.skills = parsedData.skills || [];
+      profile.achievements = parsedData.achievements || [];
+      profile.experienceLevel = parsedData.experienceLevel || '';
+      console.log('[Resume Parse] Extracted successfully.');
+    } catch (aiErr) {
+      console.error('[Resume Parse] AI extraction failed:', aiErr.message);
+    }
+
     profile.resumeFilename = req.file.originalname;
     profile.resumePdf = dataBuffer;
     await profile.save();
@@ -629,6 +664,38 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
   }
 });
 
+app.post('/api/send-followup', requireAuth, async (req, res) => {
+  const { jobId, day } = req.body;
+  try {
+    const job = await Job.findOne({ userId: req.user.id, id: jobId });
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    
+    const followUp = job.followUps.find(f => f.day === day);
+    if (!followUp) return res.status(404).json({ error: 'Follow up not found' });
+
+    const user = await User.findById(req.user.id);
+    const profile = await getProfile(req.user.id);
+
+    const mailOptions = {
+      from: `"${profile.name}" <${user.email || process.env.EMAIL_USER}>`,
+      to: job.emailRecipient,
+      subject: `Re: Application for ${job.role} - ${profile.name}`,
+      text: followUp.draft,
+      html: `<p style="white-space: pre-wrap;">${followUp.draft.replace(/\n/g, '<br>')}</p>`,
+    };
+
+    await sendEmailViaAPI(user, mailOptions);
+
+    followUp.sent = true;
+    await job.save();
+
+    res.json({ success: true, message: 'Follow up sent!' });
+  } catch (err) {
+    console.error('Send Follow-up Error:', err);
+    res.status(500).json({ error: 'Failed to send follow up' });
+  }
+});
+
 app.post('/api/generate-email', requireAuth, async (req, res) => {
   const { company, role, type, jd } = req.body;
 
@@ -638,8 +705,13 @@ app.post('/api/generate-email', requireAuth, async (req, res) => {
 
   try {
     const profile = await getProfile(req.user.id);
+    const tone = profile.tone || 'Professional';
+    const skillsText = profile.skills && profile.skills.length > 0 ? `Core Skills: ${profile.skills.join(', ')}` : '';
+    const achText = profile.achievements && profile.achievements.length > 0 ? `Key Achievements:\n- ${profile.achievements.join('\n- ')}` : '';
+
     const prompt = `You are an elite, highly persuasive software engineer ("${profile.name}") writing a cold email to the hiring manager at ${company} for the "${role}" position. 
 Context: ${type}
+Tone: ${tone}
 Here is the official Job Description:
 """
 ${jd || 'Not provided'}
@@ -648,6 +720,8 @@ Here is ${profile.name}'s Resume:
 """
 ${profile.resumeText || 'No resume available'}
 """
+${skillsText}
+${achText}
 
 INSTRUCTIONS FOR THE EMAIL DRAFT:
 1. DEEP JD ANALYSIS: Internally identify the top 2-3 most critical technical requirements mentioned in the Job Description. DO NOT OUTPUT THIS ANALYSIS in your response.
@@ -719,7 +793,7 @@ app.post('/api/send-email', requireAuth, async (req, res) => {
     const mailOptions = {
       from: user.email || process.env.EMAIL_USER,
       to,
-      subject: subject || 'Job Application',
+      subject: subject || (job ? `Application for ${job.role} - ${profile.name}` : 'Job Application'),
       html: htmlBody,
       attachments: []
     };
@@ -746,8 +820,13 @@ app.post('/api/single-draft', requireAuth, async (req, res) => {
     const profile = await getProfile(req.user.id);
     const user = await User.findById(req.user.id);
     
+    const tone = profile.tone || 'Professional';
+    const skillsText = profile.skills && profile.skills.length > 0 ? `Core Skills: ${profile.skills.join(', ')}` : '';
+    const achText = profile.achievements && profile.achievements.length > 0 ? `Key Achievements:\n- ${profile.achievements.join('\n- ')}` : '';
+
     const prompt = `You are an elite, highly persuasive software engineer ("${profile.name}") writing a cold email to the hiring manager at ${company} for the "${role}" position. 
 Context: Cold Outreach / Networking
+Tone: ${tone}
 Here is the official Job Description:
 """
 ${jd}
@@ -756,6 +835,8 @@ Here is ${profile.name}'s Resume:
 """
 ${profile.resumeText || 'No resume available'}
 """
+${skillsText}
+${achText}
 
 INSTRUCTIONS FOR THE EMAIL DRAFT:
 1. DEEP JD ANALYSIS: Internally identify the top 2-3 most critical technical requirements mentioned in the Job Description. DO NOT OUTPUT THIS ANALYSIS in your response.
@@ -808,7 +889,7 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
     const mailOptions = {
       from: user.email || process.env.EMAIL_USER,
       to: recipientEmail,
-      subject: `Application for ${role}`,
+      subject: `Application for ${role} - ${profile.name}`,
       html: htmlBody,
       attachments: []
     };
@@ -887,6 +968,100 @@ app.get('/api/track-click/:jobId', async (req, res) => {
     } catch {
       res.redirect('/');
     }
+  }
+});
+
+async function checkGmailForReply(user, recipientEmail) {
+  if (!user.googleRefreshToken) return false;
+  
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET
+  );
+  oauth2Client.setCredentials({ refresh_token: user.googleRefreshToken });
+  const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+  try {
+    const res = await gmail.users.messages.list({
+      userId: 'me',
+      q: `from:${recipientEmail} to:me`,
+      maxResults: 1
+    });
+    
+    return res.data.messages && res.data.messages.length > 0;
+  } catch (err) {
+    console.error('Error checking Gmail for reply:', err);
+    return false;
+  }
+}
+
+// Follow-Up Cron Job: Runs daily at 9:00 AM
+cron.schedule('0 9 * * *', async () => {
+  console.log('[Cron] Starting daily follow-up check...');
+  try {
+    const users = await User.find({ googleRefreshToken: { $exists: true, $ne: null } });
+    
+    for (const user of users) {
+      const profile = await getProfile(user._id);
+      if (!profile) continue;
+      
+      const jobs = await Job.find({ 
+        userId: user._id, 
+        status: { $in: ['Sent', 'Opened'] } 
+      });
+
+      for (const job of jobs) {
+        if (!job.emailRecipient) continue;
+        
+        const daysSinceSent = Math.floor((Date.now() - new Date(job.updatedAt).getTime()) / (1000 * 60 * 60 * 24));
+        const targetDay = daysSinceSent >= 6 ? 6 : daysSinceSent >= 3 ? 3 : 0;
+        
+        if (targetDay === 0) continue;
+        
+        // Check if already drafted/sent this follow-up
+        const existingFollowUp = job.followUps && job.followUps.find(f => f.day === targetDay);
+        if (existingFollowUp) continue;
+
+        // Check if recruiter replied
+        const hasReplied = await checkGmailForReply(user, job.emailRecipient);
+        if (hasReplied) {
+          job.status = 'Replied';
+          await job.save();
+          continue;
+        }
+
+        // Generate follow-up draft
+        console.log(`[Cron] Generating Day ${targetDay} follow-up for ${job.company}`);
+        const prompt = `Write a short, polite, and confident Day ${targetDay} follow-up email to the hiring manager at ${job.company} for the ${job.role} position.
+Original Email Context:
+"""
+${job.emailDraft}
+"""
+Guidelines:
+- If Day 3: Reiterate interest and ask if they need more info.
+- If Day 6: Final polite bump, mentioning you're still highly interested.
+- Tone: ${profile.tone || 'Professional'}
+- Output ONLY the body of the email. No subject, no greeting, no sign-off, no markdown blocks.`;
+
+        try {
+          const res = await callAIWithRetry(prompt, 3, 2000);
+          let draft = res.text.replace(/```(?:html|json|markdown)?\s*([\s\S]*?)```/g, '$1').trim();
+          
+          if (!job.followUps) job.followUps = [];
+          job.followUps.push({
+            draft,
+            day: targetDay,
+            sent: false
+          });
+          await job.save();
+        } catch (err) {
+          console.error('[Cron] Failed to generate follow-up:', err);
+        }
+      }
+    }
+    console.log('[Cron] Follow-up check complete.');
+  } catch (err) {
+    console.error('[Cron] Error during follow-up check:', err);
   }
 });
 

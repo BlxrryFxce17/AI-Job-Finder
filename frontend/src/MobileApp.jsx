@@ -23,6 +23,7 @@ export default function MobileApp(props) {
     batchProgress, setBatchProgress,
     batchState, setBatchState,
     activeJobs,
+    theme, setTheme,
     notify,
     loadJobs,
     loadProfile,
@@ -51,7 +52,7 @@ export default function MobileApp(props) {
           </div>
           <div style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '16px', width: '100%', height: '250px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {batchState.logs.map((log, idx) => (
-              <div key={idx} style={{ fontFamily: 'monospace', fontSize: '12px', color: 'var(--text-2)' }}>
+              <div key={idx} className="log-item" style={{ fontFamily: 'monospace', fontSize: '12px', color: 'var(--text-2)' }}>
                 <span style={{ color: 'var(--accent)', marginRight: '6px' }}>&gt;</span> {log}
               </div>
             ))}
@@ -73,15 +74,113 @@ export default function MobileApp(props) {
               <span>JobFinder</span>
               <span className="brand-ai">AI</span>
             </div>
-            <button onClick={() => { window.location.href = '/logout'; }} style={{ background: 'none', border: 'none', color: 'var(--error)', fontSize: '12px', cursor: 'pointer' }}>
-              Logout
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <button 
+                onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer' }}
+              >
+                {theme === 'dark' ? '☀️' : '🌙'}
+              </button>
+              <button onClick={() => { window.location.href = '/logout'; }} style={{ background: 'none', border: 'none', color: 'var(--error)', fontSize: '12px', cursor: 'pointer' }}>
+                Logout
+              </button>
+            </div>
           </div>
           <h1 className="mobile-page-title">{NAV.find(n => n.id === tab)?.label || tab}</h1>
           {tab !== 'resume' && tab !== 'single_drafter' && (
             <p className="mobile-subtitle">{activeJobs.length} results found</p>
           )}
         </div>
+
+        {tab === 'analytics' && (
+          <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto' }}>
+            <h2 style={{ fontSize: '20px', fontWeight: 600 }}>Email Analytics Dashboard</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div style={{ background: 'var(--surface-2)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
+                <div style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '8px' }}>Total Sent</div>
+                <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--blue)' }}>{jobs.filter(j => j.status === 'Sent' || j.status === 'Opened').length}</div>
+              </div>
+              <div style={{ background: 'var(--surface-2)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
+                <div style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '8px' }}>Total Opened</div>
+                <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--yellow)' }}>{jobs.filter(j => j.status === 'Opened').length}</div>
+              </div>
+              <div style={{ background: 'var(--surface-2)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
+                <div style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '8px' }}>Links Clicked</div>
+                <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--purple)' }}>{jobs.reduce((acc, job) => acc + (job.clickedLinks ? job.clickedLinks.length : 0), 0)}</div>
+              </div>
+              <div style={{ background: 'var(--surface-2)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
+                <div style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '8px' }}>Open Rate</div>
+                <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--green)' }}>
+                  {jobs.filter(j => j.status === 'Sent' || j.status === 'Opened').length > 0 
+                    ? Math.round((jobs.filter(j => j.status === 'Opened').length / jobs.filter(j => j.status === 'Sent' || j.status === 'Opened').length) * 100) + '%'
+                    : '0%'}
+                </div>
+              </div>
+            </div>
+            
+            <h3 style={{ fontSize: '16px', marginTop: '12px' }}>Recently Opened</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {jobs.filter(j => j.status === 'Opened').slice(0, 5).map(job => (
+                <div key={job.id} style={{ background: 'var(--surface-2)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: '14px' }}>{job.company}</div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-2)' }}>{job.role} - {job.emailRecipient}</div>
+                  </div>
+                  <div style={{ color: 'var(--yellow)', fontSize: '12px', fontWeight: 600 }}>Opened</div>
+                </div>
+              ))}
+              {jobs.filter(j => j.status === 'Opened').length === 0 && (
+                <div style={{ color: 'var(--text-3)', fontStyle: 'italic', fontSize: '13px' }}>No emails have been opened yet.</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {tab === 'followups' && (
+          <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto' }}>
+            <h2 style={{ fontSize: '20px', fontWeight: 600 }}>Pending Follow Ups</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {jobs.flatMap(job => 
+                (job.followUps || [])
+                  .filter(f => !f.sent)
+                  .map(f => (
+                    <div key={`${job.id}-${f.day}`} style={{ background: 'var(--surface-2)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: '16px' }}>{job.company}</div>
+                          <div style={{ fontSize: '13px', color: 'var(--text-2)' }}>Day {f.day} Follow Up</div>
+                        </div>
+                        <button 
+                          className="btn btn-primary"
+                          style={{ padding: '6px 12px', fontSize: '13px' }}
+                          onClick={async () => {
+                            const res = await fetch(`${API_BASE}/api/send-followup`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                              body: JSON.stringify({ jobId: job.id, day: f.day })
+                            });
+                            if (res.ok) {
+                              const fToUpdate = job.followUps.find(fu => fu.day === f.day);
+                              if(fToUpdate) fToUpdate.sent = true;
+                              setJobs([...jobs]);
+                            }
+                          }}
+                        >
+                          Send
+                        </button>
+                      </div>
+                      <div style={{ background: 'var(--surface-3)', padding: '12px', borderRadius: '8px', fontSize: '13px', whiteSpace: 'pre-wrap', color: 'var(--text-2)' }}>
+                        {f.draft}
+                      </div>
+                    </div>
+                  ))
+              )}
+              {jobs.flatMap(j => (j.followUps || []).filter(f => !f.sent)).length === 0 && (
+                <div style={{ color: 'var(--text-3)', fontStyle: 'italic', fontSize: '14px' }}>No pending follow ups at this time.</div>
+              )}
+            </div>
+          </div>
+        )}
 
         {tab === 'applications' && (
           <div className="mobile-actions-panel">
@@ -245,6 +344,14 @@ export default function MobileApp(props) {
               <label className="mobile-label">GitHub URL</label>
               <input className="form-input" value={profile.github} onChange={e => setProfile({...profile, github: e.target.value})} />
               
+              <label className="mobile-label">Custom AI Tone</label>
+              <select className="form-input" value={profile.tone || 'Professional'} onChange={e => setProfile({...profile, tone: e.target.value})}>
+                <option value="Professional">Professional & Formal</option>
+                <option value="Confident & Direct">Confident & Direct</option>
+                <option value="Enthusiastic & Friendly">Enthusiastic & Friendly</option>
+                <option value="Short & Punchy">Short & Punchy</option>
+              </select>
+              
               <button type="submit" className="btn btn-primary" disabled={savingProfile}>
                 {savingProfile ? <span className="spinner"></span> : 'Save Changes'}
               </button>
@@ -267,6 +374,26 @@ export default function MobileApp(props) {
             <div className="mobile-card">
               <p style={{ color: 'var(--text-2)', fontSize: '13px', marginBottom: '16px' }}>Current: <strong style={{color:'var(--text-1)'}}>{profile.resumeFilename || 'None'}</strong></p>
               <input type="file" accept="application/pdf" onChange={handleResumeUpload} style={{ width: '100%', color: 'var(--text-2)' }} />
+              {profile.skills && profile.skills.length > 0 && (
+                <div style={{ marginTop: '20px' }}>
+                  <div style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '8px' }}>Extracted Skills ({profile.experienceLevel})</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    {profile.skills.map((skill, idx) => (
+                      <div key={idx} style={{ background: 'var(--accent-glow)', color: 'var(--accent)', padding: '4px 10px', borderRadius: '12px', fontSize: '12px', border: '1px solid var(--accent)' }}>
+                        {skill}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {profile.achievements && profile.achievements.length > 0 && (
+                <div style={{ marginTop: '20px' }}>
+                  <div style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '8px' }}>Top Achievements</div>
+                  <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '13px', color: 'var(--text-1)' }}>
+                    {profile.achievements.map((ach, idx) => <li key={idx} style={{marginBottom: '4px'}}>{ach}</li>)}
+                  </ul>
+                </div>
+              )}
             </div>
           </div>
         )}
