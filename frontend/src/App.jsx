@@ -23,15 +23,6 @@ export default function App() {
   const [newJob, setNewJob] = useState({ company: '', role: '', status: 'Sent' });
   const [toast, setToast] = useState(null);
   
-  // Email drafter
-  const [selJobId, setSelJobId] = useState('');
-  const [emailType, setEmailType] = useState('Cold Outreach / Networking');
-  const [draft, setDraft] = useState('');
-  const [generating, setGenerating] = useState(false);
-  const [recipient, setRecipient] = useState('');
-  const [sendingEmail, setSendingEmail] = useState(false);
-  const [panelOpen, setPanelOpen] = useState(false);
-
   // Batch Selection
   const [selectedJobs, setSelectedJobs] = useState([]);
   const [batchProgress, setBatchProgress] = useState(null);
@@ -73,7 +64,7 @@ export default function App() {
             setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Draft ready. Sending...`] }));
             const sendRes = await fetch(`${API_BASE}/api/send-email`, {
                method: 'POST', headers: { 'Content-Type': 'application/json' },
-               body: JSON.stringify({ jobId: job.id, draft: genData.draft, recipient: discoveredEmail })
+               body: JSON.stringify({ jobId: job.id, body: genData.draft, to: discoveredEmail })
             });
             const sendData = await sendRes.json();
             if (sendData.success) {
@@ -191,50 +182,6 @@ export default function App() {
       loadJobs();
     } catch { notify('Failed to fetch from Adzuna', 'error'); }
     finally { setFetching(false); }
-  };
-
-  const handleGenerate = async (job) => {
-    setGenerating(true);
-    setPanelOpen(true);
-    setSelJobId(job.id);
-    setDraft('');
-    setRecipient('');
-    try {
-      const discRes = await fetch(`${API_BASE}/api/discover-email`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ company: job.company, jd: job.jd })
-      });
-      const discData = await discRes.json();
-      setRecipient(discData.email || '');
-
-      const genRes = await fetch(`${API_BASE}/api/generate-email`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ company: job.company, role: job.role, jd: job.jd, emailType })
-      });
-      const genData = await genRes.json();
-      setDraft(genData.draft);
-    } catch { notify('Failed to generate email', 'error'); }
-    finally { setGenerating(false); }
-  };
-
-  const handleSendEmail = async () => {
-    setSendingEmail(true);
-    try {
-      const r = await fetch(`${API_BASE}/api/send-email`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobId: selJobId, recipient, draft })
-      });
-      const d = await r.json();
-      if (d.success) {
-        notify('Email sent successfully!');
-        setPanelOpen(false);
-        updateStatus(selJobId, 'Sent', recipient, draft);
-        setTab('applied');
-      } else {
-        notify(d.error || 'Failed to send', 'error');
-      }
-    } catch { notify('Error sending email', 'error'); }
-    finally { setSendingEmail(false); }
   };
 
   const activeJobs = jobs.filter(j => {
@@ -476,11 +423,6 @@ export default function App() {
                       </td>
                       <td>
                         <div className="flex gap-2">
-                          {tab === 'applications' && (
-                            <button className="btn btn-primary" onClick={() => handleGenerate(job)} style={{marginRight: '8px', padding: '4px 10px'}}>
-                              Draft Email ✨
-                            </button>
-                          )}
                           <button className="btn btn-ghost" onClick={() => handleDelete(job.id)} style={{padding: '4px 10px'}}>
                             Delete
                           </button>
@@ -495,72 +437,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* Email Panel */}
-      <div className={`email-panel ${panelOpen ? 'open' : 'closed'}`}>
-        <div className="panel-header" onClick={() => setPanelOpen(!panelOpen)}>
-          <div className="panel-title">AI Email Drafter</div>
-          <div className="panel-toggle">{panelOpen ? '▶' : '◀'}</div>
-        </div>
-        
-        {panelOpen && (
-          <div className="panel-body">
-            {generating ? (
-              <div className="empty-state h-full">
-                <span className="loading-spinner"></span>
-                <p style={{marginTop: '10px'}}>Discovering HR email & generating draft...</p>
-              </div>
-            ) : (
-              <>
-                <div>
-                  <span className="form-label">To (HR/Recruiter)</span>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    style={{width: '100%', marginTop: '8px'}}
-                    value={recipient}
-                    onChange={e => setRecipient(e.target.value)}
-                    placeholder="hr@company.com"
-                  />
-                </div>
-
-                <div>
-                  <span className="form-label">Email Type</span>
-                  <select 
-                    className="form-select" 
-                    style={{width: '100%', marginTop: '8px'}}
-                    value={emailType}
-                    onChange={e => setEmailType(e.target.value)}
-                  >
-                    <option>Cold Outreach / Networking</option>
-                    <option>Direct Application</option>
-                    <option>Follow Up</option>
-                  </select>
-                </div>
-                
-                <div className="draft-area-wrapper">
-                  <span className="form-label" style={{marginBottom: '8px', display: 'block'}}>Drafted Message</span>
-                  <textarea 
-                    className="draft-textarea"
-                    value={draft}
-                    onChange={e => setDraft(e.target.value)}
-                  />
-                </div>
-
-                <div className="panel-actions">
-                  <button className="btn btn-ghost" onClick={() => setPanelOpen(false)}>Cancel</button>
-                  <button 
-                    className="btn btn-primary" 
-                    disabled={sendingEmail || !draft || !recipient}
-                    onClick={handleSendEmail}
-                  >
-                    {sendingEmail ? <span className="spinner"></span> : 'Send & Track 🚀'}
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-      </div>
 
     </div>
   );
