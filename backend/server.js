@@ -321,11 +321,11 @@ ${data.text.substring(0, 4000)}
       profile.achievements = parsedData.achievements || [];
       profile.experienceLevel = parsedData.experienceLevel || '';
       
-      if (!profile.name && parsedData.name) profile.name = parsedData.name;
-      if (!profile.title && parsedData.title) profile.title = parsedData.title;
-      if (!profile.phone && parsedData.phone) profile.phone = parsedData.phone;
-      if (!profile.linkedin && parsedData.linkedin) profile.linkedin = parsedData.linkedin;
-      if (!profile.github && parsedData.github) profile.github = parsedData.github;
+      if (parsedData.name) profile.name = parsedData.name;
+      if (parsedData.title) profile.title = parsedData.title;
+      if (parsedData.phone) profile.phone = parsedData.phone;
+      if (parsedData.linkedin) profile.linkedin = parsedData.linkedin;
+      if (parsedData.github) profile.github = parsedData.github;
       
       console.log('[Resume Parse] Extracted successfully.');
     } catch (aiErr) {
@@ -355,7 +355,7 @@ app.get('/api/profile/resume-pdf', async (req, res) => {
       return res.status(404).send('No resume uploaded.');
     }
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${profile.resumeFilename}"`);
+    res.setHeader('Content-Disposition', `inline; filename="${profile.resumeFilename}"`);
     res.send(profile.resumePdf);
   } catch (err) {
     res.status(500).send('Failed to fetch resume.');

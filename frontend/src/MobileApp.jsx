@@ -402,7 +402,7 @@ export default function MobileApp(props) {
               try {
                 const formData = new FormData(e.target);
                 const data = Object.fromEntries(formData);
-                const res = await fetch(`${API_BASE}/api/single-draft`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+                const res = await fetch(`${API_BASE}/api/single-draft`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` }, body: JSON.stringify(data) });
                 const result = await res.json();
                 if (result.success) { notify('Email Sent! 🚀'); e.target.reset(); loadJobs(); } else { notify(result.error || 'Failed to send', 'error'); }
               } catch (err) { notify('Error', 'error'); }

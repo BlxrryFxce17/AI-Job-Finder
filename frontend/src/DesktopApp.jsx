@@ -446,7 +446,7 @@ export default function DesktopApp(props) {
                 const data = Object.fromEntries(formData);
                 const res = await fetch(`${API_BASE}/api/single-draft`, {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` },
                   body: JSON.stringify(data)
                 });
                 const result = await res.json();
