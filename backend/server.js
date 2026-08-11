@@ -277,7 +277,7 @@ app.put('/api/profile', requireAuth, async (req, res) => {
     const profile = await getProfile(req.user.id);
     
     // Safely update only allowed fields
-    const allowedFields = ['name', 'title', 'phone', 'linkedin', 'github', 'tone', 'experienceLevel'];
+    const allowedFields = ['name', 'title', 'phone', 'linkedin', 'github', 'tone', 'experienceLevel', 'enableFlex', 'aiInstructions'];
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) {
         profile[field] = req.body[field];
