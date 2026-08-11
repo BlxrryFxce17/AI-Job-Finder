@@ -26,6 +26,9 @@ export default function DesktopApp(props) {
     loadJobs,
     loadProfile,
     toggleSelectJob,
+    handleLogout,
+    handleDelete,
+    handleBatchDelete,
     updateStatus,
     handleBatchSend,
     handleProfileSave,
@@ -307,9 +310,14 @@ export default function DesktopApp(props) {
                     <div style={{ width: `${batchProgress}%`, height: '100%', background: 'var(--accent)', transition: 'width 0.3s' }} />
                   </div>
                 ) : (
-                  <button className="btn btn-primary" onClick={handleBatchSend}>
-                    Auto-Apply to Selected 🚀
-                  </button>
+                  <>
+                    <button className="btn btn-primary" onClick={handleBatchSend}>
+                      Auto-Apply to Selected 🚀
+                    </button>
+                    <button className="btn btn-primary" style={{ background: 'var(--error)', borderColor: 'var(--error)' }} onClick={handleBatchDelete}>
+                      Delete Selected
+                    </button>
+                  </>
                 )}
                 <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={() => setSelectedJobs([])}>Cancel</button>
               </div>
@@ -633,7 +641,7 @@ export default function DesktopApp(props) {
                   </div>
                 )}
               </div>
-              {selectedMail.emailDraft ? selectedMail.emailDraft : 'No draft saved for this job.'}
+              {selectedMail.emailDraft || 'No draft saved for this job.'}
             </div>
           </div>
         </div>
@@ -661,7 +669,7 @@ export default function DesktopApp(props) {
                 {selectedJobDetails.applyLink && <div><strong>Link:</strong> <a href={selectedJobDetails.applyLink} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>{selectedJobDetails.applyLink}</a></div>}
               </div>
               <h4 style={{ color: 'var(--text-1)', marginBottom: '10px' }}>Job Description</h4>
-              {selectedJobDetails.jd ? selectedJobDetails.jd : 'No job description available.'}
+              {selectedJobDetails.jd || 'No job description available.'}
             </div>
           </div>
         </div>

@@ -276,6 +276,18 @@ export function useAppLogic() {
     } catch { notify('Failed to delete job', 'error'); }
   };
 
+  const handleBatchDelete = async () => {
+    if (!window.confirm(`Are you sure you want to delete ${selectedJobs.length} jobs?`)) return;
+    try {
+      for (const id of selectedJobs) {
+        await apiFetch(`${API_BASE}/api/jobs/${id}`, { method: 'DELETE' });
+      }
+      setJobs(p => p.filter(j => !selectedJobs.includes(j.id)));
+      setSelectedJobs([]);
+      notify(`${selectedJobs.length} jobs deleted`);
+    } catch { notify('Failed to delete some jobs', 'error'); }
+  };
+
   const handleFetchJobs = async () => {
     if (fetchQueries.length === 0) {
       notify('Please add at least one search query', 'error');
@@ -352,6 +364,7 @@ export function useAppLogic() {
     handleProfileSave,
     handleResumeUpload,
     handleDelete,
+    handleBatchDelete,
     handleFetchJobs,
     addFetchQuery,
     removeFetchQuery

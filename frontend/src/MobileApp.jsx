@@ -25,7 +25,9 @@ export default function MobileApp(props) {
     loadJobs,
     loadProfile,
     toggleSelectJob,
+    handleLogout,
     updateStatus,
+    handleBatchDelete,
     handleBatchSend,
     handleProfileSave,
     handleResumeUpload,
@@ -187,7 +189,10 @@ export default function MobileApp(props) {
                 {batchProgress !== null ? (
                    <span className="spinner"></span>
                 ) : (
-                  <button className="btn btn-primary" style={{ padding: '6px 12px', fontSize: '13px' }} onClick={handleBatchSend}>Auto-Apply 🚀</button>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button className="btn btn-primary" style={{ background: 'var(--error)', borderColor: 'var(--error)', padding: '6px 12px', fontSize: '13px' }} onClick={handleBatchDelete}>Delete</button>
+                    <button className="btn btn-primary" style={{ padding: '6px 12px', fontSize: '13px' }} onClick={handleBatchSend}>Auto-Apply 🚀</button>
+                  </div>
                 )}
                 <button className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: '13px', marginLeft: '8px' }} onClick={() => setSelectedJobs([])}>Cancel</button>
               </div>
