@@ -630,6 +630,7 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
       <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
         ${formattedDraft}
         <br/><br/>
+        Yours Sincerely,<br/>
         <b>${profile.name}</b><br/>
         ${profile.title}<br/>
         📞 ${profile.phone}<br/>
@@ -743,13 +744,16 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
 1. DEEP JD ANALYSIS: Internally identify the top 2-3 most critical technical requirements mentioned in the Job Description. DO NOT OUTPUT THIS ANALYSIS in your response.
 2. VALUE MAPPING: Explicitly map those exact JD requirements to specific, quantifiable achievements from ${profile.name}'s resume. DO NOT OUTPUT THIS MAPPING process in your response.
 3. TONE & STRUCTURE: Keep it concise, confident, and highly impressive. Do not use generic filler (e.g., "I hope this email finds you well"). Start with a strong hook, deliver the value proposition (the mapped skills), and end with a soft call to action.
-4. THE FLEX: ALWAYS include this exact postscript right before the sign-off: "P.S. I'm highly passionate about automation and software engineering—in fact, I built the AI web-scraper and autonomous agent that found this job and drafted this email!"
+4. THE FLEX: ALWAYS include this exact postscript right before the end of your text: "P.S. I'm highly passionate about automation and software engineering—in fact, I built the AI web-scraper and autonomous agent that found this job and drafted this email!"
 5. THE RESUME LINK: You MUST include the exact phrase "You can view my CV here." somewhere naturally towards the end of the email (before the postscript). DO NOT add any URLs, colons, or markdown links after this phrase. Just the exact phrase and a period. 
-6. OUTPUT FORMAT: You MUST output the response EXACTLY in the following format so our system can parse it. If the exact company name or job role was not provided, you MUST extract them from the Job Description.
+6. NO SIGN-OFF: DO NOT include any sign-off whatsoever (no "Best regards", "Sincerely", or your name). The backend system will automatically append the signature.
+7. OUTPUT FORMAT: You MUST output the response EXACTLY in the following format so our system can parse it. If the exact company name or job role was not provided, you MUST extract them from the Job Description.
 
 COMPANY: [Extracted Company Name or "Unknown Company"]
 ROLE: [Extracted Job Title or "General Position"]
 BODY:
+Dear Hiring Manager at [Extracted Company Name],
+
 [Start of email body without any conversational filler or markdown blocks]`;
 
     const response = await callAIWithRetry(prompt);
@@ -810,6 +814,7 @@ app.post('/api/send-email', requireAuth, async (req, res) => {
       <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
         ${formattedDraft}
         <br/><br/>
+        Yours Sincerely,<br/>
         <b>${profile.name}</b><br/>
         ${profile.title}<br/>
         📞 ${profile.phone}<br/>
@@ -874,13 +879,16 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
 1. DEEP JD ANALYSIS: Internally identify the top 2-3 most critical technical requirements mentioned in the Job Description. DO NOT OUTPUT THIS ANALYSIS in your response.
 2. VALUE MAPPING: Explicitly map those exact JD requirements to specific, quantifiable achievements from ${profile.name}'s resume. DO NOT OUTPUT THIS MAPPING process in your response.
 3. TONE & STRUCTURE: Keep it concise, confident, and highly impressive. Start with a strong hook, deliver the value proposition, and end with a soft call to action.
-4. THE FLEX: ALWAYS include this exact postscript right before the sign-off: "P.S. I'm highly passionate about automation and software engineering—in fact, I built the AI web-scraper and autonomous agent that found this job and drafted this email!"
+4. THE FLEX: ALWAYS include this exact postscript right before the end of your text: "P.S. I'm highly passionate about automation and software engineering—in fact, I built the AI web-scraper and autonomous agent that found this job and drafted this email!"
 5. THE RESUME LINK: You MUST include the exact phrase "You can view my CV here." somewhere naturally towards the end of the email (before the postscript). DO NOT add any URLs, colons, or markdown links after this phrase. Just the exact phrase and a period. 
-6. OUTPUT FORMAT: You MUST output the response EXACTLY in the following format so our system can parse it. If the exact company name or job role was not provided, you MUST extract them from the Job Description.
+6. NO SIGN-OFF: DO NOT include any sign-off whatsoever (no "Best regards", "Sincerely", or your name). The backend system will automatically append the signature.
+7. OUTPUT FORMAT: You MUST output the response EXACTLY in the following format so our system can parse it. If the exact company name or job role was not provided, you MUST extract them from the Job Description.
 
 COMPANY: [Extracted Company Name or "Unknown Company"]
 ROLE: [Extracted Job Title or "General Position"]
 BODY:
+Dear Hiring Manager at [Extracted Company Name],
+
 [Start of email body without any conversational filler or markdown blocks]`;
 
     console.log('[Single Draft] Generating AI draft for', targetCompany, '...');
@@ -926,6 +934,7 @@ BODY:
       <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
         ${formattedDraft}
         <br/><br/>
+        Yours Sincerely,<br/>
         <b>${profile.name}</b><br/>
         ${profile.title}<br/>
         📞 ${profile.phone}<br/>
@@ -1104,7 +1113,7 @@ Guidelines:
 - If Day 3: Reiterate interest and ask if they need more info.
 - If Day 6: Final polite bump, mentioning you're still highly interested.
 - Tone: ${profile.tone || 'Professional'}
-- Output ONLY the body of the email. No subject, no greeting, no sign-off, no markdown blocks.`;
+- Output ONLY the body of the email, starting with exactly "Dear Hiring Manager at ${job.company},". No subject, no sign-off, no markdown blocks.`;
 
         try {
           const res = await callAIWithRetry(prompt, 3, 2000);
@@ -1128,6 +1137,7 @@ Guidelines:
             <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
               ${formattedDraft}
               <br/><br/>
+              Yours Sincerely,<br/>
               <b>${profile.name}</b><br/>
               ${profile.title}<br/>
               📞 ${profile.phone}<br/>
