@@ -615,7 +615,7 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
     // Generate Tracked Links only if PUBLIC_URL is set
     const baseUrl = process.env.PUBLIC_URL;
     const testJobId = Date.now().toString();
-    const trackClick = (url) => baseUrl ? `${baseUrl}/api/track-click/${testJobId}?url=${encodeURIComponent(url)}` : url;
+    const trackClick = (url) => (baseUrl && url) ? `${baseUrl}/api/track-click/${testJobId}?url=${encodeURIComponent(url)}` : (url || '');
     const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${testJobId}" width="1" height="1" style="display:none;" />` : '';
 
     let formattedDraft = draftText.replace(/\n/g, '<br/>');
@@ -796,7 +796,7 @@ app.post('/api/send-email', requireAuth, async (req, res) => {
     const baseUrl = process.env.PUBLIC_URL;
 
     // Generate Tracked Links only if PUBLIC_URL is set
-    const trackClick = (url) => baseUrl ? `${baseUrl}/api/track-click/${jobId}?url=${encodeURIComponent(url)}` : url;
+    const trackClick = (url) => (baseUrl && url) ? `${baseUrl}/api/track-click/${jobId}?url=${encodeURIComponent(url)}` : (url || '');
     const linkedInUrl = trackClick(profile.linkedin);
     const githubUrl = trackClick(profile.github);
     const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${jobId}" width="1" height="1" style="display:none;" />` : '';
@@ -918,7 +918,7 @@ Dear Hiring Manager at [Extracted Company Name],
     let formattedDraft = draftText.replace(/\n/g, '<br/>');
     
     const jobId = Date.now().toString() + Math.random().toString().substring(2, 6);
-    const trackClick = (url) => baseUrl ? `${baseUrl}/api/track-click/${jobId}?url=${encodeURIComponent(url)}` : url;
+    const trackClick = (url) => (baseUrl && url) ? `${baseUrl}/api/track-click/${jobId}?url=${encodeURIComponent(url)}` : (url || '');
     const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${jobId}" width="1" height="1" style="display:none;" />` : '';
 
     if (baseUrl) {
@@ -1032,7 +1032,11 @@ app.get('/api/track-click/:jobId', async (req, res) => {
   } catch (err) { }
 
   if (url) {
-    res.redirect(url);
+    let finalUrl = url;
+    if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
+      finalUrl = 'https://' + finalUrl;
+    }
+    res.redirect(finalUrl);
   } else {
     try {
       const profile = await getProfile();
@@ -1121,7 +1125,7 @@ Guidelines:
           
           let formattedDraft = draft.replace(/\n/g, '<br/>');
           const baseUrl = process.env.PUBLIC_URL;
-          const trackClick = (url) => baseUrl ? `${baseUrl}/api/track-click/${job.id}?url=${encodeURIComponent(url)}` : url;
+          const trackClick = (url) => (baseUrl && url) ? `${baseUrl}/api/track-click/${job.id}?url=${encodeURIComponent(url)}` : (url || '');
           const linkedInUrl = trackClick(profile.linkedin);
           const githubUrl = trackClick(profile.github);
           const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${job.id}" width="1" height="1" style="display:none;" />` : '';
