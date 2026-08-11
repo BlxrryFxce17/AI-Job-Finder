@@ -98,7 +98,9 @@ const profileSchema = new mongoose.Schema({
   skills: { type: [String], default: [] },
   achievements: { type: [String], default: [] },
   experienceLevel: { type: String, default: '' },
-  tone: { type: String, default: 'Professional' }
+  tone: { type: String, default: 'Professional' },
+  enableFlex: { type: Boolean, default: true },
+  aiInstructions: { type: String, default: '' }
 });
 
 const Profile = mongoose.model('Profile', profileSchema);
@@ -596,10 +598,11 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
 1. DEEP JD ANALYSIS: Internally identify the top 2-3 most critical technical requirements mentioned in the Job Description. DO NOT OUTPUT THIS ANALYSIS in your response.
 2. VALUE MAPPING: Explicitly map those exact JD requirements to specific, quantifiable achievements from ${profile.name}'s resume. DO NOT OUTPUT THIS MAPPING process in your response.
 3. TONE & STRUCTURE: Keep it concise, confident, and highly impressive. Do not use generic filler (e.g., "I hope this email finds you well"). Start with a strong hook, deliver the value proposition (the mapped skills), and end with a soft call to action.
-4. THE FLEX: ALWAYS include this exact postscript right before the sign-off: "P.S. I'm highly passionate about automation and software engineering—in fact, I built the AI web-scraper and autonomous agent that found this job and drafted this email!"
+${profile.enableFlex !== false ? '4. THE FLEX: ALWAYS include this exact postscript right before the sign-off: "P.S. I\'m highly passionate about automation and software engineering—in fact, I built the AI web-scraper and autonomous agent that found this job and drafted this email!"' : ''}
 5. THE RESUME LINK: You MUST include the exact phrase "You can view my CV here." somewhere naturally towards the end of the email (before the postscript). DO NOT add any URLs, colons, or markdown links after this phrase. Just the exact phrase and a period. 
 6. OUTPUT STRICTLY the final email content (body only, no signature, no name). No conversational filler, no internal thoughts, no analysis, and NO MARKDOWN BLOCKS (like \`\`\`email).
-7. CRITICAL: The very first word of your output MUST be "Dear", "Hi", or the start of the email body. NEVER write "I have crafted...", "Here is the email...", or any conversational intro. Any intro text will break our automated pipeline.`;
+7. CRITICAL: The very first word of your output MUST be "Dear", "Hi", or the start of the email body. NEVER write "I have crafted...", "Here is the email...", or any conversational intro. Any intro text will break our automated pipeline.
+${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructions}` : ''}`;
 
     console.log('[Test Email] Drafting AI content...');
     const response = await callAIWithRetry(prompt);
@@ -744,10 +747,11 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
 1. DEEP JD ANALYSIS: Internally identify the top 2-3 most critical technical requirements mentioned in the Job Description. DO NOT OUTPUT THIS ANALYSIS in your response.
 2. VALUE MAPPING: Explicitly map those exact JD requirements to specific, quantifiable achievements from ${profile.name}'s resume. DO NOT OUTPUT THIS MAPPING process in your response.
 3. TONE & STRUCTURE: Keep it concise, confident, and highly impressive. Do not use generic filler (e.g., "I hope this email finds you well"). Start with a strong hook, deliver the value proposition (the mapped skills), and end with a soft call to action.
-4. THE FLEX: ALWAYS include this exact postscript right before the end of your text: "P.S. I'm highly passionate about automation and software engineering—in fact, I built the AI web-scraper and autonomous agent that found this job and drafted this email!"
+${profile.enableFlex !== false ? '4. THE FLEX: ALWAYS include this exact postscript right before the end of your text: "P.S. I\'m highly passionate about automation and software engineering—in fact, I built the AI web-scraper and autonomous agent that found this job and drafted this email!"' : ''}
 5. THE RESUME LINK: You MUST include the exact phrase "You can view my CV here." somewhere naturally towards the end of the email (before the postscript). DO NOT add any URLs, colons, or markdown links after this phrase. Just the exact phrase and a period. 
 6. NO SIGN-OFF: DO NOT include any sign-off whatsoever (no "Best regards", "Sincerely", or your name). The backend system will automatically append the signature.
 7. OUTPUT FORMAT: You MUST output the response EXACTLY in the following format so our system can parse it. If the exact company name or job role was not provided, you MUST extract them from the Job Description.
+${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructions}` : ''}
 
 COMPANY: [Extracted Company Name or "Unknown Company"]
 ROLE: [Extracted Job Title or "General Position"]
@@ -879,10 +883,11 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
 1. DEEP JD ANALYSIS: Internally identify the top 2-3 most critical technical requirements mentioned in the Job Description. DO NOT OUTPUT THIS ANALYSIS in your response.
 2. VALUE MAPPING: Explicitly map those exact JD requirements to specific, quantifiable achievements from ${profile.name}'s resume. DO NOT OUTPUT THIS MAPPING process in your response.
 3. TONE & STRUCTURE: Keep it concise, confident, and highly impressive. Start with a strong hook, deliver the value proposition, and end with a soft call to action.
-4. THE FLEX: ALWAYS include this exact postscript right before the end of your text: "P.S. I'm highly passionate about automation and software engineering—in fact, I built the AI web-scraper and autonomous agent that found this job and drafted this email!"
+${profile.enableFlex !== false ? '4. THE FLEX: ALWAYS include this exact postscript right before the end of your text: "P.S. I\'m highly passionate about automation and software engineering—in fact, I built the AI web-scraper and autonomous agent that found this job and drafted this email!"' : ''}
 5. THE RESUME LINK: You MUST include the exact phrase "You can view my CV here." somewhere naturally towards the end of the email (before the postscript). DO NOT add any URLs, colons, or markdown links after this phrase. Just the exact phrase and a period. 
 6. NO SIGN-OFF: DO NOT include any sign-off whatsoever (no "Best regards", "Sincerely", or your name). The backend system will automatically append the signature.
 7. OUTPUT FORMAT: You MUST output the response EXACTLY in the following format so our system can parse it. If the exact company name or job role was not provided, you MUST extract them from the Job Description.
+${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructions}` : ''}
 
 COMPANY: [Extracted Company Name or "Unknown Company"]
 ROLE: [Extracted Job Title or "General Position"]

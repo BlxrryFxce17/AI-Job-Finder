@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 
-import { BarChart3, Briefcase, MailCheck, RotateCw, Mail, User } from 'lucide-react';
+import { BarChart3, Briefcase, MailCheck, RotateCw, Mail, User, Settings } from 'lucide-react';
 
 export const NAV = [
   { id: 'analytics', label: 'Stats Dashboard', icon: <BarChart3 size={20} /> },
@@ -9,6 +9,7 @@ export const NAV = [
   { id: 'followups', label: 'Follow Ups', icon: <RotateCw size={20} /> },
   { id: 'single_drafter', label: 'Email Drafter', icon: <Mail size={20} /> },
   { id: 'resume', label: 'Profile Settings', icon: <User size={20} /> },
+  { id: 'ai_settings', label: 'AI Settings', icon: <Settings size={20} /> },
 ];
 
 export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';

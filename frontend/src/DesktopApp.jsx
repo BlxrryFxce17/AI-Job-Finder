@@ -26,7 +26,7 @@ export default function DesktopApp(props) {
     loadJobs,
     loadProfile,
     toggleSelectJob,
-    handleLogout,
+    logout,
     handleDelete,
     handleBatchDelete,
     updateStatus,
@@ -126,21 +126,6 @@ export default function DesktopApp(props) {
             ))}
           </ul>
 
-          <div className="sidebar-stats">
-            <div className="stats-title">Tracking Stats</div>
-            <div className="stat-row">
-              <span className="stat-label">Total Jobs</span>
-              <span className="stat-value total">{jobs.length}</span>
-            </div>
-            <div className="stat-row">
-              <span className="stat-label">Emails Sent</span>
-              <span className="stat-value sent">{jobs.filter(j => j.status === 'Sent' || j.status === 'Opened' || j.status === 'Bounced').length}</span>
-            </div>
-            <div className="stat-row">
-              <span className="stat-label">Opened</span>
-              <span className="stat-value opened">{jobs.filter(j => j.status === 'Opened').length}</span>
-            </div>
-          </div>
 
           <div className="bottom-widget">
             <div className="user-info">
@@ -178,7 +163,7 @@ export default function DesktopApp(props) {
             <button
               className="btn btn-ghost"
               style={{ fontSize: '14px', padding: '8px 16px', marginRight: '10px', color: 'var(--error)' }}
-              onClick={handleLogout}
+              onClick={logout}
             >
               Logout
             </button>
@@ -437,7 +422,7 @@ export default function DesktopApp(props) {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <div style={{ background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80', padding: '6px 12px', borderRadius: '4px', fontSize: '13px', fontWeight: 'bold' }}>✓ Connected</div>
                     <span style={{ color: 'var(--text-1)', fontWeight: '500' }}>{profile.emailUser}</span>
-                    <button onClick={handleLogout} type="button" className="btn btn-ghost" style={{ marginLeft: 'auto' }}>Logout</button>
+                    <button onClick={logout} type="button" className="btn btn-ghost" style={{ marginLeft: 'auto' }}>Logout</button>
                   </div>
                 ) : (
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -446,6 +431,49 @@ export default function DesktopApp(props) {
                   </div>
                 )}
               </div>
+            </div>
+          </div>
+        ) : tab === 'ai_settings' ? (
+          <div style={{ padding: '30px', flex: 1, overflowY: 'auto' }}>
+            <h2 style={{ fontSize: '24px', fontWeight: 600, marginBottom: '24px', color: 'var(--text-1)' }}>AI Prompt Settings</h2>
+            
+            <div style={{ background: 'var(--surface-2)', padding: '24px', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
+              <form onSubmit={handleProfileSave} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'var(--surface-3)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
+                  <input 
+                    type="checkbox" 
+                    id="enableFlex"
+                    checked={profile.enableFlex !== false} 
+                    onChange={e => setProfile({ ...profile, enableFlex: e.target.checked })}
+                    style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                  />
+                  <div>
+                    <label htmlFor="enableFlex" style={{ display: 'block', fontWeight: '600', color: 'var(--text-1)', cursor: 'pointer' }}>
+                      Enable "The Flex" Postscript
+                    </label>
+                    <div style={{ fontSize: '13px', color: 'var(--text-2)', marginTop: '4px' }}>
+                      Appends: <i>"P.S. I'm highly passionate about automation and software engineering—in fact, I built the AI web-scraper and autonomous agent that found this job and drafted this email!"</i>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: '8px', fontWeight: '600', color: 'var(--text-1)' }}>Custom AI Instructions</label>
+                  <div style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '8px' }}>Add any custom rules, constraints, or specific formats you want the AI to follow.</div>
+                  <textarea 
+                    className="form-input" 
+                    style={{ width: '100%', height: '150px', resize: 'vertical' }} 
+                    placeholder="e.g. Always mention that I am willing to relocate to New York. Do not use words like 'synergy'..."
+                    value={profile.aiInstructions || ''} 
+                    onChange={e => setProfile({ ...profile, aiInstructions: e.target.value })} 
+                  />
+                </div>
+
+                <button type="submit" className="btn btn-primary" style={{ alignSelf: 'flex-start', padding: '10px 24px' }} disabled={savingProfile}>
+                  {savingProfile ? <span className="spinner"></span> : 'Save AI Settings'}
+                </button>
+              </form>
             </div>
           </div>
         ) : tab === 'single_drafter' ? (

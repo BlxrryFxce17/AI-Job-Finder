@@ -25,7 +25,7 @@ export default function MobileApp(props) {
     loadJobs,
     loadProfile,
     toggleSelectJob,
-    handleLogout,
+    logout,
     updateStatus,
     handleBatchDelete,
     handleBatchSend,
@@ -79,7 +79,7 @@ export default function MobileApp(props) {
               >
                 {theme === 'dark' ? '☀️' : '🌙'}
               </button>
-              <button onClick={handleLogout} style={{ background: 'none', border: 'none', color: 'var(--error)', fontSize: '12px', cursor: 'pointer' }}>
+              <button onClick={logout} style={{ background: 'none', border: 'none', color: 'var(--error)', fontSize: '12px', cursor: 'pointer' }}>
                 Logout
               </button>
             </div>
@@ -386,7 +386,7 @@ export default function MobileApp(props) {
               {profile.emailUser ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   <div style={{ display: 'inline-flex', alignItems: 'center', background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80', padding: '8px 12px', borderRadius: '6px', fontSize: '14px', fontWeight: 'bold' }}>✓ {profile.emailUser}</div>
-                  <button onClick={handleLogout} type="button" className="btn btn-ghost" style={{ textAlign: 'center', width: '100%' }}>Logout</button>
+                  <button onClick={logout} type="button" className="btn btn-ghost" style={{ textAlign: 'center', width: '100%' }}>Logout</button>
                 </div>
               ) : (
                 <div style={{display: 'flex', flexDirection: 'column', gap: '12px'}}>
@@ -395,6 +395,48 @@ export default function MobileApp(props) {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {tab === 'ai_settings' && (
+          <div className="mobile-form-section">
+            <h2 className="mobile-section-title">AI Prompt Settings</h2>
+            
+            <form onSubmit={handleProfileSave} className="mobile-form">
+              <div className="mobile-card" style={{ padding: '16px', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <input 
+                    type="checkbox" 
+                    id="enableFlexMobile"
+                    checked={profile.enableFlex !== false} 
+                    onChange={e => setProfile({ ...profile, enableFlex: e.target.checked })}
+                    style={{ width: '20px', height: '20px' }}
+                  />
+                  <label htmlFor="enableFlexMobile" style={{ fontWeight: '600', color: 'var(--text-1)' }}>
+                    Enable "The Flex" Postscript
+                  </label>
+                </div>
+                <div style={{ fontSize: '13px', color: 'var(--text-2)', marginTop: '8px', paddingLeft: '32px' }}>
+                  Appends: <i>"P.S. I'm highly passionate about automation and software engineering..."</i>
+                </div>
+              </div>
+
+              <div className="mobile-card" style={{ padding: '16px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontWeight: '600', color: 'var(--text-1)' }}>Custom AI Instructions</label>
+                <div style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '12px' }}>Add any custom rules, constraints, or formats.</div>
+                <textarea 
+                  className="form-input" 
+                  style={{ width: '100%', height: '150px' }} 
+                  placeholder="e.g. Always mention that I am willing to relocate..."
+                  value={profile.aiInstructions || ''} 
+                  onChange={e => setProfile({ ...profile, aiInstructions: e.target.value })} 
+                />
+              </div>
+
+              <button type="submit" className="btn btn-primary" style={{ marginTop: '20px', width: '100%', padding: '14px' }} disabled={savingProfile}>
+                {savingProfile ? <span className="spinner"></span> : 'Save AI Settings'}
+              </button>
+            </form>
           </div>
         )}
 
