@@ -77,7 +77,7 @@ export default function MobileApp(props) {
               >
                 {theme === 'dark' ? '☀️' : '🌙'}
               </button>
-              <button onClick={() => { window.location.href = '/logout'; }} style={{ background: 'none', border: 'none', color: 'var(--error)', fontSize: '12px', cursor: 'pointer' }}>
+              <button onClick={handleLogout} style={{ background: 'none', border: 'none', color: 'var(--error)', fontSize: '12px', cursor: 'pointer' }}>
                 Logout
               </button>
             </div>
@@ -381,7 +381,7 @@ export default function MobileApp(props) {
               {profile.emailUser ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   <div style={{ display: 'inline-flex', alignItems: 'center', background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80', padding: '8px 12px', borderRadius: '6px', fontSize: '14px', fontWeight: 'bold' }}>✓ {profile.emailUser}</div>
-                  <button onClick={() => { localStorage.removeItem('token'); window.location.href = '/'; }} type="button" className="btn btn-ghost" style={{ textAlign: 'center', width: '100%' }}>Logout</button>
+                  <button onClick={handleLogout} type="button" className="btn btn-ghost" style={{ textAlign: 'center', width: '100%' }}>Logout</button>
                 </div>
               ) : (
                 <div style={{display: 'flex', flexDirection: 'column', gap: '12px'}}>

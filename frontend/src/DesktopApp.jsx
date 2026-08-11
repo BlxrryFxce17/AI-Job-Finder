@@ -172,6 +172,13 @@ export default function DesktopApp(props) {
             >
               {theme === 'dark' ? '☀️' : '🌙'}
             </button>
+            <button
+              className="btn btn-ghost"
+              style={{ fontSize: '14px', padding: '8px 16px', marginRight: '10px', color: 'var(--error)' }}
+              onClick={handleLogout}
+            >
+              Logout
+            </button>
             {(tab === 'applications' || tab === 'applied') && (
               <>
                 {tab === 'applications' && (
@@ -422,7 +429,7 @@ export default function DesktopApp(props) {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <div style={{ background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80', padding: '6px 12px', borderRadius: '4px', fontSize: '13px', fontWeight: 'bold' }}>✓ Connected</div>
                     <span style={{ color: 'var(--text-1)', fontWeight: '500' }}>{profile.emailUser}</span>
-                    <button onClick={() => { localStorage.removeItem('token'); window.location.href = '/'; }} type="button" className="btn btn-ghost" style={{ marginLeft: 'auto' }}>Logout</button>
+                    <button onClick={handleLogout} type="button" className="btn btn-ghost" style={{ marginLeft: 'auto' }}>Logout</button>
                   </div>
                 ) : (
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
