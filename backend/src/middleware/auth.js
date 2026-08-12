@@ -9,20 +9,20 @@ const requireAuth = async (req, res, next) => {
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({ error: 'No authorization header' });
     }
-    
+
     const token = authHeader.split(' ')[1];
     if (!token) {
       return res.status(401).json({ error: 'No token provided' });
     }
-    
+
     const payload = jwt.verify(token, config.jwtSecret);
-    
+
     // Optional: verify user still exists
     const user = await User.findById(payload.id).select('-googleRefreshToken -googleAccessToken');
     if (!user) {
       return res.status(401).json({ error: 'User not found' });
     }
-    
+
     req.user = payload;
     req.userDoc = user;
     next();

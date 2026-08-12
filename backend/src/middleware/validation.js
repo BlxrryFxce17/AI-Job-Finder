@@ -5,7 +5,7 @@ const validate = (req, res, next) => {
   if (!errors.isEmpty()) {
     return res.status(400).json({
       error: 'Validation failed',
-      details: errors.array()
+      details: errors.array(),
     });
   }
   next();
@@ -13,7 +13,7 @@ const validate = (req, res, next) => {
 
 module.exports = {
   validate,
-  
+
   // Job validation
   createJob: [
     body('company').trim().notEmpty().withMessage('Company is required'),
@@ -22,18 +22,18 @@ module.exports = {
     body('status').optional().isIn(['Found', 'Drafting', 'Sent', 'Opened', 'Bounced', 'Replied']),
     body('applyLink').optional().isURL(),
     body('location').optional().isString(),
-    validate
+    validate,
   ],
-  
+
   updateJob: [
     param('id').notEmpty().withMessage('Job ID is required'),
     body('status').optional().isIn(['Found', 'Drafting', 'Sent', 'Opened', 'Bounced', 'Replied']),
     body('emailRecipient').optional().isEmail(),
     body('emailDraft').optional().isString(),
     body('tracked').optional().isBoolean(),
-    validate
+    validate,
   ],
-  
+
   // Profile validation
   updateProfile: [
     body('name').optional().trim().isLength({ max: 100 }),
@@ -41,59 +41,75 @@ module.exports = {
     body('phone').optional().trim().isLength({ max: 30 }),
     body('linkedin').optional().trim().isURL(),
     body('github').optional().trim().isURL(),
-    body('tone').optional().isIn(['Professional', 'Confident & Direct', 'Enthusiastic & Friendly', 'Short & Punchy']),
+    body('tone')
+      .optional()
+      .isIn(['Professional', 'Confident & Direct', 'Enthusiastic & Friendly', 'Short & Punchy']),
     body('experienceLevel').optional().trim().isLength({ max: 50 }),
     body('enableFlex').optional().isBoolean(),
     body('aiInstructions').optional().trim().isLength({ max: 1000 }),
-    validate
+    validate,
   ],
-  
+
   // Email discovery validation
   discoverEmail: [
     body('company').trim().notEmpty().withMessage('Company name is required'),
     body('jd').optional().isString(),
     body('failedEmails').optional().isArray(),
-    validate
+    validate,
   ],
-  
+
   // Generate email validation
   generateEmail: [
     body('company').trim().notEmpty().withMessage('Company is required'),
     body('role').trim().notEmpty().withMessage('Role is required'),
     body('jd').optional().isString(),
     body('type').optional().isString(),
-    validate
+    validate,
   ],
-  
+
   // Send email validation
   sendEmail: [
     body('jobId').notEmpty().withMessage('Job ID is required'),
     body('to').isEmail().withMessage('Valid recipient email is required'),
     body('subject').optional().isString(),
     body('body').notEmpty().withMessage('Email body is required'),
-    validate
+    validate,
   ],
-  
+
   // Single draft validation
   singleDraft: [
     body('company').optional().trim().isString(),
     body('role').optional().trim().isString(),
     body('recipientEmail').isEmail().withMessage('Valid recipient email is required'),
     body('jd').notEmpty().withMessage('Job description is required'),
-    validate
+    validate,
   ],
-  
+
   // Fetch jobs validation
   fetchJobs: [
     body('queries').isArray({ min: 1 }).withMessage('At least one query is required'),
     body('queries.*').trim().notEmpty(),
-    validate
+    validate,
   ],
-  
+
   // Follow-up validation
   sendFollowup: [
     body('jobId').notEmpty().withMessage('Job ID is required'),
     body('day').isInt({ min: 1, max: 30 }).withMessage('Day must be between 1 and 30'),
-    validate
-  ]
+    validate,
+  ],
+
+  // Pagination validation
+  pagination: [
+    query('limit')
+      .optional()
+      .isInt({ min: 1, max: 100 })
+      .withMessage('Limit must be between 1 and 100'),
+    query('cursor').optional().isString().withMessage('Cursor must be a string'),
+    query('status')
+      .optional()
+      .isIn(['All', 'Found', 'Drafting', 'Sent', 'Opened', 'Bounced', 'Replied']),
+    query('search').optional().isString(),
+    validate,
+  ],
 };

@@ -2,17 +2,67 @@ const Job = require('../models/Job');
 const Profile = require('../models/Profile');
 const User = require('../models/User');
 const { callAIWithRetry } = require('../services/aiService');
-const { discoverEmailForJob, getCompanyDomain, sanitizeAiInstructions } = require('../services/emailDiscoveryService');
-const { sendEmailViaAPI, buildTrackedHtmlBody, createJobMailOptions, createFollowupMailOptions } = require('../services/emailService');
+const {
+  discoverEmailForJob,
+  getCompanyDomain,
+  sanitizeAiInstructions,
+} = require('../services/emailDiscoveryService');
+const {
+  sendEmailViaAPI,
+  buildTrackedHtmlBody,
+  createJobMailOptions,
+  createFollowupMailOptions,
+} = require('../services/emailService');
 const { fetchAndSaveJobs } = require('../services/jobFetchService');
 const { google } = require('googleapis');
 const config = require('../config');
 const logger = require('../utils/logger');
+const { logAudit, AUDIT_ACTIONS } = require('../services/auditService');
 
 const getJobs = async (req, res) => {
   try {
-    const jobs = await Job.find({ userId: req.user.id }).sort({ publishedAt: -1, createdAt: -1 });
-    res.json(jobs);
+    const { cursor, limit = 20, status, search } = req.query;
+    const userId = req.user.id;
+    const parsedLimit = Math.min(parseInt(limit, 10), 100);
+
+    // Build filter
+    const filter = { userId };
+
+    if (status && status !== 'All') {
+      filter.status = status;
+    }
+
+    if (search) {
+      filter.$or = [
+        { company: { $regex: search, $options: 'i' } },
+        { role: { $regex: search, $options: 'i' } },
+      ];
+    }
+
+    // Cursor-based pagination
+    if (cursor) {
+      const cursorDate = new Date(cursor);
+      if (!isNaN(cursorDate.getTime())) {
+        filter.$or = [
+          { publishedAt: { $lt: cursorDate } },
+          { publishedAt: cursorDate, _id: { $lt: cursor } },
+        ];
+      }
+    }
+
+    const jobs = await Job.find(filter)
+      .sort({ publishedAt: -1, _id: -1 })
+      .limit(parsedLimit + 1); // Fetch one extra to check if there's more
+
+    const hasMore = jobs.length > parsedLimit;
+    if (hasMore) {
+      jobs.pop();
+    } // Remove the extra item
+
+    const nextCursor =
+      hasMore && jobs.length > 0 ? jobs[jobs.length - 1].publishedAt.toISOString() : null;
+
+    res.json({ jobs, nextCursor, hasMore });
   } catch (err) {
     logger.error('[Jobs] Failed to fetch jobs', { error: err.message });
     res.status(500).json({ error: 'Failed to fetch jobs' });
@@ -33,21 +83,29 @@ const createJob = async (req, res) => {
 const updateJob = async (req, res) => {
   const { id } = req.params;
   const { status, emailRecipient, emailDraft, tracked } = req.body;
-  
+
   try {
     const job = await Job.findOne({ id, userId: req.user.id });
-    if (!job) return res.status(404).json({ error: 'Job not found' });
-    
+    if (!job) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+
     if (status) {
       if (status === 'Sent' && job.status !== 'Sent') {
         job.sentAt = new Date();
       }
       job.status = status;
     }
-    if (emailRecipient) job.emailRecipient = emailRecipient;
-    if (emailDraft) job.emailDraft = emailDraft;
-    if (tracked !== undefined) job.tracked = tracked;
-    
+    if (emailRecipient) {
+      job.emailRecipient = emailRecipient;
+    }
+    if (emailDraft) {
+      job.emailDraft = emailDraft;
+    }
+    if (tracked !== undefined) {
+      job.tracked = tracked;
+    }
+
     await job.save();
     res.json(job);
   } catch (err) {
@@ -67,11 +125,13 @@ const deleteJob = async (req, res) => {
 };
 
 const fetchJobs = async (req, res) => {
-  let queries = req.body.queries || [];
-  
+  const queries = req.body.queries || [];
+
   try {
     const totalAdded = await fetchAndSaveJobs(req.user.id, queries);
-    res.json({ message: `Fetched and added ${totalAdded} new jobs across ${queries.length} searches.` });
+    res.json({
+      message: `Fetched and added ${totalAdded} new jobs across ${queries.length} searches.`,
+    });
   } catch (error) {
     logger.error('[Jobs] Error in fetch jobs', { error: error.message });
     res.status(500).json({ error: 'Failed to fetch jobs from Adzuna API' });
@@ -80,8 +140,10 @@ const fetchJobs = async (req, res) => {
 
 const discoverEmail = async (req, res) => {
   const { company, jd, failedEmails = [] } = req.body;
-  if (!company) return res.status(400).json({ error: 'Company name required' });
-  
+  if (!company) {
+    return res.status(400).json({ error: 'Company name required' });
+  }
+
   const domain = getCompanyDomain(company);
   const result = await discoverEmailForJob(company, domain, jd, failedEmails);
   res.json(result);
@@ -89,24 +151,32 @@ const discoverEmail = async (req, res) => {
 
 const generateEmail = async (req, res) => {
   const { company, role, type, jd } = req.body;
-  
+
   if (!config.geminiApiKey && !config.groqApiKey) {
     return res.status(500).json({ error: 'No AI API keys configured' });
   }
-  
+
   try {
     const profile = await Profile.findOne({ userId: req.user.id });
     if (!profile) {
-      return res.status(404).json({ error: 'Profile not found. Please complete your profile first.' });
+      return res
+        .status(404)
+        .json({ error: 'Profile not found. Please complete your profile first.' });
     }
-    
+
     const tone = profile.tone || 'Professional';
-    const skillsText = profile.skills && profile.skills.length > 0 ? `Core Skills: ${profile.skills.join(', ')}` : '';
-    const achText = profile.achievements && profile.achievements.length > 0 ? `Key Achievements:\n- ${profile.achievements.join('\n- ')}` : '';
-    
+    const skillsText =
+      profile.skills && profile.skills.length > 0
+        ? `Core Skills: ${profile.skills.join(', ')}`
+        : '';
+    const achText =
+      profile.achievements && profile.achievements.length > 0
+        ? `Key Achievements:\n- ${profile.achievements.join('\n- ')}`
+        : '';
+
     const targetCompany = company || 'the company';
     const targetRole = role || 'the open role';
-    
+
     const prompt = `You are an elite, highly persuasive software engineer ("${profile.name}") writing a cold email to the hiring manager at ${targetCompany} for the "${targetRole}" position. 
 Context: ${type}
 Tone: ${tone}
@@ -137,29 +207,39 @@ BODY:
 Dear Hiring Manager at [Extracted Company Name],
 
 [Start of email body without any conversational filler or markdown blocks]`;
-    
+
     const response = await callAIWithRetry(prompt);
-    let rawText = response.text.replace(/```(?:html|json|markdown)?\s*([\s\S]*?)```/g, '$1').trim();
-    
+    const rawText = response.text
+      .replace(/```(?:html|json|markdown)?\s*([\s\S]*?)```/g, '$1')
+      .trim();
+
     let extractedCompany = company;
     let extractedRole = role;
     let draftText = rawText;
-    
+
     const companyMatch = rawText.match(/COMPANY:\s*(.*)/i);
     const roleMatch = rawText.match(/ROLE:\s*(.*)/i);
     const bodyMatch = rawText.match(/BODY:\s*([\s\S]*)/i);
-    
-    if (companyMatch) extractedCompany = companyMatch[1].trim() || extractedCompany;
-    if (roleMatch) extractedRole = roleMatch[1].trim() || extractedRole;
-    if (bodyMatch) draftText = bodyMatch[1].trim();
-    
+
+    if (companyMatch) {
+      extractedCompany = companyMatch[1].trim() || extractedCompany;
+    }
+    if (roleMatch) {
+      extractedRole = roleMatch[1].trim() || extractedRole;
+    }
+    if (bodyMatch) {
+      draftText = bodyMatch[1].trim();
+    }
+
     // Clean up any accidental conversational filler from the AI in the draft
-    const emailStartMatch = draftText.match(/(?:Here is the email.*?:|Here's the email.*?:|Here is the cold email.*?:|Subject:.*?\n)\n*/i);
+    const emailStartMatch = draftText.match(
+      /(?:Here is the email.*?:|Here's the email.*?:|Here is the cold email.*?:|Subject:.*?\n)\n*/i
+    );
     if (emailStartMatch) {
       draftText = draftText.substring(emailStartMatch.index + emailStartMatch[0].length);
     }
     draftText = draftText.trim();
-    
+
     res.json({ draft: draftText, company: extractedCompany, role: extractedRole });
   } catch (error) {
     logger.error('[Jobs] Error generating email', { error: error.message });
@@ -169,37 +249,49 @@ Dear Hiring Manager at [Extracted Company Name],
 
 const sendEmail = async (req, res) => {
   const { jobId, to, subject, body } = req.body;
-  
+
   try {
     const job = await Job.findOne({ id: jobId, userId: req.user.id });
     const profile = await Profile.findOne({ userId: req.user.id });
     const user = await User.findById(req.user.id);
-    
+
     if (!profile) {
       return res.status(404).json({ error: 'Profile not found' });
     }
-    
+
     const htmlBody = buildTrackedHtmlBody({
       draftText: body,
       profile: { ...profile.toObject(), userId: req.user.id },
       jobId,
       baseUrl: config.publicUrl,
-      recipientEmail: to
+      recipientEmail: to,
     });
-    
+
     const mailOptions = createJobMailOptions({
       from: user.email || config.emailUser,
       to,
-      subject: subject || (job ? `Application for ${job.role} - ${profile.name}` : 'Job Application'),
+      subject:
+        subject || (job ? `Application for ${job.role} - ${profile.name}` : 'Job Application'),
       htmlBody,
       profile,
-      baseUrl: config.publicUrl
+      baseUrl: config.publicUrl,
     });
-    
+
     logger.info('[Jobs] Sending email', { to, jobId });
     const info = await sendEmailViaAPI(user, mailOptions);
     logger.info('[Jobs] Email sent successfully', { messageId: info.messageId });
-    
+
+    // Audit log
+    await logAudit({
+      userId: req.user.id,
+      action: AUDIT_ACTIONS.EMAIL_SEND,
+      resourceType: 'Job',
+      resourceId: jobId,
+      details: { to, subject, tracked: !!config.publicUrl },
+      req,
+      success: true,
+    });
+
     // Update job status
     if (job) {
       job.status = 'Sent';
@@ -209,8 +301,13 @@ const sendEmail = async (req, res) => {
       job.sentAt = new Date();
       await job.save();
     }
-    
-    res.json({ success: true, tracked: !!config.publicUrl, message: 'Email sent successfully!', messageId: info.messageId });
+
+    res.json({
+      success: true,
+      tracked: !!config.publicUrl,
+      message: 'Email sent successfully!',
+      messageId: info.messageId,
+    });
   } catch (error) {
     logger.error('[Jobs] Error sending email', { error: error.message });
     res.status(500).json({ error: 'Failed to send email. Check credentials.' });
@@ -219,22 +316,30 @@ const sendEmail = async (req, res) => {
 
 const singleDraft = async (req, res) => {
   const { company, role, jd, recipientEmail } = req.body;
-  
+
   try {
     const profile = await Profile.findOne({ userId: req.user.id });
     const user = await User.findById(req.user.id);
-    
+
     if (!profile) {
-      return res.status(404).json({ error: 'Profile not found. Please complete your profile first.' });
+      return res
+        .status(404)
+        .json({ error: 'Profile not found. Please complete your profile first.' });
     }
-    
+
     const tone = profile.tone || 'Professional';
-    const skillsText = profile.skills && profile.skills.length > 0 ? `Core Skills: ${profile.skills.join(', ')}` : '';
-    const achText = profile.achievements && profile.achievements.length > 0 ? `Key Achievements:\n- ${profile.achievements.join('\n- ')}` : '';
-    
+    const skillsText =
+      profile.skills && profile.skills.length > 0
+        ? `Core Skills: ${profile.skills.join(', ')}`
+        : '';
+    const achText =
+      profile.achievements && profile.achievements.length > 0
+        ? `Key Achievements:\n- ${profile.achievements.join('\n- ')}`
+        : '';
+
     const targetCompany = company || 'the company';
     const targetRole = role || 'the open role';
-    
+
     const prompt = `You are an elite, highly persuasive software engineer ("${profile.name}") writing a cold email to the hiring manager at ${targetCompany} for the "${targetRole}" position. 
 Context: Cold Outreach / Networking
 Tone: ${tone}
@@ -265,50 +370,75 @@ BODY:
 Dear Hiring Manager at [Extracted Company Name],
 
 [Start of email body without any conversational filler or markdown blocks]`;
-    
+
     logger.info('[Single Draft] Generating AI draft', { company: targetCompany });
     const response = await callAIWithRetry(prompt);
     logger.info('[Single Draft] Draft generated successfully');
-    
-    let rawText = response.text.replace(/```(?:html|json|markdown)?\s*([\s\S]*?)```/g, '$1').trim();
-    
+
+    const rawText = response.text
+      .replace(/```(?:html|json|markdown)?\s*([\s\S]*?)```/g, '$1')
+      .trim();
+
     let extractedCompany = company || 'Unknown Company';
     let extractedRole = role || 'General Position';
     let draftText = rawText;
-    
+
     const companyMatch = rawText.match(/COMPANY:\s*(.*)/i);
     const roleMatch = rawText.match(/ROLE:\s*(.*)/i);
     const bodyMatch = rawText.match(/BODY:\s*([\s\S]*)/i);
-    
-    if (companyMatch) extractedCompany = companyMatch[1].trim() || extractedCompany;
-    if (roleMatch) extractedRole = roleMatch[1].trim() || extractedRole;
-    if (bodyMatch) draftText = bodyMatch[1].trim();
-    
-    const emailStartMatch = draftText.match(/(?:Here is the email.*?:|Here's the email.*?:|Here is the cold email.*?:|Subject:.*?\n)\n*/i);
+
+    if (companyMatch) {
+      extractedCompany = companyMatch[1].trim() || extractedCompany;
+    }
+    if (roleMatch) {
+      extractedRole = roleMatch[1].trim() || extractedRole;
+    }
+    if (bodyMatch) {
+      draftText = bodyMatch[1].trim();
+    }
+
+    const emailStartMatch = draftText.match(
+      /(?:Here is the email.*?:|Here's the email.*?:|Here is the cold email.*?:|Subject:.*?\n)\n*/i
+    );
     if (emailStartMatch) {
       draftText = draftText.substring(emailStartMatch.index + emailStartMatch[0].length).trim();
     }
-    
+
     // Build and send email
     const htmlBody = buildTrackedHtmlBody({
       draftText,
       profile: { ...profile.toObject(), userId: req.user.id },
       jobId: Date.now().toString() + Math.random().toString().substring(2, 6),
       baseUrl: config.publicUrl,
-      recipientEmail
+      recipientEmail,
     });
-    
+
     const mailOptions = createJobMailOptions({
       from: user.email || config.emailUser,
       to: recipientEmail,
       subject: `Application for ${extractedRole} - ${profile.name}`,
       htmlBody,
       profile,
-      baseUrl: config.publicUrl
+      baseUrl: config.publicUrl,
     });
-    
+
     await sendEmailViaAPI(user, mailOptions);
-    
+
+    // Audit log
+    await logAudit({
+      userId: req.user.id,
+      action: AUDIT_ACTIONS.EMAIL_SEND,
+      resourceType: 'Job',
+      resourceId: newJob.id,
+      details: {
+        to: recipientEmail,
+        subject: `Application for ${extractedRole} - ${profile.name}`,
+        singleDraft: true,
+      },
+      req,
+      success: true,
+    });
+
     // Save to database
     const newJob = new Job({
       userId: req.user.id,
@@ -320,10 +450,10 @@ Dear Hiring Manager at [Extracted Company Name],
       emailRecipient: recipientEmail,
       emailDraft: draftText,
       tracked: !!config.publicUrl,
-      sentAt: new Date()
+      sentAt: new Date(),
     });
     await newJob.save();
-    
+
     res.json({ success: true, message: 'Email sent and job tracked!', job: newJob });
   } catch (error) {
     logger.error('[Jobs] Error in Single Mail Drafter', { error: error.message });
@@ -336,16 +466,21 @@ const testEmail = async (req, res) => {
     const user = await User.findById(req.user.id);
     const profile = await Profile.findOne({ userId: req.user.id });
     const myEmail = user.email || config.emailUser;
-    
-    if (!myEmail) return res.status(500).json({ error: 'EMAIL_USER not configured in backend' });
-    if (!profile) {
-      return res.status(404).json({ error: 'Profile not found. Please complete your profile first.' });
+
+    if (!myEmail) {
+      return res.status(500).json({ error: 'EMAIL_USER not configured in backend' });
     }
-    
-    const company = "TestCorp";
-    const role = "Senior Software Engineer";
-    const jd = "We are looking for a senior developer with 5+ years of experience in React, Node.js, and MongoDB. Must be passionate about AI and automation.";
-    
+    if (!profile) {
+      return res
+        .status(404)
+        .json({ error: 'Profile not found. Please complete your profile first.' });
+    }
+
+    const company = 'TestCorp';
+    const role = 'Senior Software Engineer';
+    const jd =
+      'We are looking for a senior developer with 5+ years of experience in React, Node.js, and MongoDB. Must be passionate about AI and automation.';
+
     // Draft
     const prompt = `You are an elite, highly persuasive software engineer ("${profile.name}") writing a cold email to the hiring manager at ${company} for the "${role}" position. 
 Context: Cold Outreach / Networking
@@ -371,35 +506,48 @@ ${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${sanitizeAiInstructio
     logger.info('[Test Email] Drafting AI content...');
     const response = await callAIWithRetry(prompt);
     logger.info('[Test Email] Draft generated successfully.');
-    
+
     let draftText = response.text;
-    const emailStartMatch = draftText.match(/(?:Here is the email.*?:|Here's the email.*?:|Here is the cold email.*?:|Subject:.*?\n)\n*/i);
+    const emailStartMatch = draftText.match(
+      /(?:Here is the email.*?:|Here's the email.*?:|Here is the cold email.*?:|Subject:.*?\n)\n*/i
+    );
     if (emailStartMatch) {
       draftText = draftText.substring(emailStartMatch.index + emailStartMatch[0].length);
     }
     draftText = draftText.trim();
-    
+
     const htmlBody = buildTrackedHtmlBody({
       draftText,
       profile: { ...profile.toObject(), userId: req.user.id },
       jobId: Date.now().toString(),
       baseUrl: config.publicUrl,
-      recipientEmail: myEmail
+      recipientEmail: myEmail,
     });
-    
+
     const mailOptions = createJobMailOptions({
       from: myEmail,
       to: myEmail,
       subject: `[TEST EMAIL] Application for ${role} at ${company}`,
       htmlBody,
       profile,
-      baseUrl: config.publicUrl
+      baseUrl: config.publicUrl,
     });
-    
+
     logger.info('[Test Email] Sending email via API', { to: myEmail });
     await sendEmailViaAPI(user, mailOptions);
     logger.info('[Test Email] Sent successfully!');
-    
+
+    // Audit log
+    await logAudit({
+      userId: req.user.id,
+      action: AUDIT_ACTIONS.TEST_EMAIL_SEND,
+      resourceType: 'Job',
+      resourceId: testJob.id,
+      details: { to: myEmail, company, role },
+      req,
+      success: true,
+    });
+
     // Save to Database so it shows in the table
     const testJob = new Job({
       userId: req.user.id,
@@ -411,10 +559,10 @@ ${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${sanitizeAiInstructio
       emailDraft: draftText,
       emailRecipient: myEmail,
       tracked: !!config.publicUrl,
-      sentAt: new Date()
+      sentAt: new Date(),
     });
     await testJob.save();
-    
+
     res.json({ success: true, message: 'Test email sent to yourself and added to jobs!' });
   } catch (err) {
     logger.error('[Jobs] Test Email Error', { error: err.message });
@@ -426,18 +574,22 @@ const sendFollowup = async (req, res) => {
   const { jobId, day } = req.body;
   try {
     const job = await Job.findOne({ userId: req.user.id, id: jobId });
-    if (!job) return res.status(404).json({ error: 'Job not found' });
-    
+    if (!job) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+
     const followUp = job.followUps.find(f => f.day === day);
-    if (!followUp) return res.status(404).json({ error: 'Follow up not found' });
-    
+    if (!followUp) {
+      return res.status(404).json({ error: 'Follow up not found' });
+    }
+
     const user = await User.findById(req.user.id);
     const profile = await Profile.findOne({ userId: req.user.id });
-    
+
     if (!profile) {
       return res.status(404).json({ error: 'Profile not found' });
     }
-    
+
     const mailOptions = createFollowupMailOptions({
       from: `"${profile.name}" <${user.email || config.emailUser}>`,
       to: job.emailRecipient,
@@ -445,14 +597,25 @@ const sendFollowup = async (req, res) => {
       draft: followUp.draft,
       profile: { ...profile.toObject(), userId: req.user.id },
       jobId,
-      baseUrl: config.publicUrl
+      baseUrl: config.publicUrl,
     });
-    
+
     await sendEmailViaAPI(user, mailOptions);
-    
+
+    // Audit log
+    await logAudit({
+      userId: req.user.id,
+      action: AUDIT_ACTIONS.FOLLOWUP_SEND,
+      resourceType: 'Job',
+      resourceId: jobId,
+      details: { to: job.emailRecipient, day },
+      req,
+      success: true,
+    });
+
     followUp.sent = true;
     await job.save();
-    
+
     res.json({ success: true, message: 'Follow up sent!' });
   } catch (err) {
     logger.error('[Jobs] Send Follow-up Error', { error: err.message });
@@ -478,5 +641,5 @@ module.exports = {
   singleDraft,
   testEmail,
   sendFollowup,
-  checkBounces
+  checkBounces,
 };

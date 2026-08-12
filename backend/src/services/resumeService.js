@@ -9,7 +9,7 @@ async function parseResume(fileBuffer, originalFilename) {
   // Parse PDF text
   const data = await pdfParse(fileBuffer);
   const resumeText = data.text;
-  
+
   // Extract structured data using AI
   let extractedData = {
     skills: [],
@@ -19,9 +19,9 @@ async function parseResume(fileBuffer, originalFilename) {
     title: '',
     phone: '',
     linkedin: '',
-    github: ''
+    github: '',
   };
-  
+
   try {
     logger.info('[Resume Parse] Extracting details with AI...');
     const prompt = `Extract the core skills (max 10), top 3 achievements, experience level (e.g., Junior, Mid, Senior), full name, current professional title (e.g., Software Engineer), phone number, LinkedIn URL, and GitHub URL from this resume text. 
@@ -33,22 +33,24 @@ ${resumeText.substring(0, 4000)}
     const response = await callAIWithRetry(prompt, 3, 2000);
     let jsonStr = response.text;
     const match = jsonStr.match(/```(?:json)?([\s\S]*?)```/);
-    if (match) jsonStr = match[1].trim();
+    if (match) {
+      jsonStr = match[1].trim();
+    }
     extractedData = JSON.parse(jsonStr);
-    
+
     logger.info('[Resume Parse] Extracted successfully');
   } catch (aiErr) {
     logger.error('[Resume Parse] AI extraction failed', { error: aiErr.message });
   }
-  
+
   return {
     resumeText,
     resumePdf: fileBuffer,
     resumeFilename: originalFilename,
-    ...extractedData
+    ...extractedData,
   };
 }
 
 module.exports = {
-  parseResume
+  parseResume,
 };

@@ -36,7 +36,7 @@ const callAIWithRetry = async (prompt, retries = 5, delayMs = 3000) => {
         logger.warn('[Groq API] Failed', { error: groqErr.message });
       }
     }
-    
+
     // Fall back to Gemini
     if (gemini) {
       try {
@@ -54,7 +54,7 @@ const callAIWithRetry = async (prompt, retries = 5, delayMs = 3000) => {
         logger.warn('[Gemini API] Failed', { error: geminiErr.message });
       }
     }
-    
+
     // Both failed, retry if not last attempt
     if (i < retries - 1) {
       logger.info('[AI] Both engines failed, retrying', { waitMs: delayMs });
@@ -62,12 +62,12 @@ const callAIWithRetry = async (prompt, retries = 5, delayMs = 3000) => {
       delayMs += 3000;
     }
   }
-  
+
   throw new Error(`All AI engines failed after ${retries} attempts.`);
 };
 
 module.exports = {
   callAIWithRetry,
   groq,
-  gemini
+  gemini,
 };

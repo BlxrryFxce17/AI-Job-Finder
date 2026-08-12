@@ -62,6 +62,10 @@ export function useAppLogic() {
       logout();
       throw new Error('Unauthorized');
     }
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || `HTTP error ${res.status}`);
+    }
     return res;
   };
 
@@ -103,7 +107,9 @@ export function useAppLogic() {
     try {
       const r = await apiFetch(`${API_BASE}/api/jobs`);
       const d = await r.json();
-      setJobs(d);
+      // Safely handle the new paginated response format { jobs: [], nextCursor: ... } 
+      // or fallback to the old array format
+      setJobs(Array.isArray(d) ? d : (d.jobs || []));
     } catch { notify('Cannot reach backend', 'error'); }
     finally { setLoading(false); }
   };
@@ -122,8 +128,8 @@ export function useAppLogic() {
       loadJobs(); 
       loadProfile();
       
-      // Auto-refresh jobs every 5 seconds for real-time tracking updates
-      const trackingInterval = setInterval(loadJobs, 5000);
+      // Auto-refresh jobs every 30 seconds for real-time tracking updates
+      const trackingInterval = setInterval(loadJobs, 30000);
       return () => clearInterval(trackingInterval);
     } else {
       setLoading(false);
@@ -296,7 +302,7 @@ export function useAppLogic() {
     }
     setFetching(true);
     try {
-      const r = await apiFetch(`${API_BASE}/api/fetch-jobs`, {
+      const r = await apiFetch(`${API_BASE}/api/jobs/fetch`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ queries: fetchQueries })
       });

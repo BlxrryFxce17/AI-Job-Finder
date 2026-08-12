@@ -4,14 +4,15 @@ const config = require('../config');
 const logger = require('../utils/logger');
 const User = require('../models/User');
 const Profile = require('../models/Profile');
+const { logAudit, AUDIT_ACTIONS } = require('../services/auditService');
 
 // Initialize OAuth2 client
 const isProd = config.nodeEnv === 'production';
 const oauth2Client = new google.auth.OAuth2(
   config.googleClientId,
   config.googleClientSecret,
-  isProd && config.publicUrl 
-    ? `${config.publicUrl}/api/auth/google/callback` 
+  isProd && config.publicUrl
+    ? `${config.publicUrl}/api/auth/google/callback`
     : 'http://localhost:5000/api/auth/google/callback'
 );
 
@@ -20,11 +21,11 @@ const googleAuth = async (req, res) => {
     logger.error('[Auth] Google OAuth2 not configured');
     return res.status(500).json({ error: 'Google OAuth2 is not configured in backend .env' });
   }
-  
+
   const url = oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: ['https://mail.google.com/'],
-    prompt: 'consent'
+    prompt: 'consent',
   });
   res.redirect(url);
 };
@@ -34,16 +35,16 @@ const googleCallback = async (req, res) => {
   if (!code) {
     return res.status(400).send('No code provided');
   }
-  
+
   try {
     const { tokens } = await oauth2Client.getToken(code);
-    
+
     // Automatically fetch their email address
     oauth2Client.setCredentials(tokens);
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
     const profileRes = await gmail.users.getProfile({ userId: 'me' });
     const email = profileRes.data.emailAddress;
-    
+
     let user = await User.findOne({ email });
     if (!user) {
       user = new User({ email });
@@ -52,17 +53,30 @@ const googleCallback = async (req, res) => {
     user.googleAccessToken = tokens.access_token;
     user.googleTokenExpiry = tokens.expiry_date;
     await user.save();
-    
+
     // Create profile if it doesn't exist
     await Profile.findOneAndUpdate(
       { userId: user._id },
       { $setOnInsert: { userId: user._id, emailUser: email } },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
-    
+
     // Generate JWT
-    const token = jwt.sign({ id: user._id, email: user.email }, config.jwtSecret, { expiresIn: '7d' });
-    
+    const token = jwt.sign({ id: user._id, email: user.email }, config.jwtSecret, {
+      expiresIn: '7d',
+    });
+
+    // Audit log
+    await logAudit({
+      userId: user._id,
+      action: AUDIT_ACTIONS.OAUTH_CALLBACK,
+      resourceType: 'User',
+      resourceId: user._id.toString(),
+      details: { email },
+      req,
+      success: true,
+    });
+
     // Redirect back to frontend
     const redirectUrl = config.frontendUrl || 'http://localhost:5173';
     res.redirect(`${redirectUrl}/?token=${token}`);
@@ -74,5 +88,5 @@ const googleCallback = async (req, res) => {
 
 module.exports = {
   googleAuth,
-  googleCallback
+  googleCallback,
 };

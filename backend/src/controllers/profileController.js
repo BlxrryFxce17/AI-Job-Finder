@@ -3,9 +3,10 @@ const Profile = require('../models/Profile');
 const User = require('../models/User');
 const { parseResume } = require('../services/resumeService');
 const logger = require('../utils/logger');
+const { logAudit, AUDIT_ACTIONS } = require('../services/auditService');
 
 // Multer configuration with file size limit (5MB)
-const upload = multer({ 
+const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
   fileFilter: (req, file, cb) => {
@@ -14,24 +15,24 @@ const upload = multer({
     } else {
       cb(new Error('Only PDF files are allowed'), false);
     }
-  }
+  },
 });
 
 const getProfile = async (req, res) => {
   try {
     const profile = await Profile.findOne({ userId: req.user.id });
     const user = await User.findById(req.user.id);
-    
+
     if (!profile) {
       return res.json({});
     }
-    
+
     const profileObj = profile.toObject();
     delete profileObj.resumePdf; // Don't send raw PDF binary to frontend
-    
+
     const responseData = {
       ...profileObj,
-      emailUser: user.email // Attach email from user model for frontend
+      emailUser: user.email, // Attach email from user model for frontend
     };
     res.json(responseData);
   } catch (err) {
@@ -46,19 +47,41 @@ const updateProfile = async (req, res) => {
     if (!profile) {
       return res.status(404).json({ error: 'Profile not found' });
     }
-    
+
     // Safely update only allowed fields
-    const allowedFields = ['name', 'title', 'phone', 'linkedin', 'github', 'tone', 'experienceLevel', 'enableFlex', 'aiInstructions'];
+    const allowedFields = [
+      'name',
+      'title',
+      'phone',
+      'linkedin',
+      'github',
+      'tone',
+      'experienceLevel',
+      'enableFlex',
+      'aiInstructions',
+    ];
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) {
         profile[field] = req.body[field];
       }
     }
-    
+
     await profile.save();
     const user = await User.findById(req.user.id);
     const profileObj = profile.toObject();
     delete profileObj.resumePdf;
+
+    // Audit log
+    await logAudit({
+      userId: req.user.id,
+      action: AUDIT_ACTIONS.PROFILE_UPDATE,
+      resourceType: 'Profile',
+      resourceId: profile._id.toString(),
+      details: { updatedFields: Object.keys(req.body).filter(f => allowedFields.includes(f)) },
+      req,
+      success: true,
+    });
+
     res.json({ ...profileObj, emailUser: user.email });
   } catch (err) {
     logger.error('[Profile] Update error', { error: err.message });
@@ -68,7 +91,9 @@ const updateProfile = async (req, res) => {
 
 const uploadResume = async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
 
     const parsedData = await parseResume(req.file.buffer, req.file.originalname);
 
@@ -82,6 +107,17 @@ const uploadResume = async (req, res) => {
     const profileObj = profile.toObject();
     delete profileObj.resumePdf;
 
+    // Audit log
+    await logAudit({
+      userId: req.user.id,
+      action: AUDIT_ACTIONS.RESUME_UPLOAD,
+      resourceType: 'Profile',
+      resourceId: profile._id.toString(),
+      details: { filename: req.file.originalname, skillsExtracted: parsedData.skills?.length || 0 },
+      req,
+      success: true,
+    });
+
     res.json({ success: true, profile: profileObj });
   } catch (err) {
     logger.error('[Profile] Resume upload error', { error: err.message });
@@ -92,13 +128,15 @@ const uploadResume = async (req, res) => {
 const getResumePdf = async (req, res) => {
   try {
     const { userId } = req.query;
-    if (!userId) return res.status(400).send('Missing userId');
-    
+    if (!userId) {
+      return res.status(400).send('Missing userId');
+    }
+
     const profile = await Profile.findOne({ userId });
     if (!profile || !profile.resumePdf) {
       return res.status(404).send('No resume uploaded.');
     }
-    
+
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="${profile.resumeFilename}"`);
     res.send(profile.resumePdf);
@@ -113,5 +151,5 @@ module.exports = {
   updateProfile,
   uploadResume,
   getResumePdf,
-  upload // Export multer middleware
+  upload, // Export multer middleware
 };
