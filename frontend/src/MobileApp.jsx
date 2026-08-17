@@ -1,6 +1,83 @@
 import React from 'react';
 import { NAV, API_BASE } from './useAppLogic.jsx';
 
+function FollowUpRow({ job, f, API_BASE, token, setJobs, jobs, notify }) {
+  const [expanded, setExpanded] = React.useState(false);
+  return (
+    <div style={{
+      background: 'var(--surface-2)',
+      borderRadius: '8px',
+      border: '1px solid var(--border)',
+      overflow: 'hidden',
+      marginBottom: '8px',
+    }}>
+      <div 
+        style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: '8px', cursor: 'pointer' }}
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div style={{ flex: 1, minWidth: 0, paddingRight: '8px' }}>
+            <div style={{ fontWeight: 600, fontSize: '15px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{job.company}</div>
+            <div style={{ fontSize: '13px', color: 'var(--text-2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{job.role}</div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+            <span style={{
+              background: f.day === 3 ? 'var(--blue-bg)' : 'var(--purple-bg)',
+              color: f.day === 3 ? 'var(--blue)' : 'var(--purple)',
+              padding: '2px 8px', borderRadius: '100px', fontSize: '10px', fontWeight: 600
+            }}>Day {f.day}</span>
+            <div style={{ color: 'var(--text-3)', transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', fontSize: '12px' }}>
+              ▼
+            </div>
+          </div>
+        </div>
+        
+        <div style={{ fontSize: '13px', color: 'var(--text-3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {f.draft.replace(/\n/g, ' ')}
+        </div>
+      </div>
+
+      {expanded && (
+        <div style={{ borderTop: '1px solid var(--border)', background: 'var(--surface-1)' }}>
+          <div style={{ 
+            padding: '16px', 
+            fontSize: '13px', 
+            lineHeight: '1.6', 
+            whiteSpace: 'pre-wrap', 
+            color: 'var(--text-1)' 
+          }}>
+            {f.draft}
+          </div>
+          <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)' }}>
+            <button
+              className="btn btn-primary"
+              style={{ width: '100%', padding: '8px', fontSize: '13px' }}
+              onClick={async (e) => {
+                e.stopPropagation();
+                const res = await fetch(`${API_BASE}/api/send-followup`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                  body: JSON.stringify({ jobId: job.id, day: f.day })
+                });
+                if (res.ok) {
+                  const fToUpdate = job.followUps.find(fu => fu.day === f.day);
+                  if (fToUpdate) fToUpdate.sent = true;
+                  setJobs([...jobs]);
+                  notify('Follow-up sent successfully!', 'success');
+                } else {
+                  notify('Failed to send follow-up', 'error');
+                }
+              }}
+            >
+              Send ✈️
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function MobileApp(props) {
   const {
     tab, setTab,
@@ -94,41 +171,74 @@ export default function MobileApp(props) {
           <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto' }}>
             <h2 style={{ fontSize: '20px', fontWeight: 600 }}>Email Analytics Dashboard</h2>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              
+              <div style={{ background: 'var(--surface-2)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
+                <div style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '8px' }}>Total Sourced</div>
+                <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--text-1)' }}>{jobs.length}</div>
+              </div>
+
               <div style={{ background: 'var(--surface-2)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
                 <div style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '8px' }}>Total Sent</div>
-                <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--blue)' }}>{jobs.filter(j => j.status === 'Sent' || j.status === 'Opened').length}</div>
+                <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--blue)' }}>{jobs.filter(j => j.status === 'Sent' || j.status === 'Opened' || j.status === 'Bounced').length}</div>
               </div>
+
               <div style={{ background: 'var(--surface-2)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
                 <div style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '8px' }}>Total Opened</div>
                 <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--yellow)' }}>{jobs.filter(j => j.status === 'Opened').length}</div>
               </div>
+
+              <div style={{ background: 'var(--surface-2)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
+                <div style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '8px' }}>Total Bounced</div>
+                <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--error)' }}>{jobs.filter(j => j.status === 'Bounced').length}</div>
+              </div>
+
               <div style={{ background: 'var(--surface-2)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
                 <div style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '8px' }}>Links Clicked</div>
                 <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--purple)' }}>{jobs.reduce((acc, job) => acc + (job.clickedLinks ? job.clickedLinks.length : 0), 0)}</div>
               </div>
+
+              <div style={{ background: 'var(--surface-2)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
+                <div style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '8px' }}>Follow-Ups</div>
+                <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--accent)' }}>{jobs.reduce((acc, job) => acc + (job.followUps ? job.followUps.filter(f => f.sent).length : 0), 0)}</div>
+              </div>
+
               <div style={{ background: 'var(--surface-2)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
                 <div style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '8px' }}>Open Rate</div>
                 <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--green)' }}>
-                  {jobs.filter(j => j.status === 'Sent' || j.status === 'Opened').length > 0 
-                    ? Math.round((jobs.filter(j => j.status === 'Opened').length / jobs.filter(j => j.status === 'Sent' || j.status === 'Opened').length) * 100) + '%'
+                  {jobs.filter(j => j.status === 'Sent' || j.status === 'Opened' || j.status === 'Bounced').length > 0 
+                    ? Math.round((jobs.filter(j => j.status === 'Opened').length / jobs.filter(j => j.status === 'Sent' || j.status === 'Opened' || j.status === 'Bounced').length) * 100) + '%'
+                    : '0%'}
+                </div>
+              </div>
+
+              <div style={{ background: 'var(--surface-2)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
+                <div style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '8px' }}>CTR</div>
+                <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--green)' }}>
+                  {jobs.filter(j => j.status === 'Sent' || j.status === 'Opened' || j.status === 'Bounced').length > 0 
+                    ? Math.round((jobs.filter(j => j.clickedLinks && j.clickedLinks.length > 0).length / jobs.filter(j => j.status === 'Sent' || j.status === 'Opened' || j.status === 'Bounced').length) * 100) + '%'
                     : '0%'}
                 </div>
               </div>
             </div>
             
-            <h3 style={{ fontSize: '16px', marginTop: '12px' }}>Recently Opened</h3>
+            <h3 style={{ fontSize: '16px', marginTop: '12px' }}>Recent Activity</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {jobs.filter(j => j.status === 'Opened').slice(0, 5).map(job => (
+              {jobs.filter(j => ['Sent', 'Opened', 'Bounced'].includes(j.status)).slice(0, 5).map(job => (
                 <div key={job.id} style={{ background: 'var(--surface-2)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <div style={{ fontWeight: 600, fontSize: '14px' }}>{job.company}</div>
                     <div style={{ fontSize: '12px', color: 'var(--text-2)' }}>{job.role} - {job.emailRecipient}</div>
                   </div>
-                  <div style={{ color: 'var(--yellow)', fontSize: '12px', fontWeight: 600 }}>Opened</div>
+                  <div style={{ 
+                    color: job.status === 'Opened' ? 'var(--yellow)' : job.status === 'Sent' ? 'var(--blue)' : 'var(--error)', 
+                    fontSize: '12px', fontWeight: 600 
+                  }}>
+                    {job.status}
+                  </div>
                 </div>
               ))}
-              {jobs.filter(j => j.status === 'Opened').length === 0 && (
-                <div style={{ color: 'var(--text-3)', fontStyle: 'italic', fontSize: '13px' }}>No emails have been opened yet.</div>
+              {jobs.filter(j => ['Sent', 'Opened', 'Bounced'].includes(j.status)).length === 0 && (
+                <div style={{ color: 'var(--text-3)', fontStyle: 'italic', fontSize: '13px' }}>No emails have been sent yet.</div>
               )}
             </div>
           </div>
@@ -136,45 +246,50 @@ export default function MobileApp(props) {
 
         {tab === 'followups' && (
           <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto' }}>
-            <h2 style={{ fontSize: '20px', fontWeight: 600 }}>Pending Follow Ups</h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 style={{ fontSize: '20px', fontWeight: 600, margin: 0 }}>Follow Ups</h2>
+              <button className="btn btn-primary" style={{ padding: '8px 12px', fontSize: '13px' }} onClick={async () => {
+                setFetching(true);
+                try {
+                  const res = await fetch(`${API_BASE}/api/check-followups`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` }
+                  });
+                  const result = await res.json();
+                  if (result.success) {
+                    notify(`Drafted ${result.draftedCount} new follow-ups.`);
+                    loadJobs();
+                  } else {
+                    notify(result.error || 'Failed to check', 'error');
+                  }
+                } catch (err) {
+                  notify('An error occurred', 'error');
+                }
+                setFetching(false);
+              }} disabled={fetching}>
+                {fetching ? <span className="spinner"></span> : 'Check Now'}
+              </button>
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
               {jobs.flatMap(job => 
                 (job.followUps || [])
                   .filter(f => !f.sent)
                   .map(f => (
-                    <div key={`${job.id}-${f.day}`} style={{ background: 'var(--surface-2)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
-                        <div>
-                          <div style={{ fontWeight: 600, fontSize: '16px' }}>{job.company}</div>
-                          <div style={{ fontSize: '13px', color: 'var(--text-2)' }}>Day {f.day} Follow Up</div>
-                        </div>
-                        <button 
-                          className="btn btn-primary"
-                          style={{ padding: '6px 12px', fontSize: '13px' }}
-                          onClick={async () => {
-                            const res = await fetch(`${API_BASE}/api/send-followup`, {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                              body: JSON.stringify({ jobId: job.id, day: f.day })
-                            });
-                            if (res.ok) {
-                              const fToUpdate = job.followUps.find(fu => fu.day === f.day);
-                              if(fToUpdate) fToUpdate.sent = true;
-                              setJobs([...jobs]);
-                            }
-                          }}
-                        >
-                          Send
-                        </button>
-                      </div>
-                      <div style={{ background: 'var(--surface-3)', padding: '12px', borderRadius: '8px', fontSize: '13px', whiteSpace: 'pre-wrap', color: 'var(--text-2)' }}>
-                        {f.draft}
-                      </div>
-                    </div>
+                    <FollowUpRow 
+                      key={`${job.id}-${f.day}`} 
+                      job={job} 
+                      f={f} 
+                      API_BASE={API_BASE} 
+                      token={localStorage.getItem('token') || ''} 
+                      setJobs={setJobs} 
+                      jobs={jobs} 
+                      notify={notify} 
+                    />
                   ))
               )}
               {jobs.flatMap(j => (j.followUps || []).filter(f => !f.sent)).length === 0 && (
-                <div style={{ color: 'var(--text-3)', fontStyle: 'italic', fontSize: '14px' }}>No pending follow ups at this time.</div>
+                <div style={{ color: 'var(--text-3)', fontStyle: 'italic', fontSize: '14px', textAlign: 'center', marginTop: '20px' }}>No pending follow ups at this time.</div>
               )}
             </div>
           </div>

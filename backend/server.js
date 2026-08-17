@@ -111,7 +111,7 @@ const callAIWithRetry = async (prompt, retries = 5, delayMs = 3000) => {
       console.log(`[AI] Attempt ${i + 1}/${retries}: Trying Groq (Llama-3)...`);
       const completion = await groq.chat.completions.create({
         messages: [{ role: 'user', content: prompt }],
-        model: 'llama-3.1-8b-instant',
+        model: 'openai/gpt-oss-20b',
       });
       return { text: completion.choices[0]?.message?.content || '' };
     } catch (groqErr) {
@@ -178,16 +178,16 @@ app.get('/api/auth/google', (req, res) => {
 app.get('/api/auth/google/callback', async (req, res) => {
   const { code } = req.query;
   if (!code) return res.status(400).send('No code provided');
-  
+
   try {
     const { tokens } = await oauth2Client.getToken(code);
-    
+
     // Automatically fetch their email address
     oauth2Client.setCredentials(tokens);
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
     const profileRes = await gmail.users.getProfile({ userId: 'me' });
     const email = profileRes.data.emailAddress;
-    
+
     let user = await User.findOne({ email });
     if (!user) {
       user = new User({ email });
@@ -196,16 +196,16 @@ app.get('/api/auth/google/callback', async (req, res) => {
     user.googleAccessToken = tokens.access_token;
     user.googleTokenExpiry = tokens.expiry_date;
     await user.save();
-    
+
     // Create profile if it doesn't exist
     await getProfile(user._id);
-    
+
     // Generate JWT
     const token = jwt.sign({ id: user._id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
-    
+
     // Redirect back to frontend
     const redirectUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    res.redirect(`${redirectUrl}/?token=${token}`); 
+    res.redirect(`${redirectUrl}/?token=${token}`);
   } catch (err) {
     console.error('OAuth callback error:', err);
     res.status(500).send('Authentication failed');
@@ -214,7 +214,7 @@ app.get('/api/auth/google/callback', async (req, res) => {
 
 async function sendEmailViaAPI(user, mailOptions) {
   const userEmail = user.email || process.env.EMAIL_USER;
-  
+
   if (user.googleRefreshToken) {
     // Render blocks SMTP ports 25, 465, 587. We MUST use the Gmail API (Port 443 HTTP)
     const oauth2Client = new google.auth.OAuth2(
@@ -223,18 +223,18 @@ async function sendEmailViaAPI(user, mailOptions) {
     );
     oauth2Client.setCredentials({ refresh_token: user.googleRefreshToken });
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-    
+
     // Compile raw MIME string
     const mail = new MailComposer(mailOptions);
     const messageBuffer = await mail.compile().build();
-    
+
     // Base64URL encode the message
     const encodedMessage = messageBuffer
       .toString('base64')
       .replace(/\+/g, '-')
       .replace(/\//g, '_')
       .replace(/=+$/, '');
-      
+
     const res = await gmail.users.messages.send({
       userId: 'me',
       requestBody: {
@@ -261,7 +261,7 @@ app.get('/api/profile', requireAuth, async (req, res) => {
     const user = await User.findById(req.user.id);
     const profileObj = profile.toObject();
     delete profileObj.resumePdf; // Don't send raw PDF binary to frontend
-    
+
     const responseData = {
       ...profileObj,
       emailUser: user.email // Attach email from user model for frontend
@@ -275,7 +275,7 @@ app.get('/api/profile', requireAuth, async (req, res) => {
 app.put('/api/profile', requireAuth, async (req, res) => {
   try {
     const profile = await getProfile(req.user.id);
-    
+
     // Safely update only allowed fields
     const allowedFields = ['name', 'title', 'phone', 'linkedin', 'github', 'tone', 'experienceLevel', 'enableFlex', 'aiInstructions'];
     for (const field of allowedFields) {
@@ -283,7 +283,7 @@ app.put('/api/profile', requireAuth, async (req, res) => {
         profile[field] = req.body[field];
       }
     }
-    
+
     await profile.save();
     const user = await User.findById(req.user.id);
     const profileObj = profile.toObject();
@@ -304,7 +304,7 @@ app.post('/api/profile/resume', requireAuth, upload.single('resume'), async (req
 
     const profile = await getProfile(req.user.id);
     profile.resumeText = data.text;
-    
+
     try {
       console.log('[Resume Parse] Extracting details with AI...');
       const prompt = `Extract the core skills (max 10), top 3 achievements, experience level (e.g., Junior, Mid, Senior), full name, current professional title (e.g., Software Engineer), phone number, LinkedIn URL, and GitHub URL from this resume text. 
@@ -318,17 +318,17 @@ ${data.text.substring(0, 4000)}
       const match = jsonStr.match(/```(?:json)?([\s\S]*?)```/);
       if (match) jsonStr = match[1].trim();
       const parsedData = JSON.parse(jsonStr);
-      
+
       profile.skills = parsedData.skills || [];
       profile.achievements = parsedData.achievements || [];
       profile.experienceLevel = parsedData.experienceLevel || '';
-      
+
       if (parsedData.name) profile.name = parsedData.name;
       if (parsedData.title) profile.title = parsedData.title;
       if (parsedData.phone) profile.phone = parsedData.phone;
       if (parsedData.linkedin) profile.linkedin = parsedData.linkedin;
       if (parsedData.github) profile.github = parsedData.github;
-      
+
       console.log('[Resume Parse] Extracted successfully.');
     } catch (aiErr) {
       console.error('[Resume Parse] AI extraction failed:', aiErr.message);
@@ -434,16 +434,16 @@ app.post('/api/fetch-jobs', requireAuth, async (req, res) => {
     for (const what of queries) {
       const page = Math.floor(Math.random() * 5) + 1;
       const url = `https://api.adzuna.com/v1/api/jobs/in/search/${page}?app_id=${process.env.ADZUNA_APP_ID}&app_key=${process.env.ADZUNA_APP_KEY}&what=${encodeURIComponent(what)}&results_per_page=20&max_days_old=30&sort_by=date`;
-      
+
       try {
         const response = await axios.get(url);
         const apiJobs = response.data.results || [];
-        
+
         for (const job of apiJobs) {
           const company = job.company?.display_name || 'Unknown';
           const role = job.title || 'Unknown Role';
           const jd = job.description || 'No description available';
-    
+
           // Avoid duplicates
           const exists = await Job.findOne({ company, role, userId: req.user.id });
           if (!exists) {
@@ -559,16 +559,106 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = []) {
 app.post('/api/discover-email', requireAuth, async (req, res) => {
   const { company, jd, failedEmails = [] } = req.body;
   if (!company) return res.status(400).json({ error: 'Company name required' });
-  const domain = company.toLowerCase().replace(/[^a-z0-9]/g, '') + '.com';
+  
+  let domain = company.toLowerCase().replace(/[^a-z0-9]/g, '') + '.com';
+  try {
+    const clearbitRes = await axios.get(`https://autocomplete.clearbit.com/v1/companies/suggest?query=${encodeURIComponent(company)}`);
+    if (clearbitRes.data && clearbitRes.data.length > 0) {
+      domain = clearbitRes.data[0].domain;
+      console.log(`[Email Discovery] Found real domain for ${company}: ${domain}`);
+    }
+  } catch (err) {
+    console.warn(`[Email Discovery] Clearbit API failed for ${company}, using fallback domain: ${domain}`);
+  }
 
   const result = await discoverEmailForJob(company, domain, jd, failedEmails);
   res.json(result);
 });
 
-// IMAP Bounce Checker (Disabled for OAuth2 Multi-Tenant)
+// Gmail API Bounce Checker
 app.get('/api/check-bounces', requireAuth, async (req, res) => {
-  // TODO: Refactor to use Gmail API instead of IMAP with App Passwords
-  res.json({ newBounces: 0 });
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user || !user.googleRefreshToken) {
+      return res.json({ newBounces: 0 });
+    }
+
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET
+    );
+    oauth2Client.setCredentials({ refresh_token: user.googleRefreshToken });
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+    // Search for unread bounce messages
+    const searchRes = await gmail.users.messages.list({
+      userId: 'me',
+      q: 'from:mailer-daemon@googlemail.com is:unread',
+    });
+
+    const messages = searchRes.data.messages || [];
+    let newBouncesCount = 0;
+
+    for (const msg of messages) {
+      try {
+        const msgRes = await gmail.users.messages.get({
+          userId: 'me',
+          id: msg.id,
+          format: 'full',
+        });
+
+        const headers = msgRes.data.payload.headers;
+        let failedRecipient = null;
+
+        // Try to find X-Failed-Recipients header first
+        const xFailed = headers.find(h => h.name.toLowerCase() === 'x-failed-recipients');
+        if (xFailed) {
+          failedRecipient = xFailed.value;
+        } else {
+          // Fallback to searching the snippet for common patterns
+          const snippet = msgRes.data.snippet || '';
+          const match = snippet.match(/Delivery to the following recipient failed permanently:\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i);
+          if (match) {
+            failedRecipient = match[1];
+          }
+        }
+
+        if (failedRecipient) {
+          failedRecipient = failedRecipient.trim().toLowerCase();
+          
+          // Find and update the job in MongoDB
+          const updatedJobs = await Job.updateMany(
+            { 
+              userId: user._id, 
+              emailRecipient: new RegExp(`^${failedRecipient}$`, 'i'),
+              status: { $ne: 'Bounced' }
+            },
+            { $set: { status: 'Bounced' } }
+          );
+
+          if (updatedJobs.modifiedCount > 0) {
+            newBouncesCount += updatedJobs.modifiedCount;
+          }
+        }
+
+        // Remove the UNREAD label so we don't process it again
+        await gmail.users.messages.modify({
+          userId: 'me',
+          id: msg.id,
+          requestBody: {
+            removeLabelIds: ['UNREAD']
+          }
+        });
+      } catch (innerErr) {
+        console.error('Error processing bounce message:', innerErr);
+      }
+    }
+
+    res.json({ newBounces: newBouncesCount });
+  } catch (err) {
+    console.error('Error in /api/check-bounces:', err);
+    res.status(500).json({ error: 'Failed to check bounces' });
+  }
 });
 
 app.post('/api/test-email', requireAuth, async (req, res) => {
@@ -581,7 +671,7 @@ app.post('/api/test-email', requireAuth, async (req, res) => {
     const company = "TestCorp";
     const role = "Senior Software Engineer";
     const jd = "We are looking for a senior developer with 5+ years of experience in React, Node.js, and MongoDB. Must be passionate about AI and automation.";
-    
+
     // Draft
     const prompt = `You are an elite, highly persuasive software engineer ("${profile.name}") writing a cold email to the hiring manager at ${company} for the "${role}" position. 
 Context: Cold Outreach / Networking
@@ -607,7 +697,7 @@ ${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructio
     console.log('[Test Email] Drafting AI content...');
     const response = await callAIWithRetry(prompt);
     console.log('[Test Email] Draft generated successfully.');
-    
+
     let draftText = response.text;
     const emailStartMatch = draftText.match(/(?:Here is the email.*?:|Here's the email.*?:|Here is the cold email.*?:|Subject:.*?\n)\n*/i);
     if (emailStartMatch) {
@@ -686,20 +776,52 @@ app.post('/api/send-followup', requireAuth, async (req, res) => {
   try {
     const job = await Job.findOne({ userId: req.user.id, id: jobId });
     if (!job) return res.status(404).json({ error: 'Job not found' });
-    
+
     const followUp = job.followUps.find(f => f.day === day);
     if (!followUp) return res.status(404).json({ error: 'Follow up not found' });
 
     const user = await User.findById(req.user.id);
     const profile = await getProfile(req.user.id);
 
+    let formattedDraft = followUp.draft.replace(/\n/g, '<br/>');
+    const baseUrl = process.env.PUBLIC_URL;
+    const trackClick = (url) => (baseUrl && url) ? `${baseUrl}/api/track-click/${job.id}?url=${encodeURIComponent(url)}` : (url || '');
+    const linkedInUrl = trackClick(profile.linkedin);
+    const githubUrl = trackClick(profile.github);
+    const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${job.id}" width="1" height="1" style="display:none;" />` : '';
+
+    if (baseUrl) {
+      const resumeLinkUrl = trackClick(`${baseUrl}/api/profile/resume-pdf?userId=${user._id}`);
+      formattedDraft = formattedDraft.replace('You can view my CV here.', `<a href="${resumeLinkUrl}">You can view my CV here.</a>`);
+    } else {
+      formattedDraft = formattedDraft.replace('You can view my CV here.', 'I have attached my CV to this email for your reference.');
+    }
+
+    const htmlBody = `
+      <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
+        ${formattedDraft}
+        <br/><br/>
+        Yours Sincerely,<br/>
+        <b>${profile.name}</b><br/>
+        ${profile.title}<br/>
+        📞 ${profile.phone}<br/>
+        🔗 <a href="${linkedInUrl}">LinkedIn</a> | 💻 <a href="${githubUrl}">GitHub</a>
+        <br/>
+        ${trackingPixel}
+      </div>
+    `;
+
     const mailOptions = {
       from: `"${profile.name}" <${user.email || process.env.EMAIL_USER}>`,
       to: job.emailRecipient,
       subject: `Re: Application for ${job.role} - ${profile.name}`,
       text: followUp.draft,
-      html: `<p style="white-space: pre-wrap;">${followUp.draft.replace(/\n/g, '<br>')}</p>`,
+      html: htmlBody,
+      attachments: []
     };
+    if (!baseUrl && profile.resumePdf) {
+      mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
+    }
 
     await sendEmailViaAPI(user, mailOptions);
 
@@ -756,7 +878,8 @@ ${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructio
 COMPANY: [Extracted Company Name or "Unknown Company"]
 ROLE: [Extracted Job Title or "General Position"]
 BODY:
-Dear Hiring Manager at [Extracted Company Name],
+[If company is unknown/generic, start with: Dear Hiring Manager,]
+[Otherwise start with: Dear Hiring Manager at [Extracted Company Name],]
 
 [Start of email body without any conversational filler or markdown blocks]`;
 
@@ -781,7 +904,7 @@ Dear Hiring Manager at [Extracted Company Name],
       draftText = draftText.substring(emailStartMatch.index + emailStartMatch[0].length);
     }
     draftText = draftText.trim();
-    
+
     res.json({ draft: draftText, company: extractedCompany, role: extractedRole });
   } catch (error) {
     console.error('Error generating email:', error);
@@ -796,7 +919,7 @@ app.post('/api/send-email', requireAuth, async (req, res) => {
     const job = await Job.findOne({ id: jobId, userId: req.user.id });
     const profile = await getProfile(req.user.id);
     const user = await User.findById(req.user.id);
-    
+
     const baseUrl = process.env.PUBLIC_URL;
 
     // Generate Tracked Links only if PUBLIC_URL is set
@@ -853,11 +976,11 @@ app.post('/api/send-email', requireAuth, async (req, res) => {
 // Single Mail Drafter Endpoint
 app.post('/api/single-draft', requireAuth, async (req, res) => {
   const { company, role, jd, recipientEmail } = req.body;
-  
+
   try {
     const profile = await getProfile(req.user.id);
     const user = await User.findById(req.user.id);
-    
+
     const tone = profile.tone || 'Professional';
     const skillsText = profile.skills && profile.skills.length > 0 ? `Core Skills: ${profile.skills.join(', ')}` : '';
     const achText = profile.achievements && profile.achievements.length > 0 ? `Key Achievements:\n- ${profile.achievements.join('\n- ')}` : '';
@@ -892,14 +1015,15 @@ ${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructio
 COMPANY: [Extracted Company Name or "Unknown Company"]
 ROLE: [Extracted Job Title or "General Position"]
 BODY:
-Dear Hiring Manager at [Extracted Company Name],
+[If company is unknown/generic, start with: Dear Hiring Manager,]
+[Otherwise start with: Dear Hiring Manager at [Extracted Company Name],]
 
 [Start of email body without any conversational filler or markdown blocks]`;
 
     console.log('[Single Draft] Generating AI draft for', targetCompany, '...');
     const response = await callAIWithRetry(prompt);
     console.log('[Single Draft] Draft generated successfully.');
-    
+
     let rawText = response.text.replace(/```(?:html|json|markdown)?\s*([\s\S]*?)```/g, '$1').trim();
 
     let extractedCompany = company || 'Unknown Company';
@@ -921,7 +1045,7 @@ Dear Hiring Manager at [Extracted Company Name],
 
     const baseUrl = process.env.PUBLIC_URL;
     let formattedDraft = draftText.replace(/\n/g, '<br/>');
-    
+
     const jobId = Date.now().toString() + Math.random().toString().substring(2, 6);
     const trackClick = (url) => (baseUrl && url) ? `${baseUrl}/api/track-click/${jobId}?url=${encodeURIComponent(url)}` : (url || '');
     const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${jobId}" width="1" height="1" style="display:none;" />` : '';
@@ -995,7 +1119,7 @@ app.get('/api/track-open/:jobId', async (req, res) => {
 
   try {
     const job = await Job.findOne({ id: jobId });
-    
+
     // Time-Delay check (ignore opens within 15 seconds of sending)
     const timeSinceSent = job && job.sentAt ? Date.now() - job.sentAt.getTime() : 16000;
 
@@ -1054,7 +1178,7 @@ app.get('/api/track-click/:jobId', async (req, res) => {
 
 async function checkGmailForReply(user, recipientEmail) {
   if (!user.googleRefreshToken) return false;
-  
+
   const oauth2Client = new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET
@@ -1068,7 +1192,7 @@ async function checkGmailForReply(user, recipientEmail) {
       q: `from:${recipientEmail} to:me`,
       maxResults: 1
     });
-    
+
     return res.data.messages && res.data.messages.length > 0;
   } catch (err) {
     console.error('Error checking Gmail for reply:', err);
@@ -1076,29 +1200,114 @@ async function checkGmailForReply(user, recipientEmail) {
   }
 }
 
+app.post('/api/check-followups', requireAuth, async (req, res) => {
+  console.log('[Manual Check] Starting manual follow-up check for user', req.user.id);
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user || !user.googleRefreshToken) {
+      return res.status(400).json({ error: 'No Google account connected for checking replies' });
+    }
+    const profile = await getProfile(user._id);
+    if (!profile) return res.status(404).json({ error: 'Profile not found' });
+
+    const jobs = await Job.find({
+      userId: user._id,
+      status: { $in: ['Sent', 'Opened'] }
+    });
+
+    let draftedCount = 0;
+
+    for (const job of jobs) {
+      if (!job.emailRecipient) continue;
+
+      const daysSinceSent = Math.floor((Date.now() - new Date(job.sentAt || job.createdAt).getTime()) / (1000 * 60 * 60 * 24));
+      const targetDay = daysSinceSent >= 6 ? 6 : daysSinceSent >= 3 ? 3 : 0;
+
+      if (targetDay === 0) continue;
+
+      const existingFollowUp = job.followUps && job.followUps.find(f => f.day === targetDay);
+      if (existingFollowUp) continue;
+
+      const hasReplied = await checkGmailForReply(user, job.emailRecipient);
+      if (hasReplied) {
+        job.status = 'Replied';
+        await job.save();
+        continue;
+      }
+
+      console.log(`[Manual Check] Generating Day ${targetDay} follow-up for ${job.company}`);
+      const companyTarget = job.company && job.company.toLowerCase() !== 'unknown company' && job.company.toLowerCase() !== 'unknown' ? `at ${job.company}` : '';
+      const prompt = `Write a short, polite, and confident Day ${targetDay} follow-up email to the hiring manager ${companyTarget} for the ${job.role} position.
+Original Email Context:
+"""
+${job.emailDraft}
+"""
+Guidelines:
+- If Day 3: Reiterate interest and ask if they need more info.
+- If Day 6: Final polite bump, mentioning you're still highly interested.
+- Tone: ${profile.tone || 'Professional'}
+- Output ONLY the body of the email, starting with exactly "Dear Hiring Manager at ${job.company},". No subject, no sign-off, no markdown blocks.`;
+
+      try {
+        const resAI = await callAIWithRetry(prompt, 3, 2000);
+        let draft = resAI.text.replace(/\`\`\`(?:html|json|markdown)?\s*([\s\S]*?)\`\`\`/g, '$1').trim();
+
+        let formattedDraft = draft.replace(/\n/g, '<br/>');
+        const baseUrl = process.env.PUBLIC_URL;
+        const trackClick = (url) => (baseUrl && url) ? `${baseUrl}/api/track-click/${job.id}?url=${encodeURIComponent(url)}` : (url || '');
+        const linkedInUrl = trackClick(profile.linkedin);
+        const githubUrl = trackClick(profile.github);
+        const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${job.id}" width="1" height="1" style="display:none;" />` : '';
+
+        if (baseUrl) {
+          const resumeLinkUrl = trackClick(`${baseUrl}/api/profile/resume-pdf?userId=${user._id}`);
+          formattedDraft = formattedDraft.replace('You can view my CV here.', `<a href="${resumeLinkUrl}">You can view my CV here.</a>`);
+        } else {
+          formattedDraft = formattedDraft.replace('You can view my CV here.', 'I have attached my CV to this email for your reference.');
+        }
+
+        if (!job.followUps) job.followUps = [];
+        job.followUps.push({
+          draft,
+          day: targetDay,
+          sent: false
+        });
+        await job.save();
+        draftedCount++;
+      } catch (err) {
+        console.error('[Manual Check] Failed to generate follow-up:', err);
+      }
+    }
+    res.json({ success: true, draftedCount });
+  } catch (err) {
+    console.error('[Manual Check] Error:', err);
+    res.status(500).json({ error: 'Failed to check follow-ups manually' });
+  }
+});
+
 // Follow-Up Cron Job: Runs daily at 9:00 AM
 cron.schedule('0 9 * * *', async () => {
   console.log('[Cron] Starting daily follow-up check...');
   try {
     const users = await User.find({ googleRefreshToken: { $exists: true, $ne: null } });
-    
+
     for (const user of users) {
       const profile = await getProfile(user._id);
       if (!profile) continue;
-      
-      const jobs = await Job.find({ 
-        userId: user._id, 
-        status: { $in: ['Sent', 'Opened'] } 
+
+      const jobs = await Job.find({
+        userId: user._id,
+        status: { $in: ['Sent', 'Opened'] }
       });
 
       for (const job of jobs) {
         if (!job.emailRecipient) continue;
-        
-        const daysSinceSent = Math.floor((Date.now() - new Date(job.updatedAt).getTime()) / (1000 * 60 * 60 * 24));
+
+        const daysSinceSent = Math.floor((Date.now() - new Date(job.sentAt || job.createdAt).getTime()) / (1000 * 60 * 60 * 24));
         const targetDay = daysSinceSent >= 6 ? 6 : daysSinceSent >= 3 ? 3 : 0;
-        
+
         if (targetDay === 0) continue;
-        
+
         // Check if already drafted/sent this follow-up
         const existingFollowUp = job.followUps && job.followUps.find(f => f.day === targetDay);
         if (existingFollowUp) continue;
@@ -1113,7 +1322,8 @@ cron.schedule('0 9 * * *', async () => {
 
         // Generate follow-up draft
         console.log(`[Cron] Generating Day ${targetDay} follow-up for ${job.company}`);
-        const prompt = `Write a short, polite, and confident Day ${targetDay} follow-up email to the hiring manager at ${job.company} for the ${job.role} position.
+        const companyTarget = job.company && job.company.toLowerCase() !== 'unknown company' && job.company.toLowerCase() !== 'unknown' ? `at ${job.company}` : '';
+        const prompt = `Write a short, polite, and confident Day ${targetDay} follow-up email to the hiring manager ${companyTarget} for the ${job.role} position.
 Original Email Context:
 """
 ${job.emailDraft}
@@ -1127,7 +1337,7 @@ Guidelines:
         try {
           const res = await callAIWithRetry(prompt, 3, 2000);
           let draft = res.text.replace(/```(?:html|json|markdown)?\s*([\s\S]*?)```/g, '$1').trim();
-          
+
           let formattedDraft = draft.replace(/\n/g, '<br/>');
           const baseUrl = process.env.PUBLIC_URL;
           const trackClick = (url) => (baseUrl && url) ? `${baseUrl}/api/track-click/${job.id}?url=${encodeURIComponent(url)}` : (url || '');
@@ -1156,27 +1366,14 @@ Guidelines:
             </div>
           `;
 
-          const mailOptions = {
-            from: user.email || process.env.EMAIL_USER,
-            to: job.emailRecipient,
-            subject: `Follow-up: Application for ${job.role} - ${profile.name}`,
-            html: htmlBody,
-            attachments: []
-          };
-          if (!baseUrl && profile.resumePdf) {
-            mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
-          }
-
-          await sendEmailViaAPI(user, mailOptions);
-          
           if (!job.followUps) job.followUps = [];
           job.followUps.push({
             draft,
             day: targetDay,
-            sent: true
+            sent: false
           });
           await job.save();
-          console.log(`[Cron] Successfully sent Day ${targetDay} follow-up for ${job.company}`);
+          console.log(`[Cron] Successfully drafted Day ${targetDay} follow-up for ${job.company}`);
         } catch (err) {
           console.error('[Cron] Failed to generate follow-up:', err);
         }

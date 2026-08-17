@@ -116,6 +116,7 @@ body {
 .dashboard-container {
   display: flex;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 }
 
@@ -174,6 +175,7 @@ body {
   overflow-y: auto;
   overflow-x: hidden;
   height: 100vh;
+  height: 100dvh;
   width: 100%;
 }
 
@@ -793,6 +795,12 @@ input[type="checkbox"]:checked::after {
   border: 1px solid var(--blue);
 }
 
+.badge.replied {
+  background: var(--green-bg);
+  color: var(--green);
+  border: 1px solid var(--green);
+}
+
 .badge.bounced {
   background: rgba(239, 68, 68, 0.15);
   color: #fca5a5;
@@ -1183,6 +1191,7 @@ input[type="checkbox"]:checked::after {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100dvh;
   width: 100vw;
   background: var(--surface-1);
   overflow: hidden;
@@ -1517,6 +1526,7 @@ input[type="checkbox"]:checked::after {
   align-items: center;
   justify-content: center;
   height: 100vh;
+  height: 100dvh;
   width: 100vw;
   background: var(--surface-1);
   background-image: radial-gradient(circle at top right, rgba(99, 102, 241, 0.1), transparent 40%),
@@ -1531,4 +1541,10 @@ input[type="checkbox"]:checked::after {
   flex-direction: column;
   border: 1px solid var(--border);
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+
+@media (max-width: 768px) {
+  .toast {
+    bottom: 90px;
+  }
 }
