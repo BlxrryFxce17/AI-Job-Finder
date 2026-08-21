@@ -32,6 +32,7 @@ export function useAppLogic() {
   const [fetchQuery, setFetchQuery] = useState('');
   const [fetchQueries, setFetchQueries] = useState(['software developer']);
   const [fetching, setFetching] = useState(false);
+  const [useApify, setUseApify] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newJob, setNewJob] = useState({ company: '', role: '', status: 'Sent' });
   const [toast, setToast] = useState(null);
@@ -139,7 +140,7 @@ export function useAppLogic() {
     const checkBounces = async () => {
       if (!token) return;
       try {
-        const r = await apiFetch(`${API_BASE}/api/check-bounces`);
+        const r = await apiFetch(`${API_BASE}/api/jobs/check-bounces`);
         const d = await r.json();
         if (d.newBounces > 0) {
           notify(`Detected ${d.newBounces} bounced email(s)!`, 'error');
@@ -280,9 +281,11 @@ export function useAppLogic() {
   const handleBatchDelete = async () => {
     if (!window.confirm(`Are you sure you want to delete ${selectedJobs.length} jobs?`)) return;
     try {
-      for (const id of selectedJobs) {
-        await apiFetch(`${API_BASE}/api/jobs/${id}`, { method: 'DELETE' });
-      }
+      await apiFetch(`${API_BASE}/api/jobs/bulk-delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobIds: selectedJobs })
+      });
       setJobs(p => p.filter(j => !selectedJobs.includes(j.id)));
       setSelectedJobs([]);
       notify(`${selectedJobs.length} jobs deleted`);
@@ -296,9 +299,9 @@ export function useAppLogic() {
     }
     setFetching(true);
     try {
-      const r = await apiFetch(`${API_BASE}/api/fetch-jobs`, {
+      const r = await apiFetch(`${API_BASE}/api/jobs/fetch-jobs`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ queries: fetchQueries })
+        body: JSON.stringify({ queries: fetchQueries, useApify })
       });
       const d = await r.json();
       notify(d.message || 'Jobs fetched');
@@ -319,6 +322,13 @@ export function useAppLogic() {
     setFetchQueries(fetchQueries.filter(item => item !== q));
   };
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, statusFilter, tab]);
+
   const activeJobs = jobs.filter(j => {
     if (tab === 'applications') return j.status === 'Found' || j.status === 'Drafting';
     if (tab === 'applied') return ['Sent', 'Opened', 'Bounced'].includes(j.status);
@@ -328,6 +338,35 @@ export function useAppLogic() {
     (j.company.toLowerCase().includes(search.toLowerCase()) || 
     j.role.toLowerCase().includes(search.toLowerCase()))
   );
+
+  const paginatedJobs = activeJobs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  const totalPages = Math.ceil(activeJobs.length / itemsPerPage);
+
+  const exportToCSV = () => {
+    if (jobs.length === 0) {
+      notify('No jobs to export', 'error');
+      return;
+    }
+    const headers = ['Company', 'Role', 'Email', 'Status', 'Date Found', 'Date Sent'];
+    const rows = jobs.map(j => [
+      `"${(j.company || '').replace(/"/g, '""')}"`,
+      `"${(j.role || '').replace(/"/g, '""')}"`,
+      `"${j.emailRecipient || ''}"`,
+      `"${j.status || ''}"`,
+      `"${j.createdAt ? new Date(j.createdAt).toLocaleDateString() : ''}"`,
+      `"${j.sentAt ? new Date(j.sentAt).toLocaleDateString() : ''}"`
+    ]);
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', 'job_pipeline.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    notify('Exported successfully');
+  };
 
   return {
     token, logout, apiFetch, // Exposed new auth-related properties
@@ -354,6 +393,9 @@ export function useAppLogic() {
     completeTutorial,
     batchState, setBatchState,
     activeJobs,
+    paginatedJobs,
+    currentPage, setCurrentPage,
+    totalPages,
     theme, setTheme,
     
     notify,
@@ -368,6 +410,9 @@ export function useAppLogic() {
     handleBatchDelete,
     handleFetchJobs,
     addFetchQuery,
-    removeFetchQuery
+    removeFetchQuery,
+    exportToCSV,
+    useApify,
+    setUseApify
   };
 }

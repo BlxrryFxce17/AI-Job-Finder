@@ -102,6 +102,9 @@ export default function DesktopApp(props) {
     batchProgress, setBatchProgress,
     batchState, setBatchState,
     activeJobs,
+    paginatedJobs,
+    currentPage, setCurrentPage,
+    totalPages,
     theme, setTheme,
     notify,
     loadJobs,
@@ -116,39 +119,41 @@ export default function DesktopApp(props) {
     handleResumeUpload,
     handleFetchJobs,
     addFetchQuery,
-    removeFetchQuery
+    removeFetchQuery,
+    exportToCSV,
+    useApify,
+    setUseApify
   } = props;
 
   return (
     <div className="dashboard-container">
-      {/* Batch Overlay Splash Screen */}
+      {/* Batch Progress Modal */}
       {batchState.active && (
         <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(9, 9, 11, 0.95)', backdropFilter: 'blur(10px)',
-          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 9999,
-          color: 'var(--text-1)'
+          position: 'fixed', bottom: '24px', right: '24px', background: 'var(--surface-2)', border: '1px solid var(--border)',
+          borderRadius: 'var(--radius)', width: '400px', display: 'flex', flexDirection: 'column', zIndex: 9999,
+          boxShadow: '0 10px 30px rgba(0,0,0,0.5)', overflow: 'hidden'
         }}>
-          <h2 style={{ fontSize: '28px', fontWeight: '700', marginBottom: '10px', color: 'var(--accent)' }}>
-            Auto-Applying... ({batchState.currentIndex} / {batchState.total})
-          </h2>
-          {batchState.currentJob && (
-            <div style={{ marginBottom: '30px', fontSize: '18px', color: 'var(--text-2)' }}>
-              Current Target: <span style={{ fontWeight: '600', color: 'var(--text-1)' }}>{batchState.currentJob.company}</span> - {batchState.currentJob.role}
+          <div style={{ padding: '20px', borderBottom: '1px solid var(--border)' }}>
+            <h3 style={{ fontSize: '16px', fontWeight: '600', margin: '0 0 8px 0', display: 'flex', justifyContent: 'space-between' }}>
+              <span>Auto-Applying...</span>
+              <span style={{ color: 'var(--accent)' }}>{batchState.currentIndex} / {batchState.total}</span>
+            </h3>
+            {batchState.currentJob && (
+              <div style={{ fontSize: '13px', color: 'var(--text-2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                Processing: <span style={{ color: 'var(--text-1)' }}>{batchState.currentJob.company}</span>
+              </div>
+            )}
+            <div style={{ width: '100%', height: '4px', background: 'var(--surface-3)', borderRadius: '2px', overflow: 'hidden', marginTop: '12px' }}>
+              <div style={{ width: `${(batchState.currentIndex / batchState.total) * 100}%`, height: '100%', background: 'var(--accent)', transition: 'width 0.3s ease-out' }} />
             </div>
-          )}
-
-          <div style={{ width: '600px', height: '10px', background: 'var(--surface-3)', borderRadius: '5px', overflow: 'hidden', marginBottom: '30px' }}>
-            <div style={{ width: `${(batchState.currentIndex / batchState.total) * 100}%`, height: '100%', background: 'var(--accent)', transition: 'width 0.3s ease-out' }} />
           </div>
-
           <div style={{
-            background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
-            padding: '24px', width: '600px', height: '300px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px',
-            boxShadow: '0 10px 30px rgba(0,0,0,0.5)'
+            background: 'var(--surface-1)', padding: '16px', height: '150px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px'
           }}>
             {batchState.logs.map((log, idx) => (
-              <div key={idx} className="log-item" style={{ fontFamily: 'monospace', fontSize: '13px', color: 'var(--text-2)' }}>
-                <span style={{ color: 'var(--accent)', marginRight: '8px' }}>&gt;</span> {log}
+              <div key={idx} style={{ fontFamily: 'monospace', fontSize: '12px', color: 'var(--text-2)' }}>
+                <span style={{ color: 'var(--accent)', marginRight: '4px' }}>&gt;</span> {log}
               </div>
             ))}
           </div>
@@ -448,9 +453,15 @@ export default function DesktopApp(props) {
                     <button type="submit" className="btn btn-ghost" style={{ padding: '6px 12px' }}>Add</button>
                   </form>
                 </div>
-                <button className="btn btn-primary" onClick={handleFetchJobs} disabled={fetching || fetchQueries.length === 0} style={{ alignSelf: 'flex-end' }}>
-                  {fetching ? <span className="spinner"></span> : 'Auto-Scrape Fresh Jobs ✨'}
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '15px', alignSelf: 'flex-end' }}>
+                  <label style={{ fontSize: '13px', color: 'var(--text-2)', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={useApify} onChange={e => setUseApify(e.target.checked)} style={{ accentColor: 'var(--accent)' }} />
+                    Use Deep Scraper (Apify)
+                  </label>
+                  <button className="btn btn-primary" onClick={handleFetchJobs} disabled={fetching || fetchQueries.length === 0}>
+                    {fetching ? <span className="spinner"></span> : 'Auto-Scrape Fresh Jobs ✨'}
+                  </button>
+                </div>
               </>
             )}
           </div>
@@ -458,6 +469,13 @@ export default function DesktopApp(props) {
 
         {tab === 'resume' ? (
           <div className="profile-section" style={{ padding: '24px', background: 'var(--surface-2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', flex: 1, overflowY: 'auto', margin: '20px 28px' }}>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '20px' }}>
+              <button className="btn btn-secondary" onClick={exportToCSV} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 20px', background: 'var(--surface-3)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                Export Pipeline to CSV
+              </button>
+            </div>
 
             {/* 1. Resume Upload (Simple) */}
             <div style={{ marginBottom: '30px' }}>
@@ -686,7 +704,7 @@ export default function DesktopApp(props) {
                     </tr>
                   </thead>
                   <tbody>
-                    {activeJobs.map(job => (
+                    {paginatedJobs.map(job => (
                       <tr className="table-row" key={job.id}>
                         {tab !== 'applied' && (
                           <td>
@@ -700,7 +718,15 @@ export default function DesktopApp(props) {
                         <td>
                           <div className="company-cell">
                             <div className="company-avatar">{job.company.substring(0, 2).toUpperCase()}</div>
-                            {job.company}
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                              <span>{job.company}</span>
+                              {job.source && job.source !== 'Manual' && (
+                                <span className={`source-pill source-${job.source.toLowerCase()}`}>
+                                  <img src={`https://www.google.com/s2/favicons?domain=${job.source.toLowerCase()}.com&sz=16`} alt={job.source} style={{width: 12, height: 12, borderRadius: '2px'}} />
+                                  {job.source}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </td>
                         <td className="role-cell">{job.role}</td>
@@ -753,6 +779,17 @@ export default function DesktopApp(props) {
                     ))}
                   </tbody>
                 </table>
+              )}
+              {totalPages > 1 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px', borderTop: '1px solid var(--border)' }}>
+                  <span style={{ fontSize: '13px', color: 'var(--text-3)' }}>
+                    Showing page {currentPage} of {totalPages}
+                  </span>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button className="btn btn-secondary" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>Previous</button>
+                    <button className="btn btn-secondary" disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}>Next</button>
+                  </div>
+                </div>
               )}
             </div>
           </div>

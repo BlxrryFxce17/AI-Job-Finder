@@ -97,6 +97,9 @@ export default function MobileApp(props) {
     batchProgress, setBatchProgress,
     batchState, setBatchState,
     activeJobs,
+    paginatedJobs,
+    currentPage, setCurrentPage,
+    totalPages,
     theme, setTheme,
     notify,
     loadJobs,
@@ -110,25 +113,33 @@ export default function MobileApp(props) {
     handleResumeUpload,
     handleFetchJobs,
     addFetchQuery,
-    removeFetchQuery
+    removeFetchQuery,
+    exportToCSV,
+    useApify,
+    setUseApify
   } = props;
 
   const [isScrolled, setIsScrolled] = React.useState(false);
 
   return (
     <div className="mobile-app-container">
-      {/* Batch Overlay */}
+      {/* Batch Progress Modal */}
       {batchState.active && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(9,9,11,0.95)', backdropFilter: 'blur(10px)', zIndex: 9999, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-          <h2 style={{ fontSize: '24px', fontWeight: '700', marginBottom: '10px', color: 'var(--accent)', textAlign: 'center' }}>Auto-Applying...<br/>({batchState.currentIndex} / {batchState.total})</h2>
-          {batchState.currentJob && <div style={{ marginBottom: '20px', fontSize: '16px', color: 'var(--text-2)', textAlign: 'center' }}>Target: <span style={{color: 'var(--text-1)'}}>{batchState.currentJob.company}</span></div>}
-          <div style={{ width: '100%', height: '8px', background: 'var(--surface-3)', borderRadius: '4px', overflow: 'hidden', marginBottom: '20px' }}>
-            <div style={{ width: `${(batchState.currentIndex / batchState.total) * 100}%`, height: '100%', background: 'var(--accent)', transition: 'width 0.3s' }} />
+        <div style={{ position: 'fixed', top: '16px', left: '16px', right: '16px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', zIndex: 9999, display: 'flex', flexDirection: 'column', boxShadow: '0 10px 30px rgba(0,0,0,0.5)', overflow: 'hidden' }}>
+          <div style={{ padding: '16px', borderBottom: '1px solid var(--border)' }}>
+            <h3 style={{ fontSize: '15px', fontWeight: '600', margin: '0 0 8px 0', display: 'flex', justifyContent: 'space-between' }}>
+              <span>Auto-Applying...</span>
+              <span style={{ color: 'var(--accent)' }}>{batchState.currentIndex} / {batchState.total}</span>
+            </h3>
+            {batchState.currentJob && <div style={{ fontSize: '12px', color: 'var(--text-2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Target: <span style={{color: 'var(--text-1)'}}>{batchState.currentJob.company}</span></div>}
+            <div style={{ width: '100%', height: '4px', background: 'var(--surface-3)', borderRadius: '2px', overflow: 'hidden', marginTop: '12px' }}>
+              <div style={{ width: `${(batchState.currentIndex / batchState.total) * 100}%`, height: '100%', background: 'var(--accent)', transition: 'width 0.3s' }} />
+            </div>
           </div>
-          <div style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '16px', width: '100%', height: '250px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ background: 'var(--surface-1)', padding: '12px', height: '100px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px' }}>
             {batchState.logs.map((log, idx) => (
-              <div key={idx} className="log-item" style={{ fontFamily: 'monospace', fontSize: '12px', color: 'var(--text-2)' }}>
-                <span style={{ color: 'var(--accent)', marginRight: '6px' }}>&gt;</span> {log}
+              <div key={idx} style={{ fontFamily: 'monospace', fontSize: '11px', color: 'var(--text-2)' }}>
+                <span style={{ color: 'var(--accent)', marginRight: '4px' }}>&gt;</span> {log}
               </div>
             ))}
           </div>
@@ -327,9 +338,15 @@ export default function MobileApp(props) {
                       <button type="submit" className="btn btn-primary">+</button>
                     </form>
                 </div>
-                <button className="btn btn-primary" onClick={handleFetchJobs} disabled={fetching || fetchQueries.length === 0} style={{ gridColumn: 'span 2' }}>
-                  {fetching ? <span className="spinner"></span> : 'Auto-Scrape Jobs ✨'}
-                </button>
+                <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <label style={{ fontSize: '13px', color: 'var(--text-2)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <input type="checkbox" checked={useApify} onChange={e => setUseApify(e.target.checked)} style={{ accentColor: 'var(--accent)' }} />
+                    Use Deep Scraper (Apify)
+                  </label>
+                  <button className="btn btn-primary" onClick={handleFetchJobs} disabled={fetching || fetchQueries.length === 0}>
+                    {fetching ? <span className="spinner"></span> : 'Auto-Scrape Jobs ✨'}
+                  </button>
+                </div>
               </div>
             )}
 
@@ -338,6 +355,10 @@ export default function MobileApp(props) {
                 <option value="All">All Statuses</option>
                 <option value="Found">Found</option>
                 <option value="Drafting">Drafting</option>
+                <option value="Sent">Sent</option>
+                <option value="Opened">Opened</option>
+                <option value="Bounced">Bounced</option>
+                <option value="Replied">Replied</option>
               </select>
               <div className="search-wrapper" style={{ flex: 1, margin: 0 }}>
                 <span className="search-icon">🔍</span>
@@ -367,6 +388,13 @@ export default function MobileApp(props) {
 
         {tab === 'applied' && (
           <div className="mobile-actions-panel" style={{ display: 'flex', gap: '10px' }}>
+            <select className="form-input" style={{ flex: 1 }} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+              <option value="All">All Statuses</option>
+              <option value="Sent">Sent</option>
+              <option value="Opened">Opened</option>
+              <option value="Bounced">Bounced</option>
+              <option value="Replied">Replied</option>
+            </select>
             <div className="search-wrapper" style={{ flex: 1, margin: 0 }}>
               <span className="search-icon">🔍</span>
               <input type="text" className="search-input" placeholder="Search..." value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -381,7 +409,7 @@ export default function MobileApp(props) {
               ) : activeJobs.length === 0 ? (
                 <div className="empty-state"><div className="empty-icon">📭</div><h3>No jobs found</h3></div>
               ) : (
-                activeJobs.map(job => (
+                paginatedJobs.map(job => (
                   <div className={`mobile-job-card ${selectedJobs.includes(job.id) ? 'selected' : ''}`} key={job.id} onClick={() => { if(tab === 'applications') toggleSelectJob(job.id); }}>
                     {tab === 'applications' && (
                        <div className="mobile-card-checkbox">
@@ -392,7 +420,15 @@ export default function MobileApp(props) {
                       <div className="mobile-card-header">
                          <div className="company-avatar" style={{ width: '32px', height: '32px', fontSize: '12px' }}>{job.company.substring(0,2).toUpperCase()}</div>
                          <div className="mobile-card-title">
-                            <h3>{job.company}</h3>
+                            <h3 style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                              {job.company}
+                              {job.source && job.source !== 'Manual' && (
+                                <span className={`source-pill source-${job.source.toLowerCase()}`}>
+                                  <img src={`https://www.google.com/s2/favicons?domain=${job.source.toLowerCase()}.com&sz=16`} alt={job.source} style={{width: 10, height: 10, borderRadius: '2px'}} />
+                                  {job.source}
+                                </span>
+                              )}
+                            </h3>
                             <p>{job.role}</p>
                          </div>
                       </div>
@@ -429,12 +465,29 @@ export default function MobileApp(props) {
                   </div>
                 ))
               )}
+              {totalPages > 1 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 12px', borderTop: '1px solid var(--border)', marginTop: '8px' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--text-3)' }}>
+                    Page {currentPage} of {totalPages}
+                  </span>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button className="btn btn-secondary" style={{ padding: '6px 10px', fontSize: '12px' }} disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>Prev</button>
+                    <button className="btn btn-secondary" style={{ padding: '6px 10px', fontSize: '12px' }} disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}>Next</button>
+                  </div>
+                </div>
+              )}
           </div>
         )}
 
         {tab === 'resume' && (
           <div className="mobile-form-section">
             
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '20px' }}>
+              <button className="btn btn-secondary" onClick={exportToCSV} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', background: 'var(--surface-3)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '13px' }}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                Export CSV
+              </button>
+            </div>
             {/* 1. Resume Upload (Simple) */}
             <div style={{marginBottom: '24px'}}>
               <h2 className="mobile-section-title">Resume Upload</h2>
