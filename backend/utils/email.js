@@ -64,7 +64,7 @@ async function checkGmailForReply(user, recipientEmail) {
   }
 }
 
-async function discoverEmailForJob(company, domain, jd, failedEmails = [], callAIWithRetry) {
+async function discoverEmailForJob(company, domain, jd, failedEmails = [], callAIWithRetry, hrName = null) {
   let discoveredEmail = null;
   let source = '';
 
@@ -83,6 +83,62 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
           source = 'Tier 1 (JD Scraper + AI)';
         }
       } catch (err) { }
+    }
+  }
+
+  // Tier 1.2: Deep Web Search for HR's explicit email
+  if (!discoveredEmail && hrName && process.env.SERPER_API_KEY) {
+    try {
+      const q = `"${hrName}" "${company}" email`;
+      const sRes = await axios.post('https://google.serper.dev/search', {
+        q, num: 3
+      }, {
+        headers: { 'X-API-KEY': process.env.SERPER_API_KEY, 'Content-Type': 'application/json' }
+      });
+      const snippets = sRes.data?.organic?.map(r => r.snippet).join(' ') || '';
+      const emailRegex = /[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}/g;
+      const foundEmails = snippets.match(emailRegex);
+      if (foundEmails && foundEmails.length > 0) {
+        const validEmails = foundEmails.filter(e => !e.includes('example.com') && !e.includes('email.com') && !failedEmails.includes(e));
+        if (validEmails.length > 0) {
+          const prompt = `You are an AI Email Judge. We searched for the email of "${hrName}" at "${company}". Extracted emails: ${validEmails.join(', ')}. Which ONE is most likely their real email? Ignore generic support emails or completely unrelated domains unless it looks like an agency. Return ONLY the email address, or "NONE".`;
+          const response = await callAIWithRetry(prompt);
+          const aiJudgment = response.text.trim();
+          const emailMatch = aiJudgment.match(/[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}/);
+          if (emailMatch) {
+            discoveredEmail = emailMatch[0];
+            source = 'Tier 1.2 (Deep Web Search HR Name + AI)';
+          }
+        }
+      }
+    } catch(err) {}
+  }
+
+  // Tier 1.5: HR Name Permutations
+  if (!discoveredEmail && hrName) {
+    const parts = hrName.toLowerCase().replace(/[^a-z0-9 ]/g, '').split(' ').filter(Boolean);
+    if (parts.length >= 2) {
+      const first = parts[0];
+      const last = parts[parts.length - 1];
+      const guesses = [
+        `${first}.${last}@${domain}`,
+        `${first}${last}@${domain}`,
+        `${first[0]}${last}@${domain}`,
+        `${first}@${domain}`
+      ];
+      for (const guess of guesses) {
+        if (!failedEmails.includes(guess)) {
+          discoveredEmail = guess;
+          source = 'Tier 1.5 (HR Name Permutation)';
+          break;
+        }
+      }
+    } else if (parts.length === 1) {
+      const guess = `${parts[0]}@${domain}`;
+      if (!failedEmails.includes(guess)) {
+        discoveredEmail = guess;
+        source = 'Tier 1.5 (HR Name Guess)';
+      }
     }
   }
 

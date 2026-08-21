@@ -4,6 +4,7 @@ import { BarChart3, Briefcase, MailCheck, RotateCw, Mail, User, Settings } from 
 
 export const NAV = [
   { id: 'analytics', label: 'Stats Dashboard', icon: <BarChart3 size={20} /> },
+  { id: 'hr_dashboard', label: 'HR Discovery', icon: <User size={20} /> },
   { id: 'applications', label: 'Jobs Search', icon: <Briefcase size={20} /> },
   { id: 'applied', label: 'Applied Jobs', icon: <MailCheck size={20} /> },
   { id: 'followups', label: 'Follow Ups', icon: <RotateCw size={20} /> },
@@ -187,13 +188,16 @@ export function useAppLogic() {
       setBatchState(prev => ({ ...prev, currentIndex: i + 1, currentJob: job, logs: [...prev.logs, `[${job.company}] Starting processing...`] }));
 
       try {
-        setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Discovering HR email...`] }));
-        const discRes = await apiFetch(`${API_BASE}/api/discover-email`, {
-           method: 'POST', headers: { 'Content-Type': 'application/json' },
-           body: JSON.stringify({ company: job.company, jd: job.jd })
-        });
-        const discData = await discRes.json();
-        const discoveredEmail = discData.email || '';
+        let discoveredEmail = job.emailRecipient;
+        if (!discoveredEmail) {
+          setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Discovering HR email...`] }));
+          const discRes = await apiFetch(`${API_BASE}/api/discover-email`, {
+             method: 'POST', headers: { 'Content-Type': 'application/json' },
+             body: JSON.stringify({ company: job.company, jd: job.jd })
+          });
+          const discData = await discRes.json();
+          discoveredEmail = discData.email || '';
+        }
         
         setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Found email: ${discoveredEmail || 'None'}. Drafting...`] }));
         const genRes = await apiFetch(`${API_BASE}/api/generate-email`, {

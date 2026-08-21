@@ -125,23 +125,37 @@ export default function MobileApp(props) {
     <div className="mobile-app-container">
       {/* Batch Progress Modal */}
       {batchState.active && (
-        <div style={{ position: 'fixed', top: '16px', left: '16px', right: '16px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', zIndex: 9999, display: 'flex', flexDirection: 'column', boxShadow: '0 10px 30px rgba(0,0,0,0.5)', overflow: 'hidden' }}>
-          <div style={{ padding: '16px', borderBottom: '1px solid var(--border)' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: '600', margin: '0 0 8px 0', display: 'flex', justifyContent: 'space-between' }}>
-              <span>Auto-Applying...</span>
-              <span style={{ color: 'var(--accent)' }}>{batchState.currentIndex} / {batchState.total}</span>
-            </h3>
-            {batchState.currentJob && <div style={{ fontSize: '12px', color: 'var(--text-2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Target: <span style={{color: 'var(--text-1)'}}>{batchState.currentJob.company}</span></div>}
-            <div style={{ width: '100%', height: '4px', background: 'var(--surface-3)', borderRadius: '2px', overflow: 'hidden', marginTop: '12px' }}>
-              <div style={{ width: `${(batchState.currentIndex / batchState.total) * 100}%`, height: '100%', background: 'var(--accent)', transition: 'width 0.3s' }} />
+        <div style={{ position: 'fixed', top: '16px', left: '16px', right: '16px', background: '#0c0c0c', border: '1px solid #333', borderRadius: '8px', zIndex: 9999, display: 'flex', flexDirection: 'column', boxShadow: '0 10px 30px rgba(0,0,0,0.8)', overflow: 'hidden', color: '#00ff00', fontFamily: 'monospace' }}>
+          <div style={{ background: '#1a1a1a', padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #333' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ color: '#00ff00', fontWeight: 'bold' }}>root@kali:~#</span>
+              <span style={{ fontSize: '12px', color: '#fff' }}>batch-apply.sh ({batchState.currentIndex}/{batchState.total})</span>
             </div>
           </div>
-          <div style={{ background: 'var(--surface-1)', padding: '12px', height: '100px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            {batchState.logs.map((log, idx) => (
-              <div key={idx} style={{ fontFamily: 'monospace', fontSize: '11px', color: 'var(--text-2)' }}>
-                <span style={{ color: 'var(--accent)', marginRight: '4px' }}>&gt;</span> {log}
+          <div style={{ padding: '12px' }}>
+            {batchState.currentJob && (
+              <div style={{ fontSize: '12px', color: '#888', marginBottom: '8px', display: 'flex', justifyContent: 'space-between' }}>
+                <span>Target: <span style={{ color: '#fff' }}>{batchState.currentJob.company}</span></span>
+                <span style={{ color: '#00ff00' }}>[{Math.round((batchState.currentIndex / batchState.total) * 100)}%]</span>
               </div>
-            ))}
+            )}
+            <div style={{ width: '100%', height: '2px', background: '#333' }}>
+              <div style={{ width: `${(batchState.currentIndex / batchState.total) * 100}%`, height: '100%', background: '#00ff00', transition: 'width 0.2s' }} />
+            </div>
+          </div>
+          <div style={{ background: '#0c0c0c', padding: '12px', height: '120px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            {batchState.logs.map((log, idx) => {
+               const isError = log.includes('Error') || log.includes('Failed');
+               const isSuccess = log.includes('Successfully');
+               let color = '#00ff00';
+               if (isError) color = '#ff0000';
+               if (isSuccess) color = '#00aaff';
+               return (
+                 <div key={idx} style={{ fontSize: '11px', color, lineHeight: 1.4 }}>
+                   <span style={{ color: '#555' }}>$</span> {log}
+                 </div>
+               );
+            })}
           </div>
         </div>
       )}
@@ -639,6 +653,149 @@ export default function MobileApp(props) {
                 {fetching ? <span className="spinner"></span> : 'Draft & Send 🚀'}
               </button>
             </form>
+          </div>
+        )}
+        {tab === 'hr_dashboard' && (
+          <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 style={{ fontSize: '20px', fontWeight: 600, margin: 0 }}>HR Discovery</h2>
+              <button className="btn btn-primary" style={{ padding: '8px 12px', fontSize: '13px' }} onClick={async () => {
+                setFetching(true);
+                try {
+                  const res = await fetch(`${API_BASE}/api/jobs/scrape-hr`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` },
+                    body: JSON.stringify({ query: fetchQuery || fetchQueries[0] || 'software engineer' })
+                  });
+                  const result = await res.json();
+                  if (result.success) {
+                    notify(`Discovered ${result.count} new HR leads!`);
+                    loadJobs();
+                  } else {
+                    notify(result.error || 'Failed to scrape HRs', 'error');
+                  }
+                } catch (err) {
+                  notify('An error occurred', 'error');
+                }
+                setFetching(false);
+              }} disabled={fetching}>
+                {fetching ? <span className="spinner"></span> : 'Discover 🚀'}
+              </button>
+            </div>
+
+            <div className="mobile-actions-panel">
+              {selectedJobs.length > 0 ? (
+                <div className="mobile-selection-bar">
+                  <span style={{ fontWeight: 600, color: 'var(--accent)' }}>{selectedJobs.length} selected</span>
+                  <div style={{ flex: 1 }} />
+                  {batchProgress !== null ? (
+                     <span className="spinner"></span>
+                  ) : (
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button className="btn btn-primary" style={{ background: 'var(--error)', borderColor: 'var(--error)', padding: '6px 12px', fontSize: '13px' }} onClick={handleBatchDelete}>Delete</button>
+                      <button className="btn btn-primary" style={{ padding: '6px 12px', fontSize: '13px' }} onClick={handleBatchSend}>Send 🚀</button>
+                    </div>
+                  )}
+                  <button className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: '13px', marginLeft: '8px' }} onClick={() => setSelectedJobs([])}>Cancel</button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 4px' }}>
+                  <button 
+                    className="btn btn-ghost" 
+                    style={{ padding: '6px 12px', fontSize: '13px', background: 'var(--surface-3)', borderRadius: '6px', color: 'var(--text-1)' }} 
+                    onClick={() => {
+                      const hrJobs = jobs.filter(j => j.status === 'HR_Found');
+                      if (selectedJobs.length === hrJobs.length && hrJobs.length > 0) setSelectedJobs([]);
+                      else setSelectedJobs(hrJobs.map(j => j.id));
+                    }}
+                  >
+                    {selectedJobs.length === jobs.filter(j => j.status === 'HR_Found').length && jobs.filter(j => j.status === 'HR_Found').length > 0 ? 'Deselect All' : 'Select All'}
+                  </button>
+                  <span style={{ fontSize: '12px', color: 'var(--text-3)', fontWeight: '500' }}>{jobs.filter(j => j.status === 'HR_Found').length} HRs found</span>
+                </div>
+              )}
+            </div>
+
+            <div className="mobile-job-list" style={{ marginTop: '0' }}>
+              {jobs.filter(j => j.status === 'HR_Found').length === 0 ? (
+                 <div className="empty-state"><div className="empty-icon">📭</div><h3>No HRs found</h3></div>
+              ) : (
+                 jobs.filter(j => j.status === 'HR_Found').map(job => (
+                  <div className={`mobile-job-card ${selectedJobs.includes(job.id) ? 'selected' : ''}`} key={job.id} onClick={() => toggleSelectJob(job.id)}>
+                    <div className="mobile-card-checkbox">
+                      <input type="checkbox" checked={selectedJobs.includes(job.id)} onChange={() => {}} />
+                    </div>
+                    <div className="mobile-card-content">
+                      <div className="mobile-card-header">
+                        <div className="company-avatar" style={{ width: '32px', height: '32px', fontSize: '12px' }}>{job.hrName ? job.hrName.substring(0,2).toUpperCase() : 'HR'}</div>
+                        <div className="mobile-card-title">
+                          <h3 style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                            {job.hrName || 'Unknown HR'}
+                            {job.source && (
+                              <span className={`source-pill source-${job.source.toLowerCase()}`} style={{ padding: '2px 6px', fontSize: '10px' }}>
+                                {job.source}
+                              </span>
+                            )}
+                          </h3>
+                          <p>{job.company}</p>
+                        </div>
+                      </div>
+                      <div className="mobile-card-footer">
+                        <span className="mobile-card-date">
+                          {new Date(job.publishedAt || Date.now()).toLocaleString([], {year: 'numeric', month: 'numeric', day: 'numeric'})}
+                        </span>
+                      </div>
+                      <div className="mobile-card-actions">
+                        <button className="icon-btn" onClick={(e) => { e.stopPropagation(); job.hrLinkedIn ? window.open(job.hrLinkedIn, '_blank') : alert('No link'); }}>
+                           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"></path><rect x="2" y="9" width="4" height="12"></rect><circle cx="4" cy="4" r="2"></circle></svg>
+                        </button>
+                        <button className="icon-btn text-accent" onClick={async (e) => { 
+                          e.stopPropagation(); 
+                          notify('Drafting & sending email...', 'info');
+                          try {
+                            const discRes = await fetch(`${API_BASE}/api/discover-email`, {
+                               method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` },
+                               body: JSON.stringify({ company: job.company, jd: job.jd })
+                            });
+                            const discData = await discRes.json();
+                            const email = job.emailRecipient || discData.email;
+                            if(!email) { notify('No email found', 'error'); return; }
+                            const genRes = await fetch(`${API_BASE}/api/generate-email`, {
+                               method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` },
+                               body: JSON.stringify({ company: job.company, role: job.role, jd: job.jd, emailType: 'Cold Outreach / Networking' })
+                            });
+                            const genData = await genRes.json();
+                            const sendRes = await fetch(`${API_BASE}/api/send-email`, {
+                               method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` },
+                               body: JSON.stringify({ jobId: job.id, body: genData.draft, to: email })
+                            });
+                            const sendData = await sendRes.json();
+                            if(sendData.success) {
+                               updateStatus(job.id, 'Sent', email, genData.draft, sendData.tracked);
+                               notify('Sent successfully!', 'success');
+                            } else {
+                               notify('Failed to send', 'error');
+                            }
+                          } catch(err) { notify('Error occurred', 'error'); }
+                        }}>
+                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                        </button>
+                        <button className="icon-btn text-danger" onClick={async (e) => { 
+                          e.stopPropagation(); 
+                          try {
+                            await fetch(`${API_BASE}/api/jobs/${job.id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` } });
+                            setJobs(p => p.filter(j => j.id !== job.id));
+                            notify('Lead deleted');
+                          } catch(e) { notify('Delete failed', 'error'); }
+                        }}>
+                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         )}
       </div>

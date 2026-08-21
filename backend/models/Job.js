@@ -12,6 +12,8 @@ const jobSchema = new mongoose.Schema({
   location: { type: String, default: '' },
   emailDraft: { type: String, default: '' },
   emailRecipient: { type: String, default: '' },
+  hrName: { type: String, default: '' },
+  hrLinkedIn: { type: String, default: '' },
   failedEmails: { type: [String], default: [] },
   publishedAt: { type: Date, default: Date.now },
   tracked: { type: Boolean, default: false },

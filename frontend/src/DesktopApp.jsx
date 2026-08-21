@@ -81,6 +81,96 @@ function FollowUpRow({ job, f, API_BASE, token, setJobs, jobs, notify }) {
     </div>
   );
 }
+const DraggableTerminal = ({ batchState }) => {
+  const [minimized, setMinimized] = React.useState(false);
+  const [position, setPosition] = React.useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = React.useState(false);
+  const [dragOffset, setDragOffset] = React.useState({ x: 0, y: 0 });
+  const logsEndRef = React.useRef(null);
+
+  React.useEffect(() => {
+    setPosition({ x: window.innerWidth - 424, y: window.innerHeight - 300 });
+  }, []);
+
+  React.useEffect(() => {
+    if (logsEndRef.current && !minimized) {
+      logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [batchState.logs, minimized]);
+
+  const handlePointerDown = (e) => {
+    setIsDragging(true);
+    setDragOffset({ x: e.clientX - position.x, y: e.clientY - position.y });
+    e.target.setPointerCapture(e.pointerId);
+  };
+
+  const handlePointerMove = (e) => {
+    if (isDragging) {
+      setPosition({ x: e.clientX - dragOffset.x, y: e.clientY - dragOffset.y });
+    }
+  };
+
+  const handlePointerUp = (e) => {
+    setIsDragging(false);
+    e.target.releasePointerCapture(e.pointerId);
+  };
+
+  if (!batchState.active) return null;
+
+  return (
+    <div style={{
+      position: 'fixed', left: position.x, top: position.y, width: '400px', background: '#0c0c0c',
+      border: '1px solid #333', borderRadius: '8px', boxShadow: '0 20px 40px rgba(0,0,0,0.8)',
+      display: 'flex', flexDirection: 'column', zIndex: 10000, overflow: 'hidden', color: '#00ff00', fontFamily: 'monospace'
+    }}>
+      <div 
+        onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp}
+        style={{ background: '#1a1a1a', padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: isDragging ? 'grabbing' : 'grab', userSelect: 'none', borderBottom: '1px solid #333' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ color: '#00ff00', fontWeight: 'bold' }}>root@kali:~#</span>
+          <span style={{ fontSize: '13px', color: '#fff' }}>batch-apply.sh ({batchState.currentIndex}/{batchState.total})</span>
+        </div>
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <button onClick={() => setMinimized(!minimized)} style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', padding: '0 4px', fontSize: '14px' }}>
+            {minimized ? '🗖' : '🗕'}
+          </button>
+        </div>
+      </div>
+
+      {!minimized && (
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <div style={{ padding: '12px' }}>
+            {batchState.currentJob && (
+              <div style={{ fontSize: '12px', color: '#888', marginBottom: '8px', display: 'flex', justifyContent: 'space-between' }}>
+                <span>Target: <span style={{ color: '#fff' }}>{batchState.currentJob.company}</span></span>
+                <span style={{ color: '#00ff00' }}>[{Math.round((batchState.currentIndex / batchState.total) * 100)}%]</span>
+              </div>
+            )}
+            <div style={{ width: '100%', height: '2px', background: '#333' }}>
+              <div style={{ width: `${(batchState.currentIndex / batchState.total) * 100}%`, height: '100%', background: '#00ff00', transition: 'width 0.2s' }} />
+            </div>
+          </div>
+          <div style={{ padding: '12px', height: '180px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {batchState.logs.map((log, idx) => {
+               const isError = log.includes('Error') || log.includes('Failed');
+               const isSuccess = log.includes('Successfully');
+               let color = '#00ff00';
+               if (isError) color = '#ff0000';
+               if (isSuccess) color = '#00aaff';
+               return (
+                 <div key={idx} style={{ fontSize: '12px', color, lineHeight: 1.4 }}>
+                   <span style={{ color: '#555' }}>$</span> {log}
+                 </div>
+               );
+            })}
+            <div ref={logsEndRef} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 export default function DesktopApp(props) {
   const {
@@ -128,37 +218,7 @@ export default function DesktopApp(props) {
   return (
     <div className="dashboard-container">
       {/* Batch Progress Modal */}
-      {batchState.active && (
-        <div style={{
-          position: 'fixed', bottom: '24px', right: '24px', background: 'var(--surface-2)', border: '1px solid var(--border)',
-          borderRadius: 'var(--radius)', width: '400px', display: 'flex', flexDirection: 'column', zIndex: 9999,
-          boxShadow: '0 10px 30px rgba(0,0,0,0.5)', overflow: 'hidden'
-        }}>
-          <div style={{ padding: '20px', borderBottom: '1px solid var(--border)' }}>
-            <h3 style={{ fontSize: '16px', fontWeight: '600', margin: '0 0 8px 0', display: 'flex', justifyContent: 'space-between' }}>
-              <span>Auto-Applying...</span>
-              <span style={{ color: 'var(--accent)' }}>{batchState.currentIndex} / {batchState.total}</span>
-            </h3>
-            {batchState.currentJob && (
-              <div style={{ fontSize: '13px', color: 'var(--text-2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                Processing: <span style={{ color: 'var(--text-1)' }}>{batchState.currentJob.company}</span>
-              </div>
-            )}
-            <div style={{ width: '100%', height: '4px', background: 'var(--surface-3)', borderRadius: '2px', overflow: 'hidden', marginTop: '12px' }}>
-              <div style={{ width: `${(batchState.currentIndex / batchState.total) * 100}%`, height: '100%', background: 'var(--accent)', transition: 'width 0.3s ease-out' }} />
-            </div>
-          </div>
-          <div style={{
-            background: 'var(--surface-1)', padding: '16px', height: '150px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px'
-          }}>
-            {batchState.logs.map((log, idx) => (
-              <div key={idx} style={{ fontFamily: 'monospace', fontSize: '12px', color: 'var(--text-2)' }}>
-                <span style={{ color: 'var(--accent)', marginRight: '4px' }}>&gt;</span> {log}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <DraggableTerminal batchState={batchState} />
 
       {/* Toast Notification */}
       {toast && (
@@ -405,6 +465,175 @@ export default function DesktopApp(props) {
               )}
               {jobs.flatMap(j => (j.followUps || []).filter(f => !f.sent)).length === 0 && (
                 <div style={{ color: 'var(--text-3)', fontStyle: 'italic' }}>No pending follow ups at this time.</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {tab === 'hr_dashboard' && (
+          <div style={{ padding: '24px', flex: 1, overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+              <div>
+                <h2 style={{ fontSize: '24px', fontWeight: 600, margin: 0 }}>HR Discovery Dashboard</h2>
+                <p style={{ color: 'var(--text-2)', fontSize: '14px', margin: '4px 0 0 0' }}>Find HRs hiring right now for your queries.</p>
+              </div>
+              <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                {selectedJobs.length > 0 && (
+                  <>
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--accent)' }}>{selectedJobs.length} Selected</span>
+                    <button className="btn btn-primary" onClick={handleBatchSend} disabled={fetching}>
+                      Send to Selected 🚀
+                    </button>
+                    <button className="btn btn-primary" style={{ background: 'var(--error)', borderColor: 'var(--error)', padding: '6px 12px' }} onClick={handleBatchDelete} disabled={fetching}>
+                      Delete
+                    </button>
+                    <div style={{ width: '1px', height: '24px', background: 'var(--border)', margin: '0 4px' }}></div>
+                  </>
+                )}
+                
+                <button className="btn btn-secondary" onClick={() => {
+                  const hrJobs = jobs.filter(j => j.status === 'HR_Found');
+                  if (selectedJobs.length === hrJobs.length && hrJobs.length > 0) setSelectedJobs([]);
+                  else setSelectedJobs(hrJobs.map(j => j.id));
+                }}>
+                  {selectedJobs.length === jobs.filter(j => j.status === 'HR_Found').length && jobs.filter(j => j.status === 'HR_Found').length > 0 ? 'Deselect All' : 'Select All'}
+                </button>
+
+                <button className="btn btn-primary" onClick={async () => {
+                  setFetching(true);
+                  try {
+                    const res = await fetch(`${API_BASE}/api/jobs/scrape-hr`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` },
+                      body: JSON.stringify({ query: fetchQuery || fetchQueries[0] || 'software engineer' })
+                    });
+                    const result = await res.json();
+                    if (result.success) {
+                      notify(`Discovered ${result.count} new HR leads!`);
+                      loadJobs();
+                    } else {
+                      notify(result.error || 'Failed to scrape HRs', 'error');
+                    }
+                  } catch (err) {
+                    notify('An error occurred', 'error');
+                  }
+                  setFetching(false);
+                }} disabled={fetching}>
+                  {fetching ? <span className="spinner"></span> : 'Discover HRs 🚀'}
+                </button>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' }}>
+              {jobs.filter(j => j.status === 'HR_Found').map(job => (
+                <div key={job.id} style={{
+                  background: 'var(--surface-2)',
+                  borderRadius: '12px',
+                  border: '1px solid var(--border)',
+                  padding: '20px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '12px'
+                }}>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ fontWeight: 600, fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <input 
+                          type="checkbox" 
+                          checked={selectedJobs.includes(job.id)} 
+                          onChange={() => toggleSelectJob(job.id)} 
+                          style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: 'var(--accent)' }}
+                        />
+                        {job.hrName || 'Unknown HR'}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {job.source && (
+                          <span className={`source-pill source-${job.source.toLowerCase()}`} style={{ padding: '2px 8px', fontSize: '10px' }}>
+                            {job.source}
+                          </span>
+                        )}
+                        <button 
+                          className="btn btn-ghost" 
+                          style={{ 
+                            padding: '4px', 
+                            color: 'var(--text-3)', 
+                            fontSize: '16px', 
+                            lineHeight: 1,
+                            background: 'transparent',
+                            border: 'none',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            width: '24px',
+                            height: '24px',
+                            borderRadius: '50%',
+                            transition: 'all 0.2s ease',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.color = 'var(--error)';
+                            e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.color = 'var(--text-3)';
+                            e.currentTarget.style.background = 'transparent';
+                          }}
+                          onClick={() => handleDelete(job.id)}
+                          title="Delete HR Lead"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '13px', color: 'var(--accent)', marginTop: '4px' }}>{job.company}</div>
+                    <div style={{ fontSize: '13px', color: 'var(--text-2)' }}>{job.role}</div>
+                  </div>
+                  
+                  <div style={{ fontSize: '13px', background: 'var(--surface-1)', padding: '10px', borderRadius: '8px' }}>
+                    <strong>Email:</strong> {job.emailRecipient || 'Not Found'}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '10px', marginTop: 'auto', paddingTop: '10px' }}>
+                    {job.hrLinkedIn && (
+                      <a href={job.hrLinkedIn} target="_blank" rel="noreferrer" className="btn btn-secondary" style={{ flex: 1, textAlign: 'center', textDecoration: 'none', fontSize: '13px', padding: '8px' }}>
+                        🔗 Connect
+                      </a>
+                    )}
+                    <button className="btn btn-primary" style={{ flex: 1, fontSize: '13px', padding: '8px' }} onClick={async () => {
+                      if (!job.emailRecipient) return notify('No email found to send to!', 'error');
+                      setToast({ msg: 'Drafting email...', type: 'success' });
+                      try {
+                        const draftRes = await fetch(`${API_BASE}/api/generate-email`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` },
+                          body: JSON.stringify({ company: job.company, role: job.role, type: 'Cold Outreach', jd: job.jd })
+                        });
+                        const draftData = await draftRes.json();
+                        
+                        const sendRes = await fetch(`${API_BASE}/api/send-email`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` },
+                          body: JSON.stringify({ jobId: job.id, to: job.emailRecipient, subject: `Application for ${job.role}`, body: draftData.draft })
+                        });
+                        if (sendRes.ok) {
+                          notify('Email sent successfully!');
+                          loadJobs();
+                        } else {
+                          notify('Failed to send email', 'error');
+                        }
+                      } catch (e) {
+                        notify('Error sending email', 'error');
+                      }
+                    }}>
+                      ✉️ Send Mail
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {jobs.filter(j => j.status === 'HR_Found').length === 0 && (
+                <div style={{ gridColumn: '1 / -1', color: 'var(--text-3)', textAlign: 'center', padding: '40px', background: 'var(--surface-2)', borderRadius: '12px' }}>
+                  No HR leads found yet. Click "Discover HRs" to start scraping!
+                </div>
               )}
             </div>
           </div>

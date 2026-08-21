@@ -2,26 +2,35 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const { callAIWithRetry } = require('./ai');
 
-async function scrapeJobsFree(query, location = 'India') {
+async function scrapeJobsFree(query, location = 'India', excludeCompanies = []) {
   const jobs = [];
   
   if (!process.env.SERPER_API_KEY) {
-    console.error('SERPER_API_KEY is missing. Free scraping requires Google Dorking via Serper.');
+    console.log('No SERPER_API_KEY, skipping free scrape.');
     return jobs;
   }
 
-  // We use Serper to find jobs on LinkedIn, Indeed, and Naukri posted recently (tbs=qdr:d for last 24h, since 8h isn't a direct param, we filter later if needed or just use d)
+  // Google Dorking for recent job postings (last 24 hours)
   const dorkQueries = [
-    `site:linkedin.com/jobs/view "${query}" "${location}"`,
-    `site:in.indeed.com/viewjob "${query}" "${location}"`,
-    `site:naukri.com/job-listings "${query}" "${location}"`
+    `site:linkedin.com/jobs/view "${query}" "India"`,
+    `site:in.indeed.com/viewjob "${query}" "India"`,
+    `site:naukri.com/job-listings "${query}" "India"`
   ];
 
   for (const q of dorkQueries) {
     try {
+      // Free tier Serper doesn't allow 'page' or 'num > 10' for 'site:' queries
+      // We will inject recent exclusions into the query string to get fresh results
+      let dynamicQuery = q;
+      if (excludeCompanies.length > 0) {
+        // add up to 3 exclusions to the query string to force Google to give us different results
+        const exclusions = excludeCompanies.slice(0, 3).map(c => `-"${c}"`).join(' ');
+        dynamicQuery = `${q} ${exclusions}`;
+      }
+
       const res = await axios.post('https://google.serper.dev/search', {
-        q: q,
-        tbs: "qdr:d", // Past 24 hours
+        q: dynamicQuery,
+        tbs: "qdr:w", // Expanded to Past week for wider net
         num: 10
       }, {
         headers: {
@@ -89,15 +98,20 @@ Return ONLY valid JSON: {"company": "Extracted Company", "role": "Extracted Role
           }
 
           if (company !== 'Unknown Company' && role) {
-            jobs.push({
-              company,
-              role,
+            const companyLower = company.toLowerCase();
+            const isDuplicate = excludeCompanies.some(ex => ex.length > 2 && (companyLower.includes(ex) || ex.includes(companyLower)));
+            
+            if (!isDuplicate) {
+              jobs.push({
+                company,
+                role,
               jd: fullJD,
               applyLink: url,
               location: location,
               source: source,
-              publishedAt: new Date(), // It's from last 24h
-            });
+                publishedAt: new Date(), // It's from last 24h
+              });
+            }
           }
         } catch (jobErr) {
           console.error('[Scraper] Error parsing a job result', jobErr.message);
@@ -112,11 +126,11 @@ Return ONLY valid JSON: {"company": "Extracted Company", "role": "Extracted Role
 }
 
 // Search LinkedIn for HR profile based on company
-async function findHROnLinkedIn(company) {
+async function findHROnLinkedIn(company, location = 'India') {
   if (!process.env.SERPER_API_KEY) return null;
 
   try {
-    const query = `site:linkedin.com/in/ "HR" OR "Talent Acquisition" OR "Recruiter" "${company}"`;
+    const query = `site:linkedin.com/in/ "HR" OR "Talent Acquisition" OR "Recruiter" "${company}" "${location}"`;
     const res = await axios.post('https://google.serper.dev/search', {
       q: query,
       num: 3

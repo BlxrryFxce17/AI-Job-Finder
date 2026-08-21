@@ -6,6 +6,9 @@ const { google } = require('googleapis');
 const Job = require('../models/Job');
 const User = require('../models/User');
 const requireAuth = require('../middleware/requireAuth');
+const { scrapeJobsFree, findHROnLinkedIn } = require('../utils/scraper');
+const { discoverEmailForJob } = require('../utils/email');
+const { callAIWithRetry } = require('../utils/ai');
 
 router.get('/', requireAuth, async (req, res) => {
   try {
@@ -246,6 +249,56 @@ router.get('/check-bounces', requireAuth, async (req, res) => {
     res.json({ newBounces: newBouncesCount });
   } catch (err) {
     res.status(500).json({ error: 'Failed to check bounces' });
+  }
+});
+
+router.post('/scrape-hr', requireAuth, async (req, res) => {
+  const query = req.body.query || 'software engineer';
+  const location = req.body.location || 'India';
+  
+  try {
+    const existingJobs = await Job.find({ userId: req.user.id }, { company: 1 });
+    const excludeCompanies = existingJobs.map(j => (j.company || '').toLowerCase()).filter(Boolean);
+    
+    const freshJobs = await scrapeJobsFree(query, location, excludeCompanies);
+    const results = [];
+    
+    // Limit to 5 to avoid timeouts/rate limits in a single request
+    for (const job of freshJobs.slice(0, 5)) { 
+      let domain = job.company.toLowerCase().replace(/[^a-z0-9]/g, '') + '.com';
+      try {
+        const clearbitRes = await axios.get(`https://autocomplete.clearbit.com/v1/companies/suggest?query=${encodeURIComponent(job.company)}`);
+        if (clearbitRes.data && clearbitRes.data.length > 0) {
+          domain = clearbitRes.data[0].domain;
+        }
+      } catch (err) { }
+      
+      const hrProfile = await findHROnLinkedIn(job.company);
+      const emailRes = await discoverEmailForJob(job.company, domain, job.jd, [], callAIWithRetry, hrProfile ? hrProfile.name : null);
+      
+      const newJob = new Job({
+        userId: req.user.id,
+        id: Date.now().toString() + Math.random().toString().substring(2, 6),
+        company: job.company,
+        role: job.role,
+        jd: job.jd,
+        status: 'HR_Found',
+        applyLink: job.applyLink,
+        location: job.location,
+        source: job.source,
+        emailRecipient: emailRes.email || '',
+        hrName: hrProfile ? hrProfile.name : '',
+        hrLinkedIn: hrProfile ? hrProfile.linkedinUrl : '',
+        publishedAt: job.publishedAt
+      });
+      await newJob.save();
+      results.push(newJob);
+    }
+    
+    res.json({ success: true, count: results.length, jobs: results });
+  } catch (err) {
+    console.error('HR Scrape Error', err);
+    res.status(500).json({ error: 'Failed to scrape HRs' });
   }
 });
 
