@@ -12,7 +12,7 @@ function FollowUpRow({ job, f, API_BASE, token, setJobs, jobs, notify }) {
       marginBottom: '12px',
       transition: 'border-color 0.2s',
     }}>
-      <div 
+      <div
         style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', cursor: 'pointer' }}
         onClick={() => setExpanded(!expanded)}
       >
@@ -66,14 +66,14 @@ function FollowUpRow({ job, f, API_BASE, token, setJobs, jobs, notify }) {
 
       {/* Expanded Draft */}
       {expanded && (
-        <div style={{ 
-          padding: '20px', 
-          borderTop: '1px solid var(--border)', 
-          background: 'var(--surface-1)', 
-          fontSize: '13px', 
-          lineHeight: '1.6', 
-          whiteSpace: 'pre-wrap', 
-          color: 'var(--text-1)' 
+        <div style={{
+          padding: '20px',
+          borderTop: '1px solid var(--border)',
+          background: 'var(--surface-1)',
+          fontSize: '13px',
+          lineHeight: '1.6',
+          whiteSpace: 'pre-wrap',
+          color: 'var(--text-1)'
         }}>
           {f.draft}
         </div>
@@ -123,7 +123,7 @@ const DraggableTerminal = ({ batchState }) => {
       border: '1px solid #333', borderRadius: '8px', boxShadow: '0 20px 40px rgba(0,0,0,0.8)',
       display: 'flex', flexDirection: 'column', zIndex: 10000, overflow: 'hidden', color: '#00ff00', fontFamily: 'monospace'
     }}>
-      <div 
+      <div
         onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp}
         style={{ background: '#1a1a1a', padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: isDragging ? 'grabbing' : 'grab', userSelect: 'none', borderBottom: '1px solid #333' }}
       >
@@ -153,16 +153,16 @@ const DraggableTerminal = ({ batchState }) => {
           </div>
           <div style={{ padding: '12px', height: '180px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
             {batchState.logs.map((log, idx) => {
-               const isError = log.includes('Error') || log.includes('Failed');
-               const isSuccess = log.includes('Successfully');
-               let color = '#00ff00';
-               if (isError) color = '#ff0000';
-               if (isSuccess) color = '#00aaff';
-               return (
-                 <div key={idx} style={{ fontSize: '12px', color, lineHeight: 1.4 }}>
-                   <span style={{ color: '#555' }}>$</span> {log}
-                 </div>
-               );
+              const isError = log.includes('Error') || log.includes('Failed');
+              const isSuccess = log.includes('Successfully');
+              let color = '#00ff00';
+              if (isError) color = '#ff0000';
+              if (isSuccess) color = '#00aaff';
+              return (
+                <div key={idx} style={{ fontSize: '12px', color, lineHeight: 1.4 }}>
+                  <span style={{ color: '#555' }}>$</span> {log}
+                </div>
+              );
             })}
             <div ref={logsEndRef} />
           </div>
@@ -212,8 +212,15 @@ export default function DesktopApp(props) {
     removeFetchQuery,
     exportToCSV,
     useApify,
-    setUseApify
+    setUseApify,
+    appliedViewType,
+    setAppliedViewType
   } = props;
+
+  const [activeReplyIndex, setActiveReplyIndex] = React.useState(null);
+  const [draftOptions, setDraftOptions] = React.useState([]);
+  const [selectedDraft, setSelectedDraft] = React.useState('');
+  const [sendingReply, setSendingReply] = React.useState(false);
 
   return (
     <div className="dashboard-container">
@@ -298,12 +305,39 @@ export default function DesktopApp(props) {
             )}
           </div>
           <div className="header-actions">
-            <button
-              className="btn btn-ghost"
-              style={{ fontSize: '20px', padding: '8px', marginRight: '10px' }}
-              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-              title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
-            >
+            {tab === 'applications' && (
+              <select className="form-input" style={{ width: 'auto', padding: '6px 12px' }} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+                <option value="All">All Statuses</option>
+                <option value="Found">Found</option>
+                <option value="Drafting">Drafting</option>
+              </select>
+            )}
+
+            {tab === 'applied' && (
+              <div style={{ display: 'flex', background: 'var(--surface-3)', borderRadius: '20px', padding: '4px', gap: '4px', border: '1px solid var(--border)' }}>
+                {['All', 'Jobs', 'HR'].map(type => (
+                  <button
+                    key={type}
+                    onClick={() => setAppliedViewType(type)}
+                    style={{
+                      padding: '4px 16px',
+                      borderRadius: '16px',
+                      border: 'none',
+                      background: appliedViewType === type ? 'var(--accent)' : 'transparent',
+                      color: appliedViewType === type ? '#fff' : 'var(--text-2)',
+                      fontSize: '13px',
+                      fontWeight: appliedViewType === type ? '600' : '400',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s'
+                    }}
+                  >
+                    {type}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <button className="btn btn-ghost theme-toggle" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title="Toggle Theme">
               {theme === 'dark' ? '☀️' : '🌙'}
             </button>
             <button
@@ -342,79 +376,271 @@ export default function DesktopApp(props) {
           </div>
         </div>
 
-        {tab === 'analytics' && (
-          <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px', overflowY: 'auto', flex: 1 }}>
-            <h2 style={{ fontSize: '24px', fontWeight: 600 }}>Email Analytics Dashboard</h2>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px' }}>
-              
-              <div style={{ background: 'var(--surface-2)', padding: '20px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
-                <div style={{ fontSize: '14px', color: 'var(--text-2)', marginBottom: '8px' }}>Total Sourced Jobs</div>
-                <div style={{ fontSize: '32px', fontWeight: 700, color: 'var(--text-1)' }}>{jobs.length}</div>
-              </div>
+        {tab === 'inbox' && (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--surface-1)', overflow: 'hidden' }}>
 
-              <div style={{ background: 'var(--surface-2)', padding: '20px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
-                <div style={{ fontSize: '14px', color: 'var(--text-2)', marginBottom: '8px' }}>Total Sent</div>
-                <div style={{ fontSize: '32px', fontWeight: 700, color: 'var(--blue)' }}>{jobs.filter(j => j.status === 'Sent' || j.status === 'Opened' || j.status === 'Bounced').length}</div>
+            {/* Inbox Header */}
+            <div style={{ padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                {activeReplyIndex !== null && (
+                  <button
+                    className="btn btn-ghost"
+                    onClick={() => {
+                      setActiveReplyIndex(null);
+                      setDraftOptions([]);
+                      setSelectedDraft('');
+                    }}
+                    style={{ padding: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
+                  </button>
+                )}
+                <h2 style={{ fontSize: '20px', fontWeight: 500, margin: 0 }}>Smart Inbox</h2>
               </div>
-
-              <div style={{ background: 'var(--surface-2)', padding: '20px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
-                <div style={{ fontSize: '14px', color: 'var(--text-2)', marginBottom: '8px' }}>Total Opened</div>
-                <div style={{ fontSize: '32px', fontWeight: 700, color: 'var(--yellow)' }}>{jobs.filter(j => j.status === 'Opened').length}</div>
-              </div>
-
-              <div style={{ background: 'var(--surface-2)', padding: '20px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
-                <div style={{ fontSize: '14px', color: 'var(--text-2)', marginBottom: '8px' }}>Total Bounced</div>
-                <div style={{ fontSize: '32px', fontWeight: 700, color: 'var(--error)' }}>{jobs.filter(j => j.status === 'Bounced').length}</div>
-              </div>
-
-              <div style={{ background: 'var(--surface-2)', padding: '20px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
-                <div style={{ fontSize: '14px', color: 'var(--text-2)', marginBottom: '8px' }}>Links Clicked</div>
-                <div style={{ fontSize: '32px', fontWeight: 700, color: 'var(--purple)' }}>{jobs.reduce((acc, job) => acc + (job.clickedLinks ? job.clickedLinks.length : 0), 0)}</div>
-              </div>
-
-              <div style={{ background: 'var(--surface-2)', padding: '20px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
-                <div style={{ fontSize: '14px', color: 'var(--text-2)', marginBottom: '8px' }}>Follow-Ups Sent</div>
-                <div style={{ fontSize: '32px', fontWeight: 700, color: 'var(--accent)' }}>{jobs.reduce((acc, job) => acc + (job.followUps ? job.followUps.filter(f => f.sent).length : 0), 0)}</div>
-              </div>
-
-              <div style={{ background: 'var(--surface-2)', padding: '20px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
-                <div style={{ fontSize: '14px', color: 'var(--text-2)', marginBottom: '8px' }}>Open Rate</div>
-                <div style={{ fontSize: '32px', fontWeight: 700, color: 'var(--green)' }}>
-                  {jobs.filter(j => j.status === 'Sent' || j.status === 'Opened' || j.status === 'Bounced').length > 0
-                    ? Math.round((jobs.filter(j => j.status === 'Opened').length / jobs.filter(j => j.status === 'Sent' || j.status === 'Opened' || j.status === 'Bounced').length) * 100) + '%'
-                    : '0%'}
-                </div>
-              </div>
-
-              <div style={{ background: 'var(--surface-2)', padding: '20px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
-                <div style={{ fontSize: '14px', color: 'var(--text-2)', marginBottom: '8px' }}>Click-Through Rate</div>
-                <div style={{ fontSize: '32px', fontWeight: 700, color: 'var(--green)' }}>
-                  {jobs.filter(j => j.status === 'Sent' || j.status === 'Opened' || j.status === 'Bounced').length > 0
-                    ? Math.round((jobs.filter(j => j.clickedLinks && j.clickedLinks.length > 0).length / jobs.filter(j => j.status === 'Sent' || j.status === 'Opened' || j.status === 'Bounced').length) * 100) + '%'
-                    : '0%'}
-                </div>
-              </div>
-
+              <button className="btn btn-ghost" onClick={props.fetchInbox} disabled={props.inboxLoading} style={{ padding: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {props.inboxLoading ? <span className="spinner"></span> : <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>}
+              </button>
             </div>
 
-            <h3 style={{ fontSize: '18px', marginTop: '16px' }}>Recent Activity</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {jobs.filter(j => ['Sent', 'Opened', 'Bounced'].includes(j.status)).slice(0, 5).map(job => (
-                <div key={job.id} style={{ background: 'var(--surface-2)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px' }}>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontWeight: 600, wordBreak: 'break-word' }}>{job.company}</div>
-                    <div style={{ fontSize: '13px', color: 'var(--text-2)', wordBreak: 'break-word' }}>{job.role} - {job.emailRecipient}</div>
+            {/* Content Area */}
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {props.inboxLoading && (!props.inboxReplies || props.inboxReplies.length === 0) ? (
+                <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-3)' }}>Loading inbox...</div>
+              ) : props.inboxReplies && props.inboxReplies.length > 0 ? (
+
+                activeReplyIndex !== null ? (
+                  /* --- Detail View --- */
+                  <div style={{ padding: '32px 48px', maxWidth: '900px', margin: '0 auto' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
+                      <h1 style={{ fontSize: '24px', fontWeight: 400, color: 'var(--text-1)', margin: 0 }}>
+                        {props.inboxReplies[activeReplyIndex].subject}
+                      </h1>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        {!(props.inboxReplies[activeReplyIndex].threadMessages && props.inboxReplies[activeReplyIndex].threadMessages.length > 0 && props.inboxReplies[activeReplyIndex].threadMessages[props.inboxReplies[activeReplyIndex].threadMessages.length - 1].isMe) && (
+                          <button
+                            className="btn btn-primary"
+                            style={{ fontSize: '13px', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '8px' }}
+                            onClick={async (e) => {
+                              const btn = e.target;
+                              const originalText = btn.innerHTML;
+                              btn.innerText = 'Drafting...';
+                              btn.disabled = true;
+                              try {
+                                const res = await fetch(`${API_BASE}/api/inbox/draft-reply`, {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` },
+                                  body: JSON.stringify({
+                                    from: props.inboxReplies[activeReplyIndex].from,
+                                    subject: props.inboxReplies[activeReplyIndex].subject,
+                                    body: props.inboxReplies[activeReplyIndex].body
+                                  })
+                                });
+                                const data = await res.json();
+                                if (data.drafts && data.drafts.length > 0) {
+                                  setDraftOptions(data.drafts);
+                                  setSelectedDraft(data.drafts[0]);
+                                } else {
+                                  notify('Failed to generate drafts.', 'error');
+                                }
+                              } catch (err) {
+                                notify('Error generating draft.', 'error');
+                              }
+                              btn.innerHTML = originalText;
+                              btn.disabled = false;
+                            }}
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></svg>
+                            Draft Reply with AI
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                      {props.inboxReplies[activeReplyIndex].threadMessages && props.inboxReplies[activeReplyIndex].threadMessages.length > 0 ? (
+                        props.inboxReplies[activeReplyIndex].threadMessages.map((tMsg, idx) => (
+                          <div key={idx} style={{
+                            padding: '16px',
+                            borderRadius: '8px',
+                            background: tMsg.isMe ? 'var(--surface-2)' : 'var(--surface-1)',
+                            border: '1px solid var(--border)',
+                            marginLeft: tMsg.isMe ? '40px' : '0',
+                            marginRight: tMsg.isMe ? '0' : '40px'
+                          }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
+                              <span style={{ fontWeight: 600, fontSize: '13px' }}>{tMsg.from}</span>
+                              <span style={{ fontSize: '12px', color: 'var(--text-3)' }}>{tMsg.date}</span>
+                            </div>
+                            <div style={{ fontSize: '14px', lineHeight: '1.6', whiteSpace: 'pre-wrap', color: 'var(--text-1)', wordBreak: 'break-word', overflowWrap: 'break-word' }}>
+                              {tMsg.body}
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div style={{
+                          padding: '16px',
+                          borderRadius: '8px',
+                          background: 'var(--surface-1)',
+                          border: '1px solid var(--border)'
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
+                            <span style={{ fontWeight: 600, fontSize: '13px' }}>{props.inboxReplies[activeReplyIndex].from}</span>
+                            <span style={{ fontSize: '12px', color: 'var(--text-3)' }}>{props.inboxReplies[activeReplyIndex].date}</span>
+                          </div>
+                          <div style={{ fontSize: '14px', lineHeight: '1.6', whiteSpace: 'pre-wrap', color: 'var(--text-1)', wordBreak: 'break-word', overflowWrap: 'break-word' }}>
+                            {props.inboxReplies[activeReplyIndex].body || props.inboxReplies[activeReplyIndex].snippet}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {draftOptions && draftOptions.length > 0 && (
+                      <div style={{
+                        position: 'fixed',
+                        top: 0, left: 0, right: 0, bottom: 0,
+                        backgroundColor: 'rgba(0,0,0,0.6)',
+                        zIndex: 9999,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}>
+                        <div style={{
+                          background: 'var(--surface-1)',
+                          width: '800px',
+                          maxWidth: '90%',
+                          borderRadius: '12px',
+                          padding: '32px',
+                          boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '24px'
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <h3 style={{ fontSize: '20px', fontWeight: 500, margin: 0 }}>Select an AI Draft</h3>
+                            <button className="btn btn-ghost" onClick={() => { setDraftOptions([]); setSelectedDraft(''); }} style={{ padding: '8px' }}>
+                              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+                            </button>
+                          </div>
+
+                          <div style={{ display: 'flex', gap: '12px' }}>
+                            {draftOptions.map((draft, idx) => (
+                              <button
+                                key={idx}
+                                className="btn"
+                                style={{
+                                  flex: 1,
+                                  padding: '16px',
+                                  fontSize: '14px',
+                                  fontWeight: 600,
+                                  textAlign: 'center',
+                                  background: selectedDraft === draft ? 'var(--accent, #d34a36)' : 'var(--surface-2, #2a2a2a)',
+                                  color: selectedDraft === draft ? '#ffffff' : 'var(--text-2, #cccccc)',
+                                  border: selectedDraft === draft ? '1px solid var(--accent, #d34a36)' : '1px solid var(--border, #333333)',
+                                  transition: 'all 0.2s'
+                                }}
+                                onClick={() => setSelectedDraft(draft)}
+                              >
+                                Option {idx + 1}
+                              </button>
+                            ))}
+                          </div>
+
+                          {selectedDraft && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                              <textarea
+                                className="input"
+                                style={{ width: '100%', minHeight: '200px', padding: '16px', fontSize: '14px', resize: 'vertical', background: 'var(--surface-2)', color: 'var(--text-1)', border: '1px solid var(--border)', borderRadius: '8px' }}
+                                value={selectedDraft}
+                                onChange={(e) => setSelectedDraft(e.target.value)}
+                              />
+                              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+                                <button className="btn btn-ghost" onClick={() => { setDraftOptions([]); setSelectedDraft(''); }}>Cancel</button>
+                                <button
+                                  className="btn btn-primary"
+                                  disabled={sendingReply}
+                                  onClick={async () => {
+                                    setSendingReply(true);
+                                    try {
+                                      const replyData = props.inboxReplies[activeReplyIndex];
+                                      const res = await fetch(`${API_BASE}/api/inbox/send-reply`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` },
+                                        body: JSON.stringify({
+                                          to: replyData.fromFull,
+                                          subject: replyData.subject,
+                                          body: selectedDraft,
+                                          messageId: replyData.messageId,
+                                          threadId: replyData.threadId
+                                        })
+                                      });
+                                      if (res.ok) {
+                                        notify('Reply sent successfully!', 'success');
+                                        setDraftOptions([]);
+                                        setSelectedDraft('');
+                                        props.fetchInbox(); // Refresh threads
+                                      } else {
+                                        notify('Failed to send reply', 'error');
+                                      }
+                                    } catch (err) {
+                                      notify('Error sending reply', 'error');
+                                    }
+                                    setSendingReply(false);
+                                  }}
+                                >
+                                  {sendingReply ? 'Sending...' : 'Send Reply'}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <div style={{ 
-                    color: job.status === 'Opened' ? 'var(--yellow)' : job.status === 'Sent' ? 'var(--blue)' : 'var(--error)', 
-                    fontSize: '13px', fontWeight: 600, flexShrink: 0 
-                  }}>
-                    {job.status}
+                ) : (
+                  /* --- List View --- */
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    {props.inboxReplies.map((reply, i) => (
+                      <div
+                        key={i}
+                        onClick={() => setActiveReplyIndex(i)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          padding: '10px 16px',
+                          borderBottom: '1px solid var(--border)',
+                          cursor: 'pointer',
+                          background: 'var(--surface-1)',
+                          transition: 'background 0.1s'
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.boxShadow = 'inset 1px 0 0 #dadce0, inset -1px 0 0 #dadce0, 0 1px 2px 0 rgba(60,64,67,.3), 0 1px 3px 1px rgba(60,64,67,.15)'}
+                        onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', width: '60px', flexShrink: 0 }}>
+                          <input type="checkbox" style={{ accentColor: 'var(--text-3)', cursor: 'pointer' }} onClick={(e) => e.stopPropagation()} />
+                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ cursor: 'pointer' }}><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
+                        </div>
+                        <div style={{ width: '200px', fontWeight: 600, fontSize: '14px', color: 'var(--text-1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 0, paddingRight: '16px' }}>
+                          {reply.from.split('<')[0].trim()}
+                        </div>
+                        <div style={{ flex: 1, display: 'flex', alignItems: 'center', minWidth: 0, paddingRight: '16px' }}>
+                          <span style={{ fontWeight: 600, fontSize: '14px', color: 'var(--text-1)', marginRight: '8px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {reply.subject}
+                          </span>
+                          <span style={{ fontSize: '14px', color: 'var(--text-3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>
+                            - {reply.snippet}
+                          </span>
+                        </div>
+                        <div style={{ width: '80px', fontSize: '12px', color: 'var(--text-1)', fontWeight: 500, textAlign: 'right', flexShrink: 0 }}>
+                          {new Date(reply.date).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                        </div>
+                      </div>
+                    ))}
                   </div>
+                )
+              ) : (
+                <div style={{ padding: '60px', textAlign: 'center', color: 'var(--text-3)', fontSize: '14px' }}>
+                  No replies found from HRs yet. Keep applying!
                 </div>
-              ))}
-              {jobs.filter(j => ['Sent', 'Opened', 'Bounced'].includes(j.status)).length === 0 && (
-                <div style={{ color: 'var(--text-3)', fontStyle: 'italic' }}>No emails have been sent yet.</div>
               )}
             </div>
           </div>
@@ -451,15 +677,15 @@ export default function DesktopApp(props) {
                 (job.followUps || [])
                   .filter(f => !f.sent)
                   .map(f => (
-                    <FollowUpRow 
-                      key={`${job.id}-${f.day}`} 
-                      job={job} 
-                      f={f} 
-                      API_BASE={API_BASE} 
-                      token={localStorage.getItem('token') || ''} 
-                      setJobs={setJobs} 
-                      jobs={jobs} 
-                      notify={notify} 
+                    <FollowUpRow
+                      key={`${job.id}-${f.day}`}
+                      job={job}
+                      f={f}
+                      API_BASE={API_BASE}
+                      token={localStorage.getItem('token') || ''}
+                      setJobs={setJobs}
+                      jobs={jobs}
+                      notify={notify}
                     />
                   ))
               )}
@@ -490,7 +716,7 @@ export default function DesktopApp(props) {
                     <div style={{ width: '1px', height: '24px', background: 'var(--border)', margin: '0 4px' }}></div>
                   </>
                 )}
-                
+
                 <button className="btn btn-secondary" onClick={() => {
                   const hrJobs = jobs.filter(j => j.status === 'HR_Found');
                   if (selectedJobs.length === hrJobs.length && hrJobs.length > 0) setSelectedJobs([]);
@@ -538,10 +764,10 @@ export default function DesktopApp(props) {
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div style={{ fontWeight: 600, fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <input 
-                          type="checkbox" 
-                          checked={selectedJobs.includes(job.id)} 
-                          onChange={() => toggleSelectJob(job.id)} 
+                        <input
+                          type="checkbox"
+                          checked={selectedJobs.includes(job.id)}
+                          onChange={() => toggleSelectJob(job.id)}
                           style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: 'var(--accent)' }}
                         />
                         {job.hrName || 'Unknown HR'}
@@ -552,12 +778,12 @@ export default function DesktopApp(props) {
                             {job.source}
                           </span>
                         )}
-                        <button 
-                          className="btn btn-ghost" 
-                          style={{ 
-                            padding: '4px', 
-                            color: 'var(--text-3)', 
-                            fontSize: '16px', 
+                        <button
+                          className="btn btn-ghost"
+                          style={{
+                            padding: '4px',
+                            color: 'var(--text-3)',
+                            fontSize: '16px',
                             lineHeight: 1,
                             background: 'transparent',
                             border: 'none',
@@ -588,7 +814,7 @@ export default function DesktopApp(props) {
                     <div style={{ fontSize: '13px', color: 'var(--accent)', marginTop: '4px' }}>{job.company}</div>
                     <div style={{ fontSize: '13px', color: 'var(--text-2)' }}>{job.role}</div>
                   </div>
-                  
+
                   <div style={{ fontSize: '13px', background: 'var(--surface-1)', padding: '10px', borderRadius: '8px' }}>
                     <strong>Email:</strong> {job.emailRecipient || 'Not Found'}
                   </div>
@@ -599,31 +825,9 @@ export default function DesktopApp(props) {
                         🔗 Connect
                       </a>
                     )}
-                    <button className="btn btn-primary" style={{ flex: 1, fontSize: '13px', padding: '8px' }} onClick={async () => {
+                    <button className="btn btn-primary" style={{ flex: 1, fontSize: '13px', padding: '8px' }} onClick={() => {
                       if (!job.emailRecipient) return notify('No email found to send to!', 'error');
-                      setToast({ msg: 'Drafting email...', type: 'success' });
-                      try {
-                        const draftRes = await fetch(`${API_BASE}/api/generate-email`, {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` },
-                          body: JSON.stringify({ company: job.company, role: job.role, type: 'Cold Outreach', jd: job.jd })
-                        });
-                        const draftData = await draftRes.json();
-                        
-                        const sendRes = await fetch(`${API_BASE}/api/send-email`, {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` },
-                          body: JSON.stringify({ jobId: job.id, to: job.emailRecipient, subject: `Application for ${job.role}`, body: draftData.draft })
-                        });
-                        if (sendRes.ok) {
-                          notify('Email sent successfully!');
-                          loadJobs();
-                        } else {
-                          notify('Failed to send email', 'error');
-                        }
-                      } catch (e) {
-                        notify('Error sending email', 'error');
-                      }
+                      handleBatchSend([job.id]);
                     }}>
                       ✉️ Send Mail
                     </button>
@@ -803,15 +1007,15 @@ export default function DesktopApp(props) {
         ) : tab === 'ai_settings' ? (
           <div style={{ padding: '30px', flex: 1, overflowY: 'auto' }}>
             <h2 style={{ fontSize: '24px', fontWeight: 600, marginBottom: '24px', color: 'var(--text-1)' }}>AI Prompt Settings</h2>
-            
+
             <div style={{ background: 'var(--surface-2)', padding: '24px', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
               <form onSubmit={handleProfileSave} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                
+
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'var(--surface-3)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
-                  <input 
-                    type="checkbox" 
+                  <input
+                    type="checkbox"
                     id="enableFlex"
-                    checked={profile.enableFlex !== false} 
+                    checked={profile.enableFlex !== false}
                     onChange={e => setProfile({ ...profile, enableFlex: e.target.checked })}
                     style={{ width: '18px', height: '18px', cursor: 'pointer' }}
                   />
@@ -828,12 +1032,12 @@ export default function DesktopApp(props) {
                 <div>
                   <label style={{ display: 'block', marginBottom: '8px', fontWeight: '600', color: 'var(--text-1)' }}>Custom AI Instructions</label>
                   <div style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '8px' }}>Add any custom rules, constraints, or specific formats you want the AI to follow.</div>
-                  <textarea 
-                    className="form-input" 
-                    style={{ width: '100%', height: '150px', resize: 'vertical' }} 
+                  <textarea
+                    className="form-input"
+                    style={{ width: '100%', height: '150px', resize: 'vertical' }}
                     placeholder="e.g. Always mention that I am willing to relocate to New York. Do not use words like 'synergy'..."
-                    value={profile.aiInstructions || ''} 
-                    onChange={e => setProfile({ ...profile, aiInstructions: e.target.value })} 
+                    value={profile.aiInstructions || ''}
+                    onChange={e => setProfile({ ...profile, aiInstructions: e.target.value })}
                   />
                 </div>
 
@@ -951,7 +1155,7 @@ export default function DesktopApp(props) {
                               <span>{job.company}</span>
                               {job.source && job.source !== 'Manual' && (
                                 <span className={`source-pill source-${job.source.toLowerCase()}`}>
-                                  <img src={`https://www.google.com/s2/favicons?domain=${job.source.toLowerCase()}.com&sz=16`} alt={job.source} style={{width: 12, height: 12, borderRadius: '2px'}} />
+                                  <img src={`https://www.google.com/s2/favicons?domain=${job.source.toLowerCase()}.com&sz=16`} alt={job.source} style={{ width: 12, height: 12, borderRadius: '2px' }} />
                                   {job.source}
                                 </span>
                               )}

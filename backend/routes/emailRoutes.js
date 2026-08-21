@@ -6,7 +6,8 @@ const User = require('../models/User');
 const Profile = require('../models/Profile');
 const requireAuth = require('../middleware/requireAuth');
 const { callAIWithRetry } = require('../utils/ai');
-const { sendEmailViaAPI, discoverEmailForJob } = require('../utils/email');
+const { sendEmailViaAPI, discoverEmailForJob, getInboxReplies } = require('../utils/email');
+const { generateTailoredResumePDF } = require('../utils/pdfGenerator');
 
 async function getProfile(userId) {
   let profile = await Profile.findOne({ userId });
@@ -121,12 +122,7 @@ router.post('/send-email', requireAuth, async (req, res) => {
     const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${jobId}" width="1" height="1" style="display:none;" />` : '';
 
     let formattedDraft = body.replace(/\n/g, '<br/>');
-    if (baseUrl) {
-      const resumeLinkUrl = trackClick(`${baseUrl}/api/profile/resume-pdf?userId=${req.user.id}`);
-      formattedDraft = formattedDraft.replace('You can view my CV here.', `<a href="${resumeLinkUrl}">You can view my CV here.</a>`);
-    } else {
-      formattedDraft = formattedDraft.replace('You can view my CV here.', 'I have attached my CV to this email for your reference.');
-    }
+    formattedDraft = formattedDraft.replace('You can view my CV here.', 'I have attached my CV to this email for your reference.');
 
     const htmlBody = `
       <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
@@ -144,17 +140,39 @@ router.post('/send-email', requireAuth, async (req, res) => {
 
     const mailOptions = {
       from: user.email || process.env.EMAIL_USER,
-      to,
+      to: (to || '').trim(),
       subject: subject || (job ? `Application for ${job.role} - ${profile.name}` : 'Job Application'),
       html: htmlBody,
       attachments: []
     };
 
-    if (!baseUrl && profile.resumePdf) {
-      mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
+    try {
+      if (profile.resumeText || profile.skills?.length > 0) {
+        const pdfBuffer = await generateTailoredResumePDF(profile, job ? job.role : 'Software Engineer', job ? job.jd : '');
+        mailOptions.attachments.push({ filename: `${profile.name.replace(/\s+/g, '_')}_CV.pdf`, content: pdfBuffer });
+      } else if (profile.resumePdf) {
+        mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
+      }
+    } catch (pdfErr) {
+      console.error('Failed to generate tailored PDF, falling back to original:', pdfErr);
+      if (profile.resumePdf) {
+        mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
+      }
     }
 
     const info = await sendEmailViaAPI(user, mailOptions);
+    
+    if (job) {
+      job.status = 'Sent';
+      job.sentAt = new Date();
+      job.tracked = !!baseUrl;
+      job.emailDraft = body; // Save the final draft sent
+      if (to && to !== job.emailRecipient) {
+        job.emailRecipient = to; // Update if changed manually
+      }
+      await job.save();
+    }
+
     res.json({ success: true, tracked: !!baseUrl, message: 'Email sent successfully!', messageId: info.messageId });
   } catch (error) {
     console.error('Error sending email:', error);
@@ -235,12 +253,8 @@ BODY:
     const trackClick = (url) => (baseUrl && url) ? `${baseUrl}/api/track-click/${jobId}?url=${encodeURIComponent(url)}` : (url || '');
     const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${jobId}" width="1" height="1" style="display:none;" />` : '';
 
-    if (baseUrl) {
-      const resumeLinkUrl = trackClick(`${baseUrl}/api/profile/resume-pdf?userId=${req.user.id}`);
-      formattedDraft = formattedDraft.replace('You can view my CV here.', `<a href="${resumeLinkUrl}">You can view my CV here.</a>`);
-    } else {
-      formattedDraft = formattedDraft.replace('You can view my CV here.', 'I have attached my CV to this email for your reference.');
-    }
+
+    formattedDraft = formattedDraft.replace('You can view my CV here.', 'I have attached my CV to this email for your reference.');
 
     const linkedInUrl = trackClick(profile.linkedin);
     const githubUrl = trackClick(profile.github);
@@ -266,8 +280,18 @@ BODY:
       attachments: []
     };
 
-    if (!baseUrl && profile.resumePdf) {
-      mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
+    try {
+      if (profile.resumeText || profile.skills?.length > 0) {
+        const pdfBuffer = await generateTailoredResumePDF(profile, extractedRole, jd);
+        mailOptions.attachments.push({ filename: `${profile.name.replace(/\s+/g, '_')}_CV.pdf`, content: pdfBuffer });
+      } else if (profile.resumePdf) {
+        mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
+      }
+    } catch (pdfErr) {
+      console.error('Failed to generate tailored PDF, falling back to original:', pdfErr);
+      if (profile.resumePdf) {
+        mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
+      }
     }
 
     await sendEmailViaAPI(user, mailOptions);
@@ -340,12 +364,7 @@ ${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructio
     const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${testJobId}" width="1" height="1" style="display:none;" />` : '';
 
     let formattedDraft = draftText.replace(/\n/g, '<br/>');
-    if (baseUrl) {
-      const resumeLinkUrl = trackClick(`${baseUrl}/api/profile/resume-pdf?userId=${req.user.id}`);
-      formattedDraft = formattedDraft.replace('You can view my CV here.', `<a href="${resumeLinkUrl}">You can view my CV here.</a>`);
-    } else {
-      formattedDraft = formattedDraft.replace('You can view my CV here.', 'I have attached my CV to this email for your reference.');
-    }
+    formattedDraft = formattedDraft.replace('You can view my CV here.', 'I have attached my CV to this email for your reference.');
 
     const htmlBody = `
       <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
@@ -369,8 +388,18 @@ ${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructio
       attachments: []
     };
 
-    if (!baseUrl && profile.resumePdf) {
-      mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
+    try {
+      if (profile.resumeText || profile.skills?.length > 0) {
+        const pdfBuffer = await generateTailoredResumePDF(profile, role, jd);
+        mailOptions.attachments.push({ filename: `${profile.name.replace(/\s+/g, '_')}_CV.pdf`, content: pdfBuffer });
+      } else if (profile.resumePdf) {
+        mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
+      }
+    } catch (pdfErr) {
+      console.error('Failed to generate tailored PDF, falling back to original:', pdfErr);
+      if (profile.resumePdf) {
+        mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
+      }
     }
 
     await sendEmailViaAPI(user, mailOptions);
@@ -393,6 +422,104 @@ ${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructio
   } catch (err) {
     console.error('Test Email Error:', err);
     res.status(500).json({ error: 'Failed to send test email' });
+  }
+});
+
+router.get('/inbox', requireAuth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user || !user.googleRefreshToken) {
+      return res.status(400).json({ error: 'No Google account connected.' });
+    }
+
+    // Get all unique HR emails we've sent to
+    const jobs = await Job.find({ userId: req.user.id, emailRecipient: { $exists: true, $ne: null } });
+    const hrEmails = [...new Set(jobs.map(j => j.emailRecipient))];
+
+    if (hrEmails.length === 0) {
+      return res.json({ replies: [] });
+    }
+
+    const replies = await getInboxReplies(user, hrEmails);
+    res.json({ replies });
+  } catch (err) {
+    console.error('Error fetching inbox:', err);
+    res.status(500).json({ error: 'Failed to fetch inbox replies' });
+  }
+});
+
+router.post('/inbox/draft-reply', requireAuth, async (req, res) => {
+  try {
+    const { from, subject, body } = req.body;
+    const profile = await getProfile(req.user.id);
+
+    const prompt = `You are an elite software engineer named ${profile.name}. 
+You just received the following reply from a hiring manager/recruiter:
+From: ${from}
+Subject: ${subject}
+Message:
+"""
+${body}
+"""
+
+Please draft 3 distinct, highly professional, and concise replies to this email. 
+Separate each draft using the exact delimiter "===DRAFT===" on its own line.
+Do not include any conversational text, internal thoughts, JSON, or markdown blocks. Just the 3 drafts separated by the delimiter.`;
+
+    const response = await callAIWithRetry(prompt, 3, 2000);
+    let rawText = response.text.replace(/```(?:html|json|markdown)?\s*([\s\S]*?)```/g, '$1').trim();
+    
+    let draftOptions = rawText.split('===DRAFT===').map(s => s.trim()).filter(s => s.length > 20).slice(0, 3);
+    
+    // Fallback just in case it still uses newlines
+    if (draftOptions.length < 2) {
+      const fallbackOptions = rawText.split(/\n\s*\n/).map(s => s.trim()).filter(s => s.length > 20);
+      if (fallbackOptions.length >= 2) {
+        draftOptions = fallbackOptions.slice(0, 3);
+      }
+    }
+
+    res.json({ drafts: draftOptions });
+  } catch (err) {
+    console.error('Error drafting inbox reply:', err);
+    res.status(500).json({ error: 'Failed to draft replies' });
+  }
+});
+
+router.post('/inbox/send-reply', requireAuth, async (req, res) => {
+  try {
+    const { to, subject, body, messageId, threadId } = req.body;
+    const user = await User.findById(req.user.id);
+    const profile = await getProfile(req.user.id);
+
+    const formattedDraft = body.replace(/\n/g, '<br/>');
+    
+    const htmlBody = `
+      <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
+        ${formattedDraft}
+        <br/><br/>
+        Yours Sincerely,<br/>
+        <b>${profile.name}</b><br/>
+        ${profile.title}<br/>
+        📞 ${profile.phone}
+      </div>
+    `;
+
+    const mailOptions = {
+      from: user.email || process.env.EMAIL_USER,
+      to,
+      subject: subject.startsWith('Re:') ? subject : `Re: ${subject}`,
+      html: htmlBody,
+      inReplyTo: messageId,
+      references: [messageId],
+      threadId: threadId
+    };
+
+    const info = await sendEmailViaAPI(user, mailOptions);
+    res.json({ success: true, message: 'Reply sent successfully!', messageId: info.messageId });
+  } catch (err) {
+    console.error('Error sending inbox reply:', err);
+    res.status(500).json({ error: 'Failed to send reply' });
   }
 });
 

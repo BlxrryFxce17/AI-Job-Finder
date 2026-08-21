@@ -116,10 +116,17 @@ export default function MobileApp(props) {
     removeFetchQuery,
     exportToCSV,
     useApify,
-    setUseApify
+    setUseApify,
+    appliedViewType,
+    setAppliedViewType
   } = props;
 
   const [isScrolled, setIsScrolled] = React.useState(false);
+  const [activeReplyIndex, setActiveReplyIndex] = React.useState(null);
+  const [draftOptions, setDraftOptions] = React.useState([]);
+  const [selectedDraft, setSelectedDraft] = React.useState('');
+  const [sendingReply, setSendingReply] = React.useState(false);
+  const [showMoreMenu, setShowMoreMenu] = React.useState(false);
 
   return (
     <div className="mobile-app-container">
@@ -187,86 +194,292 @@ export default function MobileApp(props) {
             </div>
           </div>
           <h1 className="mobile-page-title">{NAV.find(n => n.id === tab)?.label || tab}</h1>
+          
+          {tab === 'applied' && (
+            <div style={{ display: 'flex', background: 'var(--surface-3)', borderRadius: '20px', padding: '4px', gap: '4px', border: '1px solid var(--border)', marginTop: '8px' }}>
+              {['All', 'Jobs', 'HR'].map(type => (
+                <button 
+                  key={type}
+                  onClick={() => setAppliedViewType(type)}
+                  style={{
+                    flex: 1,
+                    padding: '6px 0',
+                    borderRadius: '16px',
+                    border: 'none',
+                    background: appliedViewType === type ? 'var(--accent)' : 'transparent',
+                    color: appliedViewType === type ? '#fff' : 'var(--text-2)',
+                    fontSize: '13px',
+                    fontWeight: appliedViewType === type ? '600' : '400',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  {type}
+                </button>
+              ))}
+            </div>
+          )}
+
           {tab !== 'resume' && tab !== 'single_drafter' && (
             <p className="mobile-subtitle">{activeJobs.length} results found</p>
           )}
         </div>
 
-        {tab === 'analytics' && (
-          <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto' }}>
-            <h2 style={{ fontSize: '20px', fontWeight: 600 }}>Email Analytics Dashboard</h2>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-              
-              <div style={{ background: 'var(--surface-2)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
-                <div style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '8px' }}>Total Sourced</div>
-                <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--text-1)' }}>{jobs.length}</div>
-              </div>
 
-              <div style={{ background: 'var(--surface-2)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
-                <div style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '8px' }}>Total Sent</div>
-                <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--blue)' }}>{jobs.filter(j => j.status === 'Sent' || j.status === 'Opened' || j.status === 'Bounced').length}</div>
-              </div>
-
-              <div style={{ background: 'var(--surface-2)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
-                <div style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '8px' }}>Total Opened</div>
-                <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--yellow)' }}>{jobs.filter(j => j.status === 'Opened').length}</div>
-              </div>
-
-              <div style={{ background: 'var(--surface-2)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
-                <div style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '8px' }}>Total Bounced</div>
-                <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--error)' }}>{jobs.filter(j => j.status === 'Bounced').length}</div>
-              </div>
-
-              <div style={{ background: 'var(--surface-2)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
-                <div style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '8px' }}>Links Clicked</div>
-                <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--purple)' }}>{jobs.reduce((acc, job) => acc + (job.clickedLinks ? job.clickedLinks.length : 0), 0)}</div>
-              </div>
-
-              <div style={{ background: 'var(--surface-2)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
-                <div style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '8px' }}>Follow-Ups</div>
-                <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--accent)' }}>{jobs.reduce((acc, job) => acc + (job.followUps ? job.followUps.filter(f => f.sent).length : 0), 0)}</div>
-              </div>
-
-              <div style={{ background: 'var(--surface-2)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
-                <div style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '8px' }}>Open Rate</div>
-                <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--green)' }}>
-                  {jobs.filter(j => j.status === 'Sent' || j.status === 'Opened' || j.status === 'Bounced').length > 0 
-                    ? Math.round((jobs.filter(j => j.status === 'Opened').length / jobs.filter(j => j.status === 'Sent' || j.status === 'Opened' || j.status === 'Bounced').length) * 100) + '%'
-                    : '0%'}
-                </div>
-              </div>
-
-              <div style={{ background: 'var(--surface-2)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', textAlign: 'center' }}>
-                <div style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '8px' }}>CTR</div>
-                <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--green)' }}>
-                  {jobs.filter(j => j.status === 'Sent' || j.status === 'Opened' || j.status === 'Bounced').length > 0 
-                    ? Math.round((jobs.filter(j => j.clickedLinks && j.clickedLinks.length > 0).length / jobs.filter(j => j.status === 'Sent' || j.status === 'Opened' || j.status === 'Bounced').length) * 100) + '%'
-                    : '0%'}
-                </div>
-              </div>
-            </div>
+        {tab === 'inbox' && (
+          <>
             
-            <h3 style={{ fontSize: '16px', marginTop: '12px' }}>Recent Activity</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {jobs.filter(j => ['Sent', 'Opened', 'Bounced'].includes(j.status)).slice(0, 5).map(job => (
-                <div key={job.id} style={{ background: 'var(--surface-2)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: '14px' }}>{job.company}</div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-2)' }}>{job.role} - {job.emailRecipient}</div>
+            <div style={{ padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                {activeReplyIndex !== null && (
+                  <button 
+                    className="btn btn-ghost" 
+                    onClick={() => {
+                      setActiveReplyIndex(null);
+                      setDraftOptions([]);
+                      setSelectedDraft('');
+                    }}
+                    style={{ padding: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+                  </button>
+                )}
+                <h2 style={{ fontSize: '18px', fontWeight: 600, margin: 0 }}>Smart Inbox</h2>
+              </div>
+              <button className="btn btn-ghost" onClick={props.fetchInbox} disabled={props.inboxLoading} style={{ padding: '6px' }}>
+                {props.inboxLoading ? <span className="spinner"></span> : <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>}
+              </button>
+            </div>
+
+            <div style={{ paddingBottom: '20px' }}>
+              {props.inboxLoading && (!props.inboxReplies || props.inboxReplies.length === 0) ? (
+                <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-3)' }}>Loading...</div>
+              ) : props.inboxReplies && props.inboxReplies.length > 0 ? (
+                
+                activeReplyIndex !== null ? (
+                  <div style={{ padding: '20px 16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
+                      <h1 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text-1)', margin: 0 }}>
+                        {props.inboxReplies[activeReplyIndex].subject}
+                      </h1>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginBottom: '24px' }}>
+                      {props.inboxReplies[activeReplyIndex].threadMessages && props.inboxReplies[activeReplyIndex].threadMessages.length > 0 ? (
+                        props.inboxReplies[activeReplyIndex].threadMessages.map((tMsg, idx) => (
+                          <div key={idx} style={{ 
+                            padding: '14px', 
+                            borderRadius: '8px', 
+                            background: tMsg.isMe ? 'var(--surface-2)' : 'var(--surface-1)',
+                            border: '1px solid var(--border)',
+                            marginLeft: tMsg.isMe ? '24px' : '0',
+                            marginRight: tMsg.isMe ? '0' : '24px'
+                          }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                              <span style={{ fontWeight: 600, fontSize: '13px' }}>{tMsg.from}</span>
+                              <span style={{ fontSize: '11px', color: 'var(--text-3)' }}>{tMsg.date.substring(0, 16)}</span>
+                            </div>
+                            <div style={{ fontSize: '13px', lineHeight: '1.5', whiteSpace: 'pre-wrap', color: 'var(--text-1)', wordBreak: 'break-word', overflowWrap: 'break-word' }}>
+                              {tMsg.body}
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div style={{ 
+                          padding: '14px', 
+                          borderRadius: '8px', 
+                          background: 'var(--surface-1)',
+                          border: '1px solid var(--border)'
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                            <span style={{ fontWeight: 600, fontSize: '13px' }}>{props.inboxReplies[activeReplyIndex].from}</span>
+                            <span style={{ fontSize: '11px', color: 'var(--text-3)' }}>{props.inboxReplies[activeReplyIndex].date.substring(0, 16)}</span>
+                          </div>
+                          <div style={{ fontSize: '13px', lineHeight: '1.5', whiteSpace: 'pre-wrap', color: 'var(--text-1)', wordBreak: 'break-word', overflowWrap: 'break-word' }}>
+                            {props.inboxReplies[activeReplyIndex].body || props.inboxReplies[activeReplyIndex].snippet}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {!(props.inboxReplies[activeReplyIndex].threadMessages && props.inboxReplies[activeReplyIndex].threadMessages.length > 0 && props.inboxReplies[activeReplyIndex].threadMessages[props.inboxReplies[activeReplyIndex].threadMessages.length - 1].isMe) && (
+                    <button 
+                      className="btn btn-primary"
+                      style={{ fontSize: '13px', padding: '10px', width: '100%', display: 'flex', justifyContent: 'center', gap: '8px' }}
+                      onClick={async (e) => {
+                        const btn = e.target;
+                        const originalText = btn.innerHTML;
+                        btn.innerText = 'Drafting...';
+                        btn.disabled = true;
+                        try {
+                          const res = await fetch(`${API_BASE}/api/inbox/draft-reply`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` },
+                            body: JSON.stringify({ 
+                              from: props.inboxReplies[activeReplyIndex].from, 
+                              subject: props.inboxReplies[activeReplyIndex].subject, 
+                              body: props.inboxReplies[activeReplyIndex].body 
+                            })
+                          });
+                          const data = await res.json();
+                          if (data.drafts && data.drafts.length > 0) {
+                            setDraftOptions(data.drafts);
+                            setSelectedDraft(data.drafts[0]);
+                          } else {
+                            notify('Failed to generate drafts.', 'error');
+                          }
+                        } catch (err) {
+                          notify('Error generating draft.', 'error');
+                        }
+                        btn.innerHTML = originalText;
+                        btn.disabled = false;
+                      }}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+                      Draft Reply with AI
+                    </button>
+                    )}
+
+                    {draftOptions && draftOptions.length > 0 && (
+                      <div style={{
+                        position: 'fixed',
+                        top: 0, left: 0, right: 0, bottom: 0,
+                        backgroundColor: 'rgba(0,0,0,0.6)',
+                        zIndex: 9999,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}>
+                        <div style={{
+                          background: 'var(--surface-1)',
+                          width: '90%',
+                          maxHeight: '90vh',
+                          overflowY: 'auto',
+                          borderRadius: '12px',
+                          padding: '24px',
+                          boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '20px'
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <h3 style={{ fontSize: '18px', fontWeight: 600, margin: 0 }}>Select an AI Draft</h3>
+                            <button className="btn btn-ghost" onClick={() => { setDraftOptions([]); setSelectedDraft(''); }} style={{ padding: '8px' }}>
+                              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                            </button>
+                          </div>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            {draftOptions.map((draft, idx) => (
+                              <button
+                                key={idx}
+                                className="btn"
+                                style={{ 
+                                  flex: 1, 
+                                  padding: '12px', 
+                                  fontSize: '13px', 
+                                  fontWeight: 600, 
+                                  textAlign: 'center',
+                                  background: selectedDraft === draft ? 'var(--accent, #d34a36)' : 'var(--surface-2, #2a2a2a)',
+                                  color: selectedDraft === draft ? '#ffffff' : 'var(--text-2, #cccccc)',
+                                  border: selectedDraft === draft ? '1px solid var(--accent, #d34a36)' : '1px solid var(--border, #333333)',
+                                  transition: 'all 0.2s'
+                                }}
+                                onClick={() => setSelectedDraft(draft)}
+                              >
+                                Option {idx + 1}
+                              </button>
+                            ))}
+                          </div>
+                          {selectedDraft && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                              <textarea
+                                className="input"
+                                style={{ width: '100%', minHeight: '180px', padding: '12px', fontSize: '13px', resize: 'vertical', background: 'var(--surface-2)', color: 'var(--text-1)', border: '1px solid var(--border)', borderRadius: '8px' }}
+                                value={selectedDraft}
+                                onChange={(e) => setSelectedDraft(e.target.value)}
+                              />
+                              <div style={{ display: 'flex', gap: '8px' }}>
+                                <button className="btn btn-ghost" style={{ flex: 1, padding: '10px' }} onClick={() => { setDraftOptions([]); setSelectedDraft(''); }}>Cancel</button>
+                                <button 
+                                  className="btn btn-primary"
+                                  style={{ flex: 1, padding: '10px' }}
+                                  disabled={sendingReply}
+                                  onClick={async () => {
+                                    setSendingReply(true);
+                                    try {
+                                      const replyData = props.inboxReplies[activeReplyIndex];
+                                      const res = await fetch(`${API_BASE}/api/inbox/send-reply`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` },
+                                        body: JSON.stringify({
+                                          to: replyData.fromFull,
+                                          subject: replyData.subject,
+                                          body: selectedDraft,
+                                          messageId: replyData.messageId,
+                                          threadId: replyData.threadId
+                                        })
+                                      });
+                                      if (res.ok) {
+                                        notify('Reply sent successfully!', 'success');
+                                        setDraftOptions([]);
+                                        setSelectedDraft('');
+                                        props.fetchInbox();
+                                      } else {
+                                        notify('Failed to send reply', 'error');
+                                      }
+                                    } catch (err) {
+                                      notify('Error sending reply', 'error');
+                                    }
+                                    setSendingReply(false);
+                                  }}
+                                >
+                                  {sendingReply ? 'Sending...' : 'Send Reply'}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <div style={{ 
-                    color: job.status === 'Opened' ? 'var(--yellow)' : job.status === 'Sent' ? 'var(--blue)' : 'var(--error)', 
-                    fontSize: '12px', fontWeight: 600 
-                  }}>
-                    {job.status}
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    {props.inboxReplies.map((reply, i) => (
+                      <div 
+                        key={i} 
+                        onClick={() => setActiveReplyIndex(i)}
+                        style={{ 
+                          padding: '12px 16px', 
+                          borderBottom: '1px solid var(--border)', 
+                          cursor: 'pointer',
+                          background: 'var(--surface-1)'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                          <div style={{ fontWeight: 600, fontSize: '14px', color: 'var(--text-1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: '8px' }}>
+                            {reply.from.split('<')[0].trim()}
+                          </div>
+                          <div style={{ fontSize: '12px', color: 'var(--text-1)', flexShrink: 0 }}>
+                            {new Date(reply.date).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                          </div>
+                        </div>
+                        <div style={{ fontWeight: 600, fontSize: '13px', color: 'var(--text-1)', marginBottom: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {reply.subject}
+                        </div>
+                        <div style={{ fontSize: '13px', color: 'var(--text-3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {reply.snippet}
+                        </div>
+                      </div>
+                    ))}
                   </div>
+                )
+              ) : (
+                <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-3)', fontSize: '13px' }}>
+                  No replies found.
                 </div>
-              ))}
-              {jobs.filter(j => ['Sent', 'Opened', 'Bounced'].includes(j.status)).length === 0 && (
-                <div style={{ color: 'var(--text-3)', fontStyle: 'italic', fontSize: '13px' }}>No emails have been sent yet.</div>
               )}
             </div>
-          </div>
+          </>
         )}
 
         {tab === 'followups' && (
@@ -749,34 +962,10 @@ export default function MobileApp(props) {
                         <button className="icon-btn" onClick={(e) => { e.stopPropagation(); job.hrLinkedIn ? window.open(job.hrLinkedIn, '_blank') : alert('No link'); }}>
                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"></path><rect x="2" y="9" width="4" height="12"></rect><circle cx="4" cy="4" r="2"></circle></svg>
                         </button>
-                        <button className="icon-btn text-accent" onClick={async (e) => { 
+                        <button className="icon-btn text-accent" onClick={(e) => { 
                           e.stopPropagation(); 
-                          notify('Drafting & sending email...', 'info');
-                          try {
-                            const discRes = await fetch(`${API_BASE}/api/discover-email`, {
-                               method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` },
-                               body: JSON.stringify({ company: job.company, jd: job.jd })
-                            });
-                            const discData = await discRes.json();
-                            const email = job.emailRecipient || discData.email;
-                            if(!email) { notify('No email found', 'error'); return; }
-                            const genRes = await fetch(`${API_BASE}/api/generate-email`, {
-                               method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` },
-                               body: JSON.stringify({ company: job.company, role: job.role, jd: job.jd, emailType: 'Cold Outreach / Networking' })
-                            });
-                            const genData = await genRes.json();
-                            const sendRes = await fetch(`${API_BASE}/api/send-email`, {
-                               method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` },
-                               body: JSON.stringify({ jobId: job.id, body: genData.draft, to: email })
-                            });
-                            const sendData = await sendRes.json();
-                            if(sendData.success) {
-                               updateStatus(job.id, 'Sent', email, genData.draft, sendData.tracked);
-                               notify('Sent successfully!', 'success');
-                            } else {
-                               notify('Failed to send', 'error');
-                            }
-                          } catch(err) { notify('Error occurred', 'error'); }
+                          if (!job.emailRecipient) return notify('No email found to send to!', 'error');
+                          handleBatchSend([job.id]);
                         }}>
                           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
                         </button>
@@ -801,13 +990,33 @@ export default function MobileApp(props) {
       </div>
 
       {/* Bottom Navigation */}
+      {showMoreMenu && (
+        <div className="mobile-more-menu-overlay" onClick={() => setShowMoreMenu(false)} style={{ position: 'fixed', inset: 0, zIndex: 4998, background: 'rgba(0,0,0,0.5)' }}>
+          <div className="mobile-more-menu" onClick={e => e.stopPropagation()} style={{ position: 'absolute', bottom: '70px', left: 0, right: 0, background: 'var(--surface-2)', borderTopLeftRadius: '24px', borderTopRightRadius: '24px', borderTop: '1px solid var(--border)', padding: '24px 16px 32px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', boxShadow: '0 -10px 40px rgba(0,0,0,0.8)' }}>
+            <div style={{ gridColumn: '1 / -1', textAlign: 'center', color: 'var(--text-3)', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px', fontWeight: 'bold' }}>More Options</div>
+            {NAV.slice(4).map(n => (
+              <button key={n.id} onClick={() => { setTab(n.id); setShowMoreMenu(false); }} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', padding: '20px 12px', background: 'var(--surface-3)', border: `1px solid ${tab === n.id ? 'var(--accent)' : 'var(--border)'}`, borderRadius: '16px', color: tab === n.id ? 'var(--accent)' : 'var(--text-1)', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', transition: 'all 0.2s' }}>
+                <div style={{ transform: 'scale(1.2)' }}>{n.icon}</div>
+                <span style={{ fontSize: '14px', fontWeight: '500' }}>{n.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="bottom-nav">
-        {NAV.map(n => (
-          <div key={n.id} className={`bottom-nav-item ${tab === n.id ? 'active' : ''}`} onClick={() => setTab(n.id)}>
+        {NAV.slice(0, 4).map(n => (
+          <div key={n.id} className={`bottom-nav-item ${tab === n.id ? 'active' : ''}`} onClick={() => { setTab(n.id); setShowMoreMenu(false); }}>
             <span className="bottom-nav-icon">{n.icon}</span>
             <span className="bottom-nav-label">{n.label.split(' ')[0]}</span>
           </div>
         ))}
+        <div className={`bottom-nav-item ${showMoreMenu || NAV.slice(4).some(n => n.id === tab) ? 'active' : ''}`} onClick={() => setShowMoreMenu(!showMoreMenu)}>
+          <span className="bottom-nav-icon">
+             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+          </span>
+          <span className="bottom-nav-label">More</span>
+        </div>
       </div>
       
       {/* Modals for Mail */}

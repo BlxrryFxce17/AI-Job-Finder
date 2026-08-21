@@ -4,7 +4,7 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const cron = require('node-cron');
 const { callAIWithRetry } = require('./utils/ai');
-const { checkGmailForReply } = require('./utils/email');
+const { checkGmailForReply, sendEmailViaAPI } = require('./utils/email');
 
 // Import Models
 const User = require('./models/User');
@@ -70,7 +70,10 @@ cron.schedule('0 9 * * *', async () => {
         if (targetDay === 0) continue;
 
         const existingFollowUp = job.followUps && job.followUps.find(f => f.day === targetDay);
-        if (existingFollowUp) continue;
+        
+        if (existingFollowUp && existingFollowUp.sent) {
+          continue; // Already sent this day's follow-up
+        }
 
         const hasReplied = await checkGmailForReply(user, job.emailRecipient);
         if (hasReplied) {
@@ -79,9 +82,14 @@ cron.schedule('0 9 * * *', async () => {
           continue;
         }
 
-        console.log(`[Cron] Generating Day ${targetDay} follow-up for ${job.company}`);
-        const companyTarget = job.company && job.company.toLowerCase() !== 'unknown company' && job.company.toLowerCase() !== 'unknown' ? `at ${job.company}` : '';
-        const prompt = `Write a short, polite, and confident Day ${targetDay} follow-up email to the hiring manager ${companyTarget} for the ${job.role} position.
+        let draftToSend = '';
+
+        if (existingFollowUp && !existingFollowUp.sent) {
+          draftToSend = existingFollowUp.draft;
+        } else {
+          console.log(`[Cron] Generating Day ${targetDay} follow-up for ${job.company}`);
+          const companyTarget = job.company && job.company.toLowerCase() !== 'unknown company' && job.company.toLowerCase() !== 'unknown' ? `at ${job.company}` : '';
+          const prompt = `Write a short, polite, and confident Day ${targetDay} follow-up email to the hiring manager ${companyTarget} for the ${job.role} position.
 Original Email Context:
 """
 ${job.emailDraft}
@@ -92,20 +100,52 @@ Guidelines:
 - Tone: ${profile.tone || 'Professional'}
 - Output ONLY the body of the email, starting with exactly "Dear Hiring Manager at ${job.company},". No subject, no sign-off, no markdown blocks.`;
 
-        try {
-          const resAI = await callAIWithRetry(prompt, 3, 2000);
-          let draft = resAI.text.replace(/```(?:html|json|markdown)?\s*([\s\S]*?)```/g, '$1').trim();
+          try {
+            const resAI = await callAIWithRetry(prompt, 3, 2000);
+            draftToSend = resAI.text.replace(/```(?:html|json|markdown)?\s*([\s\S]*?)```/g, '$1').trim();
 
-          if (!job.followUps) job.followUps = [];
-          job.followUps.push({
-            draft,
-            day: targetDay,
-            sent: false
-          });
-          await job.save();
-          console.log(`[Cron] Successfully drafted Day ${targetDay} follow-up for ${job.company}`);
-        } catch (err) {
-          console.error('[Cron] Failed to generate follow-up:', err);
+            if (!job.followUps) job.followUps = [];
+            job.followUps.push({
+              draft: draftToSend,
+              day: targetDay,
+              sent: false
+            });
+            await job.save(); // Save the draft first just in case sending fails
+            console.log(`[Cron] Successfully drafted Day ${targetDay} follow-up for ${job.company}`);
+          } catch (err) {
+            console.error('[Cron] Failed to generate follow-up:', err);
+            continue;
+          }
+        }
+
+        // Send the email
+        if (draftToSend) {
+          try {
+            console.log(`[Cron] Sending Day ${targetDay} follow-up to ${job.emailRecipient}`);
+            const mailOptions = {
+              from: user.email || process.env.EMAIL_USER,
+              to: job.emailRecipient,
+              subject: `Re: Application for ${job.role} - ${profile.name}`,
+              text: draftToSend,
+              replyTo: user.email || process.env.EMAIL_USER,
+              inReplyTo: job.messageId || undefined,
+              references: job.messageId ? [job.messageId] : undefined
+            };
+
+            const sendRes = await sendEmailViaAPI(user, mailOptions);
+            
+            // Mark as sent
+            const fUpIndex = job.followUps.findIndex(f => f.day === targetDay);
+            if (fUpIndex !== -1) {
+              job.followUps[fUpIndex].sent = true;
+              job.followUps[fUpIndex].sentAt = new Date();
+              job.followUps[fUpIndex].messageId = sendRes.messageId || null;
+            }
+            await job.save();
+            console.log(`[Cron] Successfully SENT Day ${targetDay} follow-up for ${job.company}`);
+          } catch (sendErr) {
+            console.error('[Cron] Failed to send follow-up:', sendErr);
+          }
         }
       }
     }

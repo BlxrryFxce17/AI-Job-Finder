@@ -27,6 +27,7 @@ async function sendEmailViaAPI(user, mailOptions) {
       userId: 'me',
       requestBody: {
         raw: encodedMessage,
+        threadId: mailOptions.threadId || undefined
       },
     });
     return { messageId: res.data.id };
@@ -63,6 +64,120 @@ async function checkGmailForReply(user, recipientEmail) {
     return false;
   }
 }
+
+async function getInboxReplies(user, hrEmails) {
+  if (!user.googleRefreshToken || !hrEmails || hrEmails.length === 0) return [];
+
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET
+  );
+  oauth2Client.setCredentials({ refresh_token: user.googleRefreshToken });
+  const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+  try {
+    // Build the query: to:me AND (from:email1 OR from:email2)
+    const fromQuery = hrEmails.map(email => `from:${email}`).join(' OR ');
+    const query = `to:me (${fromQuery})`;
+
+    const res = await gmail.users.messages.list({
+      userId: 'me',
+      q: query,
+      maxResults: 20
+    });
+
+    if (!res.data.messages) return [];
+
+    const replies = [];
+    for (const msg of res.data.messages) {
+      const msgData = await gmail.users.messages.get({
+        userId: 'me',
+        id: msg.id,
+        format: 'full'
+      });
+      
+      const payload = msgData.data.payload;
+      const headers = payload.headers;
+      
+      const autoSubmitted = headers.find(h => h.name.toLowerCase() === 'auto-submitted')?.value || '';
+      if (autoSubmitted && autoSubmitted.toLowerCase() !== 'no') {
+        continue;
+      }
+
+      const subject = headers.find(h => h.name.toLowerCase() === 'subject')?.value || 'No Subject';
+      const from = headers.find(h => h.name.toLowerCase() === 'from')?.value || '';
+      const date = headers.find(h => h.name.toLowerCase() === 'date')?.value || '';
+      
+      let snippet = msgData.data.snippet;
+      let bodyText = '';
+      
+      if (payload.parts) {
+        const textPart = payload.parts.find(p => p.mimeType === 'text/plain');
+        if (textPart && textPart.body && textPart.body.data) {
+           bodyText = Buffer.from(textPart.body.data, 'base64').toString('utf8');
+        }
+      } else if (payload.body && payload.body.data) {
+        bodyText = Buffer.from(payload.body.data, 'base64').toString('utf8');
+      }
+
+      const emailMatch = from.match(/<([^>]+)>/);
+      const rawFromEmail = emailMatch ? emailMatch[1] : from;
+      
+      if (/no-?reply|donotreply|bounce/i.test(rawFromEmail)) {
+        continue;
+      }
+
+      // Fetch full thread to get all messages (sent & received)
+      const threadData = await gmail.users.threads.get({
+        userId: 'me',
+        id: msg.threadId,
+        format: 'full'
+      });
+      
+      const threadMessages = [];
+      if (threadData.data && threadData.data.messages) {
+        for (const tMsg of threadData.data.messages) {
+           const tPayload = tMsg.payload;
+           const tHeaders = tPayload.headers;
+           const tFrom = tHeaders.find(h => h.name.toLowerCase() === 'from')?.value || '';
+           const tDate = tHeaders.find(h => h.name.toLowerCase() === 'date')?.value || '';
+           let tBody = tMsg.snippet;
+           if (tPayload.parts) {
+             const tp = tPayload.parts.find(p => p.mimeType === 'text/plain');
+             if (tp && tp.body && tp.body.data) tBody = Buffer.from(tp.body.data, 'base64').toString('utf8');
+           } else if (tPayload.body && tPayload.body.data) {
+             tBody = Buffer.from(tPayload.body.data, 'base64').toString('utf8');
+           }
+           threadMessages.push({
+             id: tMsg.id,
+             from: tFrom,
+             date: tDate,
+             body: tBody || tMsg.snippet,
+             isMe: tFrom.includes(user.email || 'me') // Basic check for sent messages
+           });
+        }
+      }
+
+      replies.push({
+        messageId: msg.id,
+        threadId: msg.threadId,
+        from: rawFromEmail,
+        fromFull: from,
+        subject,
+        date,
+        snippet,
+        body: bodyText || snippet,
+        threadMessages
+      });
+    }
+
+    return replies;
+  } catch (err) {
+    console.error('Error fetching inbox replies:', err);
+    return [];
+  }
+}
+
 
 async function discoverEmailForJob(company, domain, jd, failedEmails = [], callAIWithRetry, hrName = null) {
   let discoveredEmail = null;
@@ -199,4 +314,9 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
   return { email: discoveredEmail, source };
 }
 
-module.exports = { sendEmailViaAPI, checkGmailForReply, discoverEmailForJob };
+module.exports = {
+  sendEmailViaAPI,
+  checkGmailForReply,
+  getInboxReplies,
+  discoverEmailForJob
+};

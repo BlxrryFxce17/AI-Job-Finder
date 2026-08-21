@@ -1212,9 +1212,9 @@ input[type="checkbox"]:checked::after {
 .mobile-content-area {
   flex: 1;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   padding-top: 160px;
   padding-bottom: 70px;
-  /* Space for bottom nav */
 }
 
 /* Mobile Header */
@@ -1459,8 +1459,6 @@ input[type="checkbox"]:checked::after {
   left: 0;
   right: 0;
   background: rgba(24, 24, 27, 0.85);
-  
-  
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   display: flex;
   padding-bottom: env(safe-area-inset-bottom);
@@ -1474,7 +1472,7 @@ input[type="checkbox"]:checked::after {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 10px 0;
+  padding: 12px 0 10px; /* Comfortable padding */
   color: var(--text-3);
   transition: color 0.2s;
   cursor: pointer;
@@ -1489,8 +1487,8 @@ input[type="checkbox"]:checked::after {
 }
 
 .bottom-nav-icon {
-  font-size: 20px;
-  margin-bottom: 4px;
+  font-size: 24px;
+  margin-bottom: 6px;
 }
 
 .bottom-nav-item.active .bottom-nav-icon {
@@ -1499,7 +1497,7 @@ input[type="checkbox"]:checked::after {
 }
 
 .bottom-nav-label {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
 }
 

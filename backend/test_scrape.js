@@ -1,0 +1,1 @@
+require('dotenv').config(); const { scrapeJobsFree, findHROnLinkedIn } = require('./utils/scraper.js'); async function run() { console.log('Testing scraper...'); const jobs = await scrapeJobsFree('software engineer', 'India', []); console.log(jobs); } run();

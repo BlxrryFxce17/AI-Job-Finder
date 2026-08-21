@@ -1,14 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
-import { BarChart3, Briefcase, MailCheck, RotateCw, Mail, User, Settings } from 'lucide-react';
+import { BarChart3, Briefcase, MailCheck, RotateCw, Mail, User, Settings, Inbox } from 'lucide-react';
 
 export const NAV = [
-  { id: 'analytics', label: 'Stats Dashboard', icon: <BarChart3 size={20} /> },
-  { id: 'hr_dashboard', label: 'HR Discovery', icon: <User size={20} /> },
   { id: 'applications', label: 'Jobs Search', icon: <Briefcase size={20} /> },
+  { id: 'hr_dashboard', label: 'HR Discovery', icon: <User size={20} /> },
+  { id: 'single_drafter', label: 'Email Drafter', icon: <Mail size={20} /> },
   { id: 'applied', label: 'Applied Jobs', icon: <MailCheck size={20} /> },
   { id: 'followups', label: 'Follow Ups', icon: <RotateCw size={20} /> },
-  { id: 'single_drafter', label: 'Email Drafter', icon: <Mail size={20} /> },
+  { id: 'inbox', label: 'Smart Inbox', icon: <Inbox size={20} /> },
   { id: 'resume', label: 'Profile Settings', icon: <User size={20} /> },
   { id: 'ai_settings', label: 'AI Settings', icon: <Settings size={20} /> },
 ];
@@ -34,6 +34,7 @@ export function useAppLogic() {
   const [fetchQueries, setFetchQueries] = useState(['software developer']);
   const [fetching, setFetching] = useState(false);
   const [useApify, setUseApify] = useState(false);
+  const [appliedViewType, setAppliedViewType] = useState('All');
   const [showAddForm, setShowAddForm] = useState(false);
   const [newJob, setNewJob] = useState({ company: '', role: '', status: 'Sent' });
   const [toast, setToast] = useState(null);
@@ -49,6 +50,10 @@ export function useAppLogic() {
   const [selectedJobs, setSelectedJobs] = useState([]);
   const [batchProgress, setBatchProgress] = useState(null);
   const [batchState, setBatchState] = useState({ active: false, currentIndex: 0, total: 0, currentJob: null, logs: [] });
+
+  // Inbox State
+  const [inboxReplies, setInboxReplies] = useState([]);
+  const [inboxLoading, setInboxLoading] = useState(false);
 
   const notify = (msg, type = 'success') => {
     setToast({ msg, type });
@@ -175,17 +180,37 @@ export function useAppLogic() {
     } catch { notify('Failed to update status', 'error'); }
   };
 
-  const handleBatchSend = async () => {
-    if (selectedJobs.length === 0) return;
-    setBatchProgress(0);
-    setBatchState({ active: true, currentIndex: 0, total: selectedJobs.length, currentJob: null, logs: [] });
+  const batchQueueRef = useRef([]);
+  const isBatchingRef = useRef(false);
+
+  const handleBatchSend = async (jobIds = null) => {
+    const jobsToProcess = jobIds || selectedJobs;
+    if (jobsToProcess.length === 0) return;
     
-    for (let i = 0; i < selectedJobs.length; i++) {
-      const jobId = selectedJobs[i];
+    batchQueueRef.current = [...batchQueueRef.current, ...jobsToProcess];
+    
+    if (isBatchingRef.current) {
+        setBatchState(prev => ({ 
+            ...prev, 
+            total: prev.currentIndex + batchQueueRef.current.length, 
+            logs: [...prev.logs, `Added ${jobsToProcess.length} job(s) to the queue...`] 
+        }));
+        return;
+    }
+    
+    isBatchingRef.current = true;
+    setBatchProgress(0);
+    setBatchState({ active: true, currentIndex: 0, total: batchQueueRef.current.length, currentJob: null, logs: [] });
+    
+    let processed = 0;
+    
+    while (batchQueueRef.current.length > 0) {
+      const jobId = batchQueueRef.current.shift();
       const job = jobs.find(j => j.id === jobId);
       if (!job) continue;
 
-      setBatchState(prev => ({ ...prev, currentIndex: i + 1, currentJob: job, logs: [...prev.logs, `[${job.company}] Starting processing...`] }));
+      processed++;
+      setBatchState(prev => ({ ...prev, currentIndex: processed, currentJob: job, logs: [...prev.logs, `[${job.company}] Starting processing...`] }));
 
       try {
         let discoveredEmail = job.emailRecipient;
@@ -226,12 +251,17 @@ export function useAppLogic() {
         console.error(err);
         setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Error occurred: ${err.message}`] }));
       }
-      setBatchProgress(((i + 1) / selectedJobs.length) * 100);
+      // Calculate progress based on total originally queued + newly queued
+      setBatchState(prev => {
+         setBatchProgress((processed / prev.total) * 100);
+         return prev;
+      });
     }
     
-    setBatchState(prev => ({ ...prev, logs: [...prev.logs, `Batch complete! Closing in 3 seconds...`] }));
-    notify('Batch complete!');
+    setBatchState(prev => ({ ...prev, logs: [...prev.logs, `All queued tasks complete! Closing in 3 seconds...`] }));
+    notify('Queue complete!');
     setTimeout(() => {
+        isBatchingRef.current = false;
         setBatchProgress(null);
         setSelectedJobs([]);
         setBatchState(prev => ({ ...prev, active: false }));
@@ -283,18 +313,40 @@ export function useAppLogic() {
   };
 
   const handleBatchDelete = async () => {
-    if (!window.confirm(`Are you sure you want to delete ${selectedJobs.length} jobs?`)) return;
-    try {
-      await apiFetch(`${API_BASE}/api/jobs/bulk-delete`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobIds: selectedJobs })
-      });
-      setJobs(p => p.filter(j => !selectedJobs.includes(j.id)));
-      setSelectedJobs([]);
-      notify(`${selectedJobs.length} jobs deleted`);
-    } catch { notify('Failed to delete some jobs', 'error'); }
+    if (!selectedJobs.length) return;
+    if (!confirm(`Delete ${selectedJobs.length} selected jobs?`)) return;
+    
+    setLoading(true);
+    for (const id of selectedJobs) {
+      await apiFetch(`${API_BASE}/api/jobs/${id}`, { method: 'DELETE' });
+    }
+    setJobs(jobs.filter(j => !selectedJobs.includes(j.id)));
+    setSelectedJobs([]);
+    setLoading(false);
+    notify(`${selectedJobs.length} jobs deleted`);
   };
+
+  const fetchInbox = async () => {
+    setInboxLoading(true);
+    try {
+      const res = await apiFetch(`${API_BASE}/api/inbox`);
+      if (res.ok) {
+        const data = await res.json();
+        setInboxReplies(data.replies || []);
+      }
+    } catch (e) {
+      console.error(e);
+      notify('Failed to load inbox', 'error');
+    } finally {
+      setInboxLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (tab === 'inbox' && inboxReplies.length === 0) {
+      fetchInbox();
+    }
+  }, [tab]);
 
   const handleFetchJobs = async () => {
     if (fetchQueries.length === 0) {
@@ -335,7 +387,12 @@ export function useAppLogic() {
 
   const activeJobs = jobs.filter(j => {
     if (tab === 'applications') return j.status === 'Found' || j.status === 'Drafting';
-    if (tab === 'applied') return ['Sent', 'Opened', 'Bounced'].includes(j.status);
+    if (tab === 'applied') {
+      if (!['Sent', 'Opened', 'Bounced'].includes(j.status)) return false;
+      if (appliedViewType === 'HR') return !!j.hrName;
+      if (appliedViewType === 'Jobs') return !j.hrName;
+      return true;
+    }
     return true;
   }).filter(j => 
     (statusFilter === 'All' || j.status === statusFilter) &&
@@ -417,6 +474,11 @@ export function useAppLogic() {
     removeFetchQuery,
     exportToCSV,
     useApify,
-    setUseApify
+    setUseApify,
+    appliedViewType,
+    setAppliedViewType,
+    inboxReplies,
+    inboxLoading,
+    fetchInbox
   };
 }

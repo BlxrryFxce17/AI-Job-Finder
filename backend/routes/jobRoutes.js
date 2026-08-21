@@ -7,8 +7,10 @@ const Job = require('../models/Job');
 const User = require('../models/User');
 const requireAuth = require('../middleware/requireAuth');
 const { scrapeJobsFree, findHROnLinkedIn } = require('../utils/scraper');
-const { discoverEmailForJob } = require('../utils/email');
+const { discoverEmailForJob, sendEmailViaAPI } = require('../utils/email');
 const { callAIWithRetry } = require('../utils/ai');
+const Profile = require('../models/Profile');
+const { generateTailoredResumePDF } = require('../utils/pdfGenerator');
 
 router.get('/', requireAuth, async (req, res) => {
   try {
@@ -224,17 +226,89 @@ router.get('/check-bounces', requireAuth, async (req, res) => {
         if (failedRecipient) {
           failedRecipient = failedRecipient.trim().toLowerCase();
           
-          const updatedJobs = await Job.updateMany(
-            { 
-              userId: user._id, 
-              emailRecipient: new RegExp(`^${failedRecipient}$`, 'i'),
-              status: { $ne: 'Bounced' }
-            },
-            { $set: { status: 'Bounced' } }
-          );
+          const bouncedJobs = await Job.find({ 
+            userId: user._id, 
+            emailRecipient: new RegExp(`^${failedRecipient}$`, 'i'),
+            status: { $ne: 'Bounced' }
+          });
 
-          if (updatedJobs.modifiedCount > 0) {
-            newBouncesCount += updatedJobs.modifiedCount;
+          for (const job of bouncedJobs) {
+            if (!job.failedEmails.includes(failedRecipient)) {
+              job.failedEmails.push(failedRecipient);
+            }
+            job.status = 'Bounced';
+            await job.save();
+            newBouncesCount++;
+
+            // Auto-retry: Try to discover a new email and resend
+            try {
+              let domain = job.company.toLowerCase().replace(/[^a-z0-9]/g, '') + '.com';
+              try {
+                const clearbitRes = await axios.get(`https://autocomplete.clearbit.com/v1/companies/suggest?query=${encodeURIComponent(job.company)}`);
+                if (clearbitRes.data && clearbitRes.data.length > 0) {
+                  domain = clearbitRes.data[0].domain;
+                }
+              } catch (err) { }
+              
+              const emailRes = await discoverEmailForJob(job.company, domain, job.jd, job.failedEmails, callAIWithRetry, job.hrName);
+              
+              if (emailRes.email && emailRes.email.toLowerCase() !== failedRecipient) {
+                const profile = await Profile.findOne({ userId: user._id });
+                const baseUrl = process.env.PUBLIC_URL;
+                
+                const trackClick = (url) => (baseUrl && url) ? `${baseUrl}/api/track-click/${job.id}?url=${encodeURIComponent(url)}` : (url || '');
+                const linkedInUrl = trackClick(profile.linkedin);
+                const githubUrl = trackClick(profile.github);
+                const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${job.id}" width="1" height="1" style="display:none;" />` : '';
+
+                let formattedDraft = (job.emailDraft || '').replace(/\n/g, '<br/>');
+                formattedDraft = formattedDraft.replace('You can view my CV here.', 'I have attached my CV to this email for your reference.');
+
+                const htmlBody = `
+                  <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
+                    ${formattedDraft}
+                    <br/><br/>
+                    Yours Sincerely,<br/>
+                    <b>${profile.name}</b><br/>
+                    ${profile.title}<br/>
+                    📞 ${profile.phone}<br/>
+                    🔗 <a href="${linkedInUrl}">LinkedIn</a> | 💻 <a href="${githubUrl}">GitHub</a>
+                    <br/>
+                    ${trackingPixel}
+                  </div>
+                `;
+
+                const mailOptions = {
+                  from: user.email || process.env.EMAIL_USER,
+                  to: emailRes.email,
+                  subject: `Application for ${job.role} - ${profile.name}`,
+                  html: htmlBody,
+                  attachments: []
+                };
+
+                try {
+                  if (profile.resumeText || profile.skills?.length > 0) {
+                    const pdfBuffer = await generateTailoredResumePDF(profile, job.role, job.jd);
+                    mailOptions.attachments.push({ filename: `${profile.name.replace(/\s+/g, '_')}_CV.pdf`, content: pdfBuffer });
+                  } else if (profile.resumePdf) {
+                    mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
+                  }
+                } catch (pdfErr) {
+                  if (profile.resumePdf) {
+                    mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
+                  }
+                }
+
+                await sendEmailViaAPI(user, mailOptions);
+                
+                job.emailRecipient = emailRes.email;
+                job.status = 'Sent';
+                await job.save();
+                console.log(`[Auto-Retry] Successfully re-sent application for ${job.company} to new email: ${emailRes.email}`);
+              }
+            } catch (retryErr) {
+              console.error('[Auto-Retry] Error re-sending bounced email:', retryErr.message);
+            }
           }
         }
 
@@ -263,8 +337,11 @@ router.post('/scrape-hr', requireAuth, async (req, res) => {
     const freshJobs = await scrapeJobsFree(query, location, excludeCompanies);
     const results = [];
     
+    // Randomize the jobs so we don't always pick the exact same top 5 if many are returned
+    const shuffledJobs = freshJobs.sort(() => 0.5 - Math.random());
+    
     // Limit to 5 to avoid timeouts/rate limits in a single request
-    for (const job of freshJobs.slice(0, 5)) { 
+    for (const job of shuffledJobs.slice(0, 5)) { 
       let domain = job.company.toLowerCase().replace(/[^a-z0-9]/g, '') + '.com';
       try {
         const clearbitRes = await axios.get(`https://autocomplete.clearbit.com/v1/companies/suggest?query=${encodeURIComponent(job.company)}`);

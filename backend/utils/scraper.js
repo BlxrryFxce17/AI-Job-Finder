@@ -23,8 +23,9 @@ async function scrapeJobsFree(query, location = 'India', excludeCompanies = []) 
       // We will inject recent exclusions into the query string to get fresh results
       let dynamicQuery = q;
       if (excludeCompanies.length > 0) {
-        // add up to 3 exclusions to the query string to force Google to give us different results
-        const exclusions = excludeCompanies.slice(0, 3).map(c => `-"${c}"`).join(' ');
+        // Shuffle and pick 5 exclusions to dynamically shift search results without hitting limits
+        const shuffledExclusions = [...excludeCompanies].sort(() => 0.5 - Math.random());
+        const exclusions = shuffledExclusions.slice(0, 5).map(c => `-"${c}"`).join(' ');
         dynamicQuery = `${q} ${exclusions}`;
       }
 
