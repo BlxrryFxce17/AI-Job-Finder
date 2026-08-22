@@ -146,18 +146,8 @@ router.post('/send-email', requireAuth, async (req, res) => {
       attachments: []
     };
 
-    try {
-      if (profile.resumeText || profile.skills?.length > 0) {
-        const pdfBuffer = await generateTailoredResumePDF(profile, job ? job.role : 'Software Engineer', job ? job.jd : '');
-        mailOptions.attachments.push({ filename: `${profile.name.replace(/\s+/g, '_')}_CV.pdf`, content: pdfBuffer });
-      } else if (profile.resumePdf) {
-        mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
-      }
-    } catch (pdfErr) {
-      console.error('Failed to generate tailored PDF, falling back to original:', pdfErr);
-      if (profile.resumePdf) {
-        mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
-      }
+    if (profile.resumePdf) {
+      mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
     }
 
     const info = await sendEmailViaAPI(user, mailOptions);
@@ -280,18 +270,8 @@ BODY:
       attachments: []
     };
 
-    try {
-      if (profile.resumeText || profile.skills?.length > 0) {
-        const pdfBuffer = await generateTailoredResumePDF(profile, extractedRole, jd);
-        mailOptions.attachments.push({ filename: `${profile.name.replace(/\s+/g, '_')}_CV.pdf`, content: pdfBuffer });
-      } else if (profile.resumePdf) {
-        mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
-      }
-    } catch (pdfErr) {
-      console.error('Failed to generate tailored PDF, falling back to original:', pdfErr);
-      if (profile.resumePdf) {
-        mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
-      }
+    if (profile.resumePdf) {
+      mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
     }
 
     await sendEmailViaAPI(user, mailOptions);
@@ -388,18 +368,8 @@ ${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructio
       attachments: []
     };
 
-    try {
-      if (profile.resumeText || profile.skills?.length > 0) {
-        const pdfBuffer = await generateTailoredResumePDF(profile, role, jd);
-        mailOptions.attachments.push({ filename: `${profile.name.replace(/\s+/g, '_')}_CV.pdf`, content: pdfBuffer });
-      } else if (profile.resumePdf) {
-        mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
-      }
-    } catch (pdfErr) {
-      console.error('Failed to generate tailored PDF, falling back to original:', pdfErr);
-      if (profile.resumePdf) {
-        mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
-      }
+    if (profile.resumePdf) {
+      mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
     }
 
     await sendEmailViaAPI(user, mailOptions);

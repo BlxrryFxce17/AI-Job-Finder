@@ -201,10 +201,12 @@ export function useAppLogic() {
     isBatchingRef.current = true;
     setBatchProgress(0);
     setBatchState({ active: true, currentIndex: 0, total: batchQueueRef.current.length, currentJob: null, logs: [] });
+    setTab('applied');
+    setAppliedViewType('All');
     
     let processed = 0;
     
-    while (batchQueueRef.current.length > 0) {
+    while (batchQueueRef.current.length > 0 && isBatchingRef.current) {
       const jobId = batchQueueRef.current.shift();
       const job = jobs.find(j => j.id === jobId);
       if (!job) continue;
@@ -258,16 +260,27 @@ export function useAppLogic() {
       });
     }
     
-    setBatchState(prev => ({ ...prev, logs: [...prev.logs, `All queued tasks complete! Closing in 3 seconds...`] }));
-    notify('Queue complete!');
-    setTimeout(() => {
-        isBatchingRef.current = false;
-        setBatchProgress(null);
-        setSelectedJobs([]);
-        setBatchState(prev => ({ ...prev, active: false }));
-        setTab('applied');
-        loadJobs();
-    }, 3000);
+    if (isBatchingRef.current) {
+        setBatchState(prev => ({ ...prev, logs: [...prev.logs, `All queued tasks complete! Closing in 3 seconds...`] }));
+        notify('Queue complete!');
+        setTimeout(() => {
+            isBatchingRef.current = false;
+            setBatchProgress(null);
+            setSelectedJobs([]);
+            setBatchState(prev => ({ ...prev, active: false }));
+            loadJobs();
+        }, 3000);
+    }
+  };
+
+  const cancelBatch = () => {
+    isBatchingRef.current = false;
+    batchQueueRef.current = [];
+    setBatchProgress(null);
+    setSelectedJobs([]);
+    setBatchState(prev => ({ ...prev, active: false, logs: [] }));
+    notify('Batch process killed.', 'error');
+    loadJobs();
   };
 
   const handleProfileSave = async (e) => {
@@ -465,6 +478,7 @@ export function useAppLogic() {
     toggleSelectJob,
     updateStatus,
     handleBatchSend,
+    cancelBatch,
     handleProfileSave,
     handleResumeUpload,
     handleDelete,

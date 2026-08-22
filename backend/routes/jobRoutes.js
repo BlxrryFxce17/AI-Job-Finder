@@ -286,17 +286,8 @@ router.get('/check-bounces', requireAuth, async (req, res) => {
                   attachments: []
                 };
 
-                try {
-                  if (profile.resumeText || profile.skills?.length > 0) {
-                    const pdfBuffer = await generateTailoredResumePDF(profile, job.role, job.jd);
-                    mailOptions.attachments.push({ filename: `${profile.name.replace(/\s+/g, '_')}_CV.pdf`, content: pdfBuffer });
-                  } else if (profile.resumePdf) {
-                    mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
-                  }
-                } catch (pdfErr) {
-                  if (profile.resumePdf) {
-                    mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
-                  }
+                if (profile.resumePdf) {
+                  mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
                 }
 
                 await sendEmailViaAPI(user, mailOptions);

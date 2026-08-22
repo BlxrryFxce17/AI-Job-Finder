@@ -20,6 +20,9 @@ const callAIWithRetry = async (prompt, retries = 5, delayMs = 3000) => {
         const response = await gemini.models.generateContent({
           model: 'gemini-2.5-flash',
           contents: prompt,
+          config: {
+            maxOutputTokens: 8192,
+          }
         });
         return { text: response.text };
       } catch (geminiErr) {

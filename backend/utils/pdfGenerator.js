@@ -22,12 +22,12 @@ Job Description:
 ${jd || jobRole}
 
 INSTRUCTIONS:
-1. Extract 1 summary sentence (highly tailored to the JD, based ONLY on the provided resume/skills).
-2. Extract the top 6 most relevant skills matching the JD from the candidate's existing skills. You may reword skills slightly to match JD keywords.
-3. Extract professional experiences and projects (company/project name, title/role, dates, and 2 bullet points each). 
-   - CRITICAL: DO NOT change the main titles, subtitles, companies, project names, or dates. They must remain exactly as they are in the Base Resume.
-   - You MUST ONLY change the body (bullet points) of the experiences and projects. Reword the bullet points to include keywords from the JD and highlight relevant achievements.
-   - Do not invent new experiences or projects. Output only what exists in the base resume.
+1. Extract the summary from the Base Resume exactly as it is, but subtly inject 1-2 keywords from the JD where they fit naturally. Do not rewrite the sentence structure.
+2. Extract the top 6 most relevant skills matching the JD from the candidate's existing skills. You may append JD keywords to existing skills if applicable.
+3. Extract professional experiences and projects (company/project name, title/role, dates, and bullet points) EXACTLY as they appear in the Base Resume.
+   - CRITICAL: DO NOT change the main titles, subtitles, companies, project names, or dates. Keep the original order.
+   - For the bullet points: DO NOT rewrite them. Keep the original text exactly as it is, but you may subtly insert/inject 1-2 relevant keywords from the JD into the existing sentences if they fit naturally. Do not change the original phrasing, meaning, or length significantly.
+   - Do not invent new experiences, projects, or bullet points.
 4. Extract education (Degree, University) EXACTLY as provided in the Base Resume. Do not change its title or subtitle.
 
 OUTPUT FORMAT (Valid JSON ONLY):
@@ -53,12 +53,24 @@ OUTPUT FORMAT (Valid JSON ONLY):
   "education": "B.S. Computer Science, University Name"
 }`;
 
-      const resAI = await callAIWithRetry(prompt, 3, 2000);
+      const resAI = await callAIWithRetry(prompt + "\n\nCRITICAL: Return ONLY valid, complete JSON. Do not use markdown backticks (```) and ensure all arrays and objects are properly closed.", 3, 4000);
       let jsonStr = resAI.text.replace(/```(?:json)?\s*([\s\S]*?)```/g, '$1').trim();
       
       if (!jsonStr.startsWith('{')) {
         const match = jsonStr.match(/\{[\s\S]*\}/);
         if (match) jsonStr = match[0];
+      }
+      
+      // Auto-repair missing closing brackets if it got truncated
+      const openBraces = (jsonStr.match(/\{/g) || []).length;
+      const closeBraces = (jsonStr.match(/\}/g) || []).length;
+      if (openBraces > closeBraces) {
+         jsonStr += '}'.repeat(openBraces - closeBraces);
+      }
+      const openBrackets = (jsonStr.match(/\[/g) || []).length;
+      const closeBrackets = (jsonStr.match(/\]/g) || []).length;
+      if (openBrackets > closeBrackets) {
+         jsonStr = jsonStr.replace(/}\s*$/, ']' + '}'); // basic hack
       }
 
       // Sanitize: JSON.parse fails if there are literal newlines/tabs inside string values.

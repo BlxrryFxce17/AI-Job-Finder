@@ -138,6 +138,9 @@ export default function MobileApp(props) {
               <span style={{ color: '#00ff00', fontWeight: 'bold' }}>root@kali:~#</span>
               <span style={{ fontSize: '12px', color: '#fff' }}>batch-apply.sh ({batchState.currentIndex}/{batchState.total})</span>
             </div>
+            <button onClick={props.cancelBatch} style={{ background: 'transparent', border: 'none', color: 'var(--error)', cursor: 'pointer', padding: '0 4px', fontSize: '14px', fontWeight: 'bold' }} title="Cancel Batch">
+              ✕
+            </button>
           </div>
           <div style={{ padding: '12px' }}>
             {batchState.currentJob && (
@@ -543,8 +546,8 @@ export default function MobileApp(props) {
                    <span className="spinner"></span>
                 ) : (
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    <button className="btn btn-primary" style={{ background: 'var(--error)', borderColor: 'var(--error)', padding: '6px 12px', fontSize: '13px' }} onClick={handleBatchDelete}>Delete</button>
-                    <button className="btn btn-primary" style={{ padding: '6px 12px', fontSize: '13px' }} onClick={handleBatchSend}>Auto-Apply 🚀</button>
+                    <button className="btn btn-primary" style={{ background: 'var(--error)', borderColor: 'var(--error)', padding: '6px 12px', fontSize: '13px' }} onClick={() => handleBatchDelete()}>Delete</button>
+                    <button className="btn btn-primary" style={{ padding: '6px 12px', fontSize: '13px' }} onClick={() => handleBatchSend()}>Auto-Apply 🚀</button>
                   </div>
                 )}
                 <button className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: '13px', marginLeft: '8px' }} onClick={() => setSelectedJobs([])}>Cancel</button>
@@ -679,6 +682,11 @@ export default function MobileApp(props) {
                          <button className="icon-btn" onClick={(e) => { e.stopPropagation(); job.applyLink ? window.open(job.applyLink, '_blank') : alert('No link'); }}>
                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                          </button>
+                         {job.hrLinkedIn && (
+                           <button className="icon-btn text-accent" onClick={(e) => { e.stopPropagation(); window.open(job.hrLinkedIn, '_blank'); }}>
+                             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"></path><rect x="2" y="9" width="4" height="12"></rect><circle cx="4" cy="4" r="2"></circle></svg>
+                           </button>
+                         )}
                          {(job.emailDraft || job.status === 'Sent' || job.status === 'Opened') && (
                             <button className="icon-btn text-accent" onClick={(e) => { e.stopPropagation(); setSelectedMail(job); }}>
                               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
@@ -905,8 +913,8 @@ export default function MobileApp(props) {
                      <span className="spinner"></span>
                   ) : (
                     <div style={{ display: 'flex', gap: '8px' }}>
-                      <button className="btn btn-primary" style={{ background: 'var(--error)', borderColor: 'var(--error)', padding: '6px 12px', fontSize: '13px' }} onClick={handleBatchDelete}>Delete</button>
-                      <button className="btn btn-primary" style={{ padding: '6px 12px', fontSize: '13px' }} onClick={handleBatchSend}>Send 🚀</button>
+                      <button className="btn btn-primary" style={{ background: 'var(--error)', borderColor: 'var(--error)', padding: '6px 12px', fontSize: '13px' }} onClick={() => handleBatchDelete()}>Delete</button>
+                      <button className="btn btn-primary" style={{ padding: '6px 12px', fontSize: '13px' }} onClick={() => handleBatchSend()}>Send 🚀</button>
                     </div>
                   )}
                   <button className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: '13px', marginLeft: '8px' }} onClick={() => setSelectedJobs([])}>Cancel</button>

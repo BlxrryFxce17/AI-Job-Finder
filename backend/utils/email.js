@@ -204,7 +204,7 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
   // Tier 1.2: Deep Web Search for HR's explicit email
   if (!discoveredEmail && hrName && process.env.SERPER_API_KEY) {
     try {
-      const q = `"${hrName}" "${company}" email`;
+      const q = `"${hrName}" "${company}" ("@gmail.com" OR "@yahoo.com" OR "@hotmail.com" OR "@outlook.com")`;
       const sRes = await axios.post('https://google.serper.dev/search', {
         q, num: 3
       }, {
@@ -216,7 +216,7 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
       if (foundEmails && foundEmails.length > 0) {
         const validEmails = foundEmails.filter(e => !e.includes('example.com') && !e.includes('email.com') && !failedEmails.includes(e));
         if (validEmails.length > 0) {
-          const prompt = `You are an AI Email Judge. We searched for the email of "${hrName}" at "${company}". Extracted emails: ${validEmails.join(', ')}. Which ONE is most likely their real email? Ignore generic support emails or completely unrelated domains unless it looks like an agency. Return ONLY the email address, or "NONE".`;
+          const prompt = `You are an AI Email Judge. We searched for the personal email of "${hrName}" at "${company}". Extracted emails: ${validEmails.join(', ')}. Which ONE is most likely their real PERSONAL email (e.g. @gmail.com, @yahoo.com)? If there is a personal email, pick it. If there is only a company email, pick that as a fallback. Return ONLY the email address, or "NONE".`;
           const response = await callAIWithRetry(prompt);
           const aiJudgment = response.text.trim();
           const emailMatch = aiJudgment.match(/[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}/);
