@@ -6,10 +6,14 @@ const User = require('../models/User');
 const Profile = require('../models/Profile');
 
 const isProd = process.env.NODE_ENV === 'production';
+const getBaseUrl = (url) => url && !url.startsWith('http') ? `https://${url}` : url;
+
+const publicUrl = getBaseUrl(process.env.PUBLIC_URL);
+
 const oauth2Client = new google.auth.OAuth2(
   process.env.GOOGLE_CLIENT_ID,
   process.env.GOOGLE_CLIENT_SECRET,
-  isProd && process.env.PUBLIC_URL ? `${process.env.PUBLIC_URL}/api/auth/google/callback` : 'http://localhost:5000/api/auth/google/callback'
+  isProd && publicUrl ? `${publicUrl}/api/auth/google/callback` : 'http://localhost:5000/api/auth/google/callback'
 );
 
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -60,7 +64,7 @@ router.get('/google/callback', async (req, res) => {
 
     const token = jwt.sign({ id: user._id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
 
-    const redirectUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const redirectUrl = getBaseUrl(process.env.FRONTEND_URL) || 'http://localhost:5173';
     res.redirect(`${redirectUrl}/?token=${token}`);
   } catch (err) {
     console.error('OAuth callback error:', err);
