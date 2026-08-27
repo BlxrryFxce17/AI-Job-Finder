@@ -250,7 +250,7 @@ router.get('/check-bounces', requireAuth, async (req, res) => {
                 }
               } catch (err) { }
               
-              const emailRes = await discoverEmailForJob(job.company, domain, job.jd, job.failedEmails, callAIWithRetry, job.hrName);
+              const emailRes = await discoverEmailForJob(job.company, domain, job.jd, job.failedEmails, callAIWithRetry, job.hrName, job.hrLinkedIn);
               
               if (emailRes.email && emailRes.email.toLowerCase() !== failedRecipient) {
                 const profile = await Profile.findOne({ userId: user._id });
@@ -342,7 +342,7 @@ router.post('/scrape-hr', requireAuth, async (req, res) => {
       } catch (err) { }
       
       const hrProfile = await findHROnLinkedIn(job.company);
-      const emailRes = await discoverEmailForJob(job.company, domain, job.jd, [], callAIWithRetry, hrProfile ? hrProfile.name : null);
+      const emailRes = await discoverEmailForJob(job.company, domain, job.jd, [], callAIWithRetry, hrProfile ? hrProfile.name : null, hrProfile ? hrProfile.linkedinUrl : null);
       
       const newJob = new Job({
         userId: req.user.id,

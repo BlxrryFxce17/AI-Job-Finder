@@ -46,6 +46,11 @@ app.use('/api', emailRoutes); // discover-email, generate-email, send-email, sin
 app.use('/api', trackingRoutes); // track-open, track-click
 app.use('/api', followupRoutes); // send-followup, check-followups
 
+// Keep-Alive Ping Endpoint
+app.get('/api/ping', (req, res) => {
+  res.status(200).send('pong');
+});
+
 // Follow-Up Cron Job: Runs daily at 9:00 AM
 cron.schedule('0 9 * * *', async () => {
   console.log('[Cron] Starting daily follow-up check...');
@@ -150,6 +155,16 @@ Guidelines:
       }
     }
     console.log('[Cron] Follow-up check complete.');
+    
+    // Heartbeat ping to UptimeRobot
+    if (process.env.UPTIMEROBOT_HEARTBEAT_URL) {
+      const https = require('https');
+      https.get(process.env.UPTIMEROBOT_HEARTBEAT_URL, (res) => {
+        console.log(`[Cron] Heartbeat sent to UptimeRobot (Status: ${res.statusCode})`);
+      }).on('error', (err) => {
+        console.error('[Cron] Failed to send heartbeat:', err.message);
+      });
+    }
   } catch (err) {
     console.error('[Cron] Error during follow-up check:', err);
   }

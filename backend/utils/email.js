@@ -179,12 +179,14 @@ async function getInboxReplies(user, hrEmails) {
 }
 
 
-async function discoverEmailForJob(company, domain, jd, failedEmails = [], callAIWithRetry, hrName = null) {
+async function discoverEmailForJob(company, domain, jd, failedEmails = [], callAIWithRetry, hrName = null, hrLinkedInUrl = null) {
   let discoveredEmail = null;
   let source = '';
 
+  // Tier 0: Proxycurl removed (requires corporate email for signup)
+
   // Tier 1: JD Scraper + AI Judge
-  if (jd && jd.length > 0) {
+  if (!discoveredEmail && jd && jd.length > 0) {
     const emailRegex = /[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}/g;
     const foundEmails = jd.match(emailRegex);
     if (foundEmails && foundEmails.length > 0) {
@@ -201,28 +203,45 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
     }
   }
 
-  // Tier 1.2: Deep Web Search for HR's explicit email
+  // Tier 1.2: Advanced Deep Web Search (OSINT) for HR's explicit email
   if (!discoveredEmail && hrName && process.env.SERPER_API_KEY) {
     try {
-      const q = `"${hrName}" "${company}" ("@gmail.com" OR "@yahoo.com" OR "@hotmail.com" OR "@outlook.com")`;
-      const sRes = await axios.post('https://google.serper.dev/search', {
-        q, num: 3
-      }, {
-        headers: { 'X-API-KEY': process.env.SERPER_API_KEY, 'Content-Type': 'application/json' }
+      // 3 distinct advanced OSINT queries to maximize personal email discovery
+      const queries = [
+        `"${hrName}" "${company}" ("@gmail.com" OR "@yahoo.com" OR "@hotmail.com" OR "@outlook.com")`,
+        `"${hrName}" "HR" OR "Recruiter" "email" ("@gmail.com" OR "@yahoo.com") -site:linkedin.com`,
+        `site:twitter.com "${hrName}" "${company}" ("@gmail.com" OR "@yahoo.com")`
+      ];
+      
+      let allSnippets = '';
+      
+      // Execute searches in parallel to save time
+      const searchPromises = queries.map(q => 
+        axios.post('https://google.serper.dev/search', { q, num: 3 }, {
+          headers: { 'X-API-KEY': process.env.SERPER_API_KEY, 'Content-Type': 'application/json' }
+        }).catch(() => null)
+      );
+      
+      const results = await Promise.all(searchPromises);
+      
+      results.forEach(sRes => {
+        if (sRes && sRes.data && sRes.data.organic) {
+          allSnippets += sRes.data.organic.map(r => r.snippet).join(' ') + ' ';
+        }
       });
-      const snippets = sRes.data?.organic?.map(r => r.snippet).join(' ') || '';
+
       const emailRegex = /[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}/g;
-      const foundEmails = snippets.match(emailRegex);
+      const foundEmails = allSnippets.match(emailRegex);
       if (foundEmails && foundEmails.length > 0) {
         const validEmails = foundEmails.filter(e => !e.includes('example.com') && !e.includes('email.com') && !failedEmails.includes(e));
         if (validEmails.length > 0) {
-          const prompt = `You are an AI Email Judge. We searched for the personal email of "${hrName}" at "${company}". Extracted emails: ${validEmails.join(', ')}. Which ONE is most likely their real PERSONAL email (e.g. @gmail.com, @yahoo.com)? If there is a personal email, pick it. If there is only a company email, pick that as a fallback. Return ONLY the email address, or "NONE".`;
+          const prompt = `You are an AI Email Judge. We did an advanced OSINT search for the personal email of "${hrName}" at "${company}". Extracted emails: ${validEmails.join(', ')}. Which ONE is most likely their real PERSONAL email (e.g. @gmail.com, @yahoo.com)? Prioritize personal emails over company emails. Return ONLY the email address, or "NONE".`;
           const response = await callAIWithRetry(prompt);
           const aiJudgment = response.text.trim();
           const emailMatch = aiJudgment.match(/[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}/);
           if (emailMatch) {
             discoveredEmail = emailMatch[0];
-            source = 'Tier 1.2 (Deep Web Search HR Name + AI)';
+            source = 'Tier 1.2 (Advanced OSINT HR Name + AI)';
           }
         }
       }
