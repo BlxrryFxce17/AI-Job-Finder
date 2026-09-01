@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Job = require('../models/Job');
 const Profile = require('../models/Profile');
+const { learnFromOpen } = require('../utils/learningEngine');
 
 async function getProfile() {
   const profile = await Profile.findOne();
@@ -24,6 +25,7 @@ router.get('/track-open/:jobId', async (req, res) => {
       if (!isBot && timeSinceSent > 15000) {
         job.status = 'Opened';
         await job.save();
+        await learnFromOpen(job.company, job.emailRecipient);
         console.log(`[Tracking] Email opened for job: ${job.company}`);
       } else {
         console.log(`[Tracking] Ignored bot/early open for ${job.company} (Bot: ${isBot}, MsDelay: ${timeSinceSent})`);

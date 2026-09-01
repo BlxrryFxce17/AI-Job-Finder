@@ -6,7 +6,7 @@ const User = require('../models/User');
 const Profile = require('../models/Profile');
 const requireAuth = require('../middleware/requireAuth');
 const { callAIWithRetry } = require('../utils/ai');
-const { sendEmailViaAPI, discoverEmailForJob, getInboxReplies } = require('../utils/email');
+const { sendEmailViaAPI, discoverEmailForJob, getInboxReplies, verifyEmail } = require('../utils/email');
 const { generateTailoredResumePDF } = require('../utils/pdfGenerator');
 
 async function getProfile(userId) {
@@ -18,8 +18,15 @@ async function getProfile(userId) {
   return profile;
 }
 
+router.post('/verify-email', requireAuth, async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email is required' });
+  const result = await verifyEmail(email);
+  res.json(result);
+});
+
 router.post('/discover-email', requireAuth, async (req, res) => {
-  const { company, jd, failedEmails = [] } = req.body;
+  const { company, jd, failedEmails = [], hrName = null, hrLinkedInUrl = null } = req.body;
   if (!company) return res.status(400).json({ error: 'Company name required' });
   
   let domain = company.toLowerCase().replace(/[^a-z0-9]/g, '') + '.com';
@@ -30,8 +37,42 @@ router.post('/discover-email', requireAuth, async (req, res) => {
     }
   } catch (err) { }
 
-  const result = await discoverEmailForJob(company, domain, jd, failedEmails, callAIWithRetry);
+  const result = await discoverEmailForJob(company, domain, jd, failedEmails, callAIWithRetry, hrName, hrLinkedInUrl);
   res.json(result);
+});
+
+router.post('/generate-linkedin-note', requireAuth, async (req, res) => {
+  const { hrName, company, role } = req.body;
+  try {
+    const profile = await getProfile(req.user.id);
+    const firstName = hrName ? hrName.split(' ')[0] : 'there';
+    const candidateFirstName = profile.name ? profile.name.split(' ')[0] : 'a developer';
+
+    // Clean role: shorten long titles (e.g. "New College Grad - Embedded Firmware Engineer" -> "Firmware Engineer")
+    const shortRole = role ? role.replace(/^(New College Grad\s*[-–]\s*|Senior\s+|Junior\s+|Lead\s+)/i, '').split('-')[0].trim() : 'open';
+    const skillsSnippet = profile.skills && profile.skills.length > 0 ? profile.skills.slice(0, 3).join(', ') : 'modern full-stack systems';
+
+    const prompt = `You are an elite tech recruiter copywriter. Write an ultra-compelling, high-converting LinkedIn connection note from developer ${candidateFirstName} to recruiter ${firstName} regarding the ${shortRole} role at ${company}.
+
+CRITICAL RULES:
+1. STRICTLY between 130 and 180 characters total (hard character limit is 200).
+2. Start with "Hi ${firstName},"
+3. DO NOT use generic clichés like "I'm excited about" or "would love to learn more" or "passionate about".
+4. Position ${candidateFirstName} as a strong software builder (${skillsSnippet}) eager to share relevant work/portfolio for the ${shortRole} opening.
+5. Return ONLY the final raw note text, strictly under 185 characters, no quotes or markdown.`;
+
+    const response = await callAIWithRetry(prompt);
+    let note = response.text.replace(/["`]/g, '').trim();
+    if (note.length > 195) {
+      note = `Hi ${firstName}, I'm an engineer building scalable software & UI systems. I'd love to connect and share my work for the ${shortRole} role at ${company}!`;
+    }
+    res.json({ note });
+  } catch (err) {
+    const firstName = hrName ? hrName.split(' ')[0] : 'there';
+    res.json({ 
+      note: `Hi ${firstName}, I build scalable software and UI systems. Would love to connect and share my work for the role at ${company || 'your team'}!` 
+    });
+  }
 });
 
 router.post('/generate-email', requireAuth, async (req, res) => {
@@ -166,7 +207,7 @@ router.post('/send-email', requireAuth, async (req, res) => {
     res.json({ success: true, tracked: !!baseUrl, message: 'Email sent successfully!', messageId: info.messageId });
   } catch (error) {
     console.error('Error sending email:', error);
-    res.status(500).json({ error: 'Failed to send email. Check credentials.' });
+    res.status(500).json({ error: error.message || 'Failed to send email. Check credentials.' });
   }
 });
 

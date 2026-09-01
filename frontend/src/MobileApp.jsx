@@ -118,7 +118,9 @@ export default function MobileApp(props) {
     useApify,
     setUseApify,
     appliedViewType,
-    setAppliedViewType
+    setAppliedViewType,
+    sourceFilter,
+    setSourceFilter
   } = props;
 
   const [isScrolled, setIsScrolled] = React.useState(false);
@@ -127,6 +129,90 @@ export default function MobileApp(props) {
   const [selectedDraft, setSelectedDraft] = React.useState('');
   const [sendingReply, setSendingReply] = React.useState(false);
   const [showMoreMenu, setShowMoreMenu] = React.useState(false);
+
+  // HR Dashboard State for Mobile
+  const [hrFilter, setHrFilter] = React.useState('all');
+  const [copyingNoteId, setCopyingNoteId] = React.useState(null);
+  const [discoveringHrId, setDiscoveringHrId] = React.useState(null);
+  const [editingEmailId, setEditingEmailId] = React.useState(null);
+  const [editEmailVal, setEditEmailVal] = React.useState('');
+  const [connectedJobIds, setConnectedJobIds] = React.useState([]);
+
+  const handleConnectWithNote = async (job) => {
+    setCopyingNoteId(job.id);
+    const targetUrl = job.hrLinkedIn || `https://www.linkedin.com/search/results/all/?keywords=${encodeURIComponent((job.hrName || '') + ' ' + (job.company || ''))}`;
+    try {
+      const res = await props.apiFetch(`${API_BASE}/api/generate-linkedin-note`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hrName: job.hrName, company: job.company, role: job.role })
+      });
+      const data = await res.json();
+      if (data.note) {
+        await navigator.clipboard.writeText(data.note);
+        notify('📋 Note copied & LinkedIn opened! Hit Paste (Ctrl+V) on LinkedIn, then Mark Invite Sent below.');
+        window.open(targetUrl, '_blank');
+        setConnectedJobIds(prev => [...new Set([...prev, job.id])]);
+      }
+    } catch (err) {
+      const defaultNote = `Hi ${job.hrName ? job.hrName.split(' ')[0] : 'there'}, I'm interested in the role at ${job.company} and would love to connect!`;
+      await navigator.clipboard.writeText(defaultNote);
+      notify('📋 Note copied & LinkedIn opened!');
+      window.open(targetUrl, '_blank');
+      setConnectedJobIds(prev => [...new Set([...prev, job.id])]);
+    } finally {
+      setCopyingNoteId(null);
+    }
+  };
+
+  const handleDeepDiscoverHrEmail = async (job) => {
+    setDiscoveringHrId(job.id);
+    try {
+      notify(`🔍 Scanning web & pattern databases for ${job.hrName}...`, 'info');
+      const res = await props.apiFetch(`${API_BASE}/api/discover-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          company: job.company,
+          jd: job.jd || '',
+          failedEmails: job.failedEmails || [],
+          hrName: job.hrName,
+          hrLinkedInUrl: job.hrLinkedIn
+        })
+      });
+      const data = await res.json();
+      if (data && data.email) {
+        await props.apiFetch(`${API_BASE}/api/jobs/${job.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ emailRecipient: data.email })
+        });
+        setJobs(prev => prev.map(j => j.id === job.id ? { ...j, emailRecipient: data.email } : j));
+        notify(`🎉 Found verified email for ${job.hrName}: ${data.email}!`, 'success');
+      } else {
+        notify(`No verified email found for ${job.hrName}. Try LinkedIn outreach!`, 'warning');
+      }
+    } catch (err) {
+      notify('Error scanning for email', 'error');
+    } finally {
+      setDiscoveringHrId(null);
+    }
+  };
+
+  const handleSaveInlineEmail = async (jobId) => {
+    try {
+      await props.apiFetch(`${API_BASE}/api/jobs/${jobId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emailRecipient: editEmailVal.trim() })
+      });
+      setJobs(prev => prev.map(j => j.id === jobId ? { ...j, emailRecipient: editEmailVal.trim() } : j));
+      notify('Email updated successfully!');
+      setEditingEmailId(null);
+    } catch (err) {
+      notify('Failed to update email', 'error');
+    }
+  };
 
   return (
     <div className="mobile-app-container">
@@ -580,26 +666,25 @@ export default function MobileApp(props) {
               </div>
             )}
 
-            <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
-              <select className="form-input" style={{ flex: 1 }} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-                <option value="All">All Statuses</option>
-                <option value="Found">Found</option>
-                <option value="Drafting">Drafting</option>
-                <option value="Sent">Sent</option>
-                <option value="Opened">Opened</option>
-                <option value="Bounced">Bounced</option>
-                <option value="Replied">Replied</option>
-              </select>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '14px' }}>
               <div className="search-wrapper" style={{ flex: 1, margin: 0 }}>
                 <span className="search-icon">🔍</span>
-                <input type="text" className="search-input" placeholder="Search..." value={search} onChange={(e) => setSearch(e.target.value)} />
+                <input type="text" className="search-input" placeholder="Search company or role..." value={search} onChange={(e) => setSearch(e.target.value)} />
               </div>
+              <select className="form-input" style={{ width: 'auto', flexShrink: 0 }} value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
+                <option value="All">🌐 All Portals</option>
+                <option value="LinkedIn">💼 LinkedIn</option>
+                <option value="Indeed">🔍 Indeed</option>
+                <option value="Naukri">⚡ Naukri</option>
+                <option value="Adzuna">🎯 Adzuna</option>
+                <option value="Other">📝 Other</option>
+              </select>
             </div>
             {activeJobs.length > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', padding: '0 4px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '14px', padding: '0 4px' }}>
                 <button 
                   className="btn btn-ghost" 
-                  style={{ padding: '6px 12px', fontSize: '13px', background: 'var(--surface-3)', borderRadius: '6px', color: 'var(--text-1)' }} 
+                  style={{ padding: '6px 12px', fontSize: '12px', background: 'var(--surface-3)', borderRadius: '6px', color: 'var(--text-1)' }} 
                   onClick={() => {
                     if (selectedJobs.length === activeJobs.length) {
                       setSelectedJobs([]);
@@ -617,17 +702,27 @@ export default function MobileApp(props) {
         )}
 
         {tab === 'applied' && (
-          <div className="mobile-actions-panel" style={{ display: 'flex', gap: '10px' }}>
-            <select className="form-input" style={{ flex: 1 }} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-              <option value="All">All Statuses</option>
-              <option value="Sent">Sent</option>
-              <option value="Opened">Opened</option>
-              <option value="Bounced">Bounced</option>
-              <option value="Replied">Replied</option>
-            </select>
-            <div className="search-wrapper" style={{ flex: 1, margin: 0 }}>
+          <div className="mobile-actions-panel" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div className="search-wrapper" style={{ margin: 0 }}>
               <span className="search-icon">🔍</span>
-              <input type="text" className="search-input" placeholder="Search..." value={search} onChange={(e) => setSearch(e.target.value)} />
+              <input type="text" className="search-input" placeholder="Search company or role..." value={search} onChange={(e) => setSearch(e.target.value)} />
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <select className="form-input" style={{ flex: 1 }} value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
+                <option value="All">🌐 All Portals</option>
+                <option value="LinkedIn">💼 LinkedIn</option>
+                <option value="Indeed">🔍 Indeed</option>
+                <option value="Naukri">⚡ Naukri</option>
+                <option value="Adzuna">🎯 Adzuna</option>
+                <option value="Other">📝 Other</option>
+              </select>
+              <select className="form-input" style={{ flex: 1 }} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+                <option value="All">📊 All Statuses</option>
+                <option value="Sent">🟢 Sent</option>
+                <option value="Opened">📬 Opened</option>
+                <option value="Replied">💬 Replied</option>
+                <option value="Bounced">🔴 Bounced</option>
+              </select>
             </div>
           </div>
         )}
@@ -876,14 +971,139 @@ export default function MobileApp(props) {
             </form>
           </div>
         )}
+        
+        {tab === 'applied' && (
+          <div className="mobile-actions-panel" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div className="search-wrapper" style={{ margin: 0 }}>
+              <span className="search-icon">🔍</span>
+              <input type="text" className="search-input" placeholder="Search company or role..." value={search} onChange={(e) => setSearch(e.target.value)} />
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <select className="form-input" style={{ flex: 1 }} value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
+                <option value="All">🌐 All Portals</option>
+                <option value="LinkedIn">💼 LinkedIn</option>
+                <option value="Indeed">🔍 Indeed</option>
+                <option value="Naukri">⚡ Naukri</option>
+                <option value="Adzuna">🎯 Adzuna</option>
+                <option value="Other">📝 Other</option>
+              </select>
+              <select className="form-input" style={{ flex: 1 }} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+                <option value="All">📊 All Statuses</option>
+                <option value="Sent">🟢 Email Sent</option>
+                <option value="Opened">📬 Email Opened</option>
+                <option value="Replied">💬 Email Replied</option>
+                <option value="Bounced">🔴 Email Bounced</option>
+                <option value="LinkedIn_Sent">💼 LinkedIn Invite Sent</option>
+                <option value="LinkedIn_Connected">🤝 LinkedIn Connected</option>
+                <option value="LinkedIn_Replied">💬 LinkedIn Replied</option>
+              </select>
+            </div>
+          </div>
+        )}
+
+        {(tab === 'applications' || tab === 'applied') && (
+          <div className="mobile-job-list">
+             {loading ? (
+                <div className="empty-state"><span className="loading-spinner"></span><h3>Loading...</h3></div>
+              ) : activeJobs.length === 0 ? (
+                <div className="empty-state"><div className="empty-icon">📭</div><h3>No jobs found</h3></div>
+              ) : (
+                paginatedJobs.map(job => (
+                  <div className={`mobile-job-card ${selectedJobs.includes(job.id) ? 'selected' : ''}`} key={job.id} onClick={() => { if(tab === 'applications') toggleSelectJob(job.id); }}>
+                    {tab === 'applications' && (
+                       <div className="mobile-card-checkbox">
+                         <input type="checkbox" checked={selectedJobs.includes(job.id)} onChange={() => {}} />
+                       </div>
+                    )}
+                    <div className="mobile-card-content">
+                      <div className="mobile-card-header">
+                         <div className="company-avatar" style={{ width: '32px', height: '32px', fontSize: '12px' }}>{job.company.substring(0,2).toUpperCase()}</div>
+                         <div className="mobile-card-title">
+                            <h3 style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                              {job.company}
+                              {job.source && job.source !== 'Manual' && (
+                                <span className={`source-pill source-${job.source.toLowerCase()}`}>
+                                  <img src={`https://www.google.com/s2/favicons?domain=${job.source.toLowerCase()}.com&sz=16`} alt={job.source} style={{width: 10, height: 10, borderRadius: '2px'}} />
+                                  {job.source}
+                                </span>
+                              )}
+                            </h3>
+                            <p>{job.role}</p>
+                         </div>
+                      </div>
+                      <div className="mobile-card-footer">
+                        <span className="mobile-card-date">
+                          {tab === 'applied'
+                            ? `Sent: ${new Date(job.sentAt || job.updatedAt || job.createdAt || Date.now()).toLocaleString([], {year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute:'2-digit'})}`
+                            : `Found: ${new Date(job.createdAt || Date.now()).toLocaleString([], {year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute:'2-digit'})}`
+                          }
+                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          {tab === 'applied' && (
+                            job.status.startsWith('LinkedIn') ? (
+                              <select
+                                value={job.status}
+                                onClick={e => e.stopPropagation()}
+                                onChange={(e) => updateStatus(job.id, e.target.value)}
+                                style={{
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  padding: '2px 6px',
+                                  borderRadius: '6px',
+                                  background: 'rgba(10, 102, 194, 0.15)',
+                                  color: '#38bdf8',
+                                  border: '1px solid rgba(10, 102, 194, 0.4)',
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                <option value="LinkedIn_Sent" style={{ background: 'var(--surface-2)', color: 'var(--text-1)' }}>💼 Invite Sent</option>
+                                <option value="LinkedIn_Connected" style={{ background: 'var(--surface-2)', color: 'var(--text-1)' }}>🤝 Connected</option>
+                                <option value="LinkedIn_Replied" style={{ background: 'var(--surface-2)', color: 'var(--text-1)' }}>💬 Replied</option>
+                              </select>
+                            ) : (
+                              <span className={`badge ${job.status.toLowerCase()}`}>
+                                {job.status}
+                              </span>
+                            )
+                          )}
+                          {job.tracked && <span style={{ fontSize: '12px' }}>🎯</span>}
+                        </div>
+                      </div>
+                      <div className="mobile-card-actions">
+                         <button className="icon-btn" onClick={(e) => { e.stopPropagation(); job.applyLink ? window.open(job.applyLink, '_blank') : alert('No link'); }}>
+                           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                         </button>
+                         {job.hrLinkedIn && (
+                           <button className="icon-btn text-accent" onClick={(e) => { e.stopPropagation(); window.open(job.hrLinkedIn, '_blank'); }}>
+                             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"></path><rect x="2" y="9" width="4" height="12"></rect><circle cx="4" cy="4" r="2"></circle></svg>
+                           </button>
+                         )}
+                         <button className="icon-btn text-danger" onClick={async (e) => { 
+                           e.stopPropagation(); 
+                           try {
+                             await fetch(`${API_BASE}/api/jobs/${job.id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` } });
+                             setJobs(p => p.filter(j => j.id !== job.id));
+                             notify('Job deleted');
+                           } catch(e) { notify('Delete failed', 'error'); }
+                         }}>
+                           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                         </button>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+          </div>
+        )}
+
         {tab === 'hr_dashboard' && (
-          <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 style={{ fontSize: '20px', fontWeight: 600, margin: 0 }}>HR Discovery</h2>
-              <button className="btn btn-primary" style={{ padding: '8px 12px', fontSize: '13px' }} onClick={async () => {
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div className="mobile-actions-panel" style={{ display: 'flex', gap: '8px' }}>
+              <input type="text" className="form-input" style={{ flex: 1 }} placeholder="Role (e.g. software engineer)..." value={fetchQuery} onChange={e => setFetchQuery(e.target.value)} />
+              <button className="btn btn-primary" style={{ padding: '8px 14px' }} onClick={async () => {
                 setFetching(true);
                 try {
-                  const res = await fetch(`${API_BASE}/api/jobs/scrape-hr`, {
+                  const res = await props.apiFetch(`${API_BASE}/api/jobs/scrape-hr`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` },
                     body: JSON.stringify({ query: fetchQuery || fetchQueries[0] || 'software engineer' })
@@ -903,6 +1123,41 @@ export default function MobileApp(props) {
                 {fetching ? <span className="spinner"></span> : 'Discover 🚀'}
               </button>
             </div>
+
+            {/* Sub-Filters for HR Leads on Mobile */}
+            {(() => {
+              const allHrJobs = jobs.filter(j => j.status === 'HR_Found');
+              const withEmailCount = allHrJobs.filter(j => !!j.emailRecipient).length;
+              const noEmailCount = allHrJobs.filter(j => !j.emailRecipient).length;
+              return (
+                <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', padding: '0 4px' }}>
+                  {[
+                    { id: 'all', label: `All (${allHrJobs.length})` },
+                    { id: 'with_email', label: `✉️ With Email (${withEmailCount})` },
+                    { id: 'no_email', label: `💼 LinkedIn (${noEmailCount})` }
+                  ].map(f => (
+                    <button
+                      key={f.id}
+                      onClick={() => setHrFilter(f.id)}
+                      style={{
+                        padding: '5px 12px',
+                        borderRadius: '12px',
+                        fontSize: '11px',
+                        fontWeight: hrFilter === f.id ? 600 : 400,
+                        border: '1px solid',
+                        borderColor: hrFilter === f.id ? 'var(--accent)' : 'var(--border)',
+                        background: hrFilter === f.id ? 'var(--surface-3)' : 'var(--surface-2)',
+                        color: hrFilter === f.id ? 'var(--text-1)' : 'var(--text-2)',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+              );
+            })()}
 
             <div className="mobile-actions-panel">
               {selectedJobs.length > 0 ? (
@@ -937,60 +1192,173 @@ export default function MobileApp(props) {
               )}
             </div>
 
-            <div className="mobile-job-list" style={{ marginTop: '0' }}>
-              {jobs.filter(j => j.status === 'HR_Found').length === 0 ? (
+            <div className="mobile-job-list" style={{ marginTop: '0', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {jobs.filter(j => {
+                if (j.status !== 'HR_Found') return false;
+                if (hrFilter === 'with_email') return !!j.emailRecipient;
+                if (hrFilter === 'no_email') return !j.emailRecipient;
+                return true;
+              }).length === 0 ? (
                  <div className="empty-state"><div className="empty-icon">📭</div><h3>No HRs found</h3></div>
               ) : (
-                 jobs.filter(j => j.status === 'HR_Found').map(job => (
-                  <div className={`mobile-job-card ${selectedJobs.includes(job.id) ? 'selected' : ''}`} key={job.id} onClick={() => toggleSelectJob(job.id)}>
-                    <div className="mobile-card-checkbox">
-                      <input type="checkbox" checked={selectedJobs.includes(job.id)} onChange={() => {}} />
-                    </div>
-                    <div className="mobile-card-content">
-                      <div className="mobile-card-header">
-                        <div className="company-avatar" style={{ width: '32px', height: '32px', fontSize: '12px' }}>{job.hrName ? job.hrName.substring(0,2).toUpperCase() : 'HR'}</div>
-                        <div className="mobile-card-title">
-                          <h3 style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
-                            {job.hrName || 'Unknown HR'}
-                            {job.source && (
-                              <span className={`source-pill source-${job.source.toLowerCase()}`} style={{ padding: '2px 6px', fontSize: '10px' }}>
-                                {job.source}
-                              </span>
-                            )}
-                          </h3>
-                          <p>{job.company}</p>
+                 jobs.filter(j => {
+                   if (j.status !== 'HR_Found') return false;
+                   if (hrFilter === 'with_email') return !!j.emailRecipient;
+                   if (hrFilter === 'no_email') return !j.emailRecipient;
+                   return true;
+                 }).map(job => {
+                   const linkedInTargetUrl = job.hrLinkedIn || `https://www.linkedin.com/search/results/all/?keywords=${encodeURIComponent((job.hrName || '') + ' ' + (job.company || ''))}`;
+                   const hasEmail = !!job.emailRecipient;
+
+                   return (
+                    <div className={`mobile-job-card ${selectedJobs.includes(job.id) ? 'selected' : ''}`} key={job.id} onClick={() => toggleSelectJob(job.id)} style={{ flexDirection: 'column', gap: '10px' }}>
+                      <div style={{ display: 'flex', width: '100%', alignItems: 'flex-start', gap: '10px' }}>
+                        <div className="mobile-card-checkbox" style={{ marginTop: '2px' }}>
+                          <input type="checkbox" checked={selectedJobs.includes(job.id)} onChange={() => {}} />
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <h3 style={{ fontSize: '14px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              {job.hrName || 'Unknown Recruiter'}
+                              {job.source && (
+                                <span className={`source-pill source-${job.source.toLowerCase()}`} style={{ padding: '1px 6px', fontSize: '9px' }}>
+                                  {job.source}
+                                </span>
+                              )}
+                            </h3>
+                            <button
+                              className="icon-btn text-danger"
+                              style={{ padding: '2px' }}
+                              onClick={async (e) => { 
+                                e.stopPropagation(); 
+                                try {
+                                  await fetch(`${API_BASE}/api/jobs/${job.id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` } });
+                                  setJobs(p => p.filter(j => j.id !== job.id));
+                                  notify('Lead deleted');
+                                } catch(e) { notify('Delete failed', 'error'); }
+                              }}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                          <div style={{ fontSize: '12px', color: 'var(--accent)', fontWeight: 600, marginTop: '2px' }}>🏢 {job.company}</div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-2)', marginTop: '1px' }}>
+                            <span style={{ color: 'var(--text-3)' }}>Hiring for: </span>{job.role}
+                          </div>
                         </div>
                       </div>
-                      <div className="mobile-card-footer">
-                        <span className="mobile-card-date">
-                          {new Date(job.publishedAt || Date.now()).toLocaleString([], {year: 'numeric', month: 'numeric', day: 'numeric'})}
-                        </span>
+
+                      {/* Email Box / Inline Editor on Mobile */}
+                      <div style={{
+                        fontSize: '11px',
+                        background: 'var(--surface-1)',
+                        padding: '6px 10px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '6px'
+                      }} onClick={e => e.stopPropagation()}>
+                        {editingEmailId === job.id ? (
+                          <div style={{ display: 'flex', width: '100%', gap: '6px' }}>
+                            <input
+                              type="email"
+                              className="form-input"
+                              style={{ flex: 1, padding: '3px 6px', fontSize: '11px' }}
+                              value={editEmailVal}
+                              onChange={(e) => setEditEmailVal(e.target.value)}
+                              placeholder="hr@company.com"
+                              autoFocus
+                            />
+                            <button className="btn btn-primary" style={{ padding: '3px 8px', fontSize: '10px' }} onClick={() => handleSaveInlineEmail(job.id)}>Save</button>
+                            <button className="btn btn-ghost" style={{ padding: '3px 6px', fontSize: '10px' }} onClick={() => setEditingEmailId(null)}>✕</button>
+                          </div>
+                        ) : (
+                          <>
+                            <span style={{ color: hasEmail ? 'var(--text-1)' : 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              ✉️ {hasEmail ? job.emailRecipient : 'Email: Not Found'}
+                            </span>
+                            <button
+                              onClick={() => {
+                                setEditingEmailId(job.id);
+                                setEditEmailVal(job.emailRecipient || '');
+                              }}
+                              style={{ background: 'transparent', border: 'none', color: 'var(--accent)', fontSize: '10px', cursor: 'pointer', textDecoration: 'underline' }}
+                            >
+                              {hasEmail ? '✏️ Edit' : '+ Add'}
+                            </button>
+                          </>
+                        )}
                       </div>
-                      <div className="mobile-card-actions">
-                        <button className="icon-btn" onClick={(e) => { e.stopPropagation(); job.hrLinkedIn ? window.open(job.hrLinkedIn, '_blank') : alert('No link'); }}>
-                           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"></path><rect x="2" y="9" width="4" height="12"></rect><circle cx="4" cy="4" r="2"></circle></svg>
+
+                      {/* Action buttons on Mobile */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%' }} onClick={e => e.stopPropagation()}>
+                        {/* Unified Connect with AI Note Button */}
+                        <button
+                          className="btn"
+                          style={{ width: '100%', padding: '7px', fontSize: '11px', background: '#0a66c2', color: '#fff', borderRadius: '6px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                          onClick={() => handleConnectWithNote(job)}
+                          disabled={copyingNoteId === job.id}
+                        >
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z"/>
+                          </svg>
+                          {copyingNoteId === job.id ? (
+                            <>
+                              <span className="spinner" style={{ width: '10px', height: '10px' }}></span>
+                              Opening & Copying...
+                            </>
+                          ) : (
+                            '💼 Connect with AI Note'
+                          )}
                         </button>
-                        <button className="icon-btn text-accent" onClick={(e) => { 
-                          e.stopPropagation(); 
-                          if (!job.emailRecipient) return notify('No email found to send to!', 'error');
-                          handleBatchSend([job.id]);
-                        }}>
-                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
-                        </button>
-                        <button className="icon-btn text-danger" onClick={async (e) => { 
-                          e.stopPropagation(); 
-                          try {
-                            await fetch(`${API_BASE}/api/jobs/${job.id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` } });
-                            setJobs(p => p.filter(j => j.id !== job.id));
-                            notify('Lead deleted');
-                          } catch(e) { notify('Delete failed', 'error'); }
-                        }}>
-                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-                        </button>
+
+                        {hasEmail ? (
+                          <button className="btn btn-primary" style={{ width: '100%', padding: '7px', fontSize: '11px' }} onClick={() => handleBatchSend([job.id])}>
+                            ✉️ Send Mail
+                          </button>
+                        ) : (
+                          <button
+                            className="btn btn-ghost"
+                            style={{ width: '100%', padding: '7px', fontSize: '11px', border: '1px dashed var(--accent)', color: 'var(--accent)' }}
+                            onClick={() => handleDeepDiscoverHrEmail(job)}
+                            disabled={discoveringHrId === job.id}
+                          >
+                            {discoveringHrId === job.id ? 'Scanning...' : '🔍 Deep Scan for Email'}
+                          </button>
+                        )}
+
+                        {/* Revealed Only After Clicking Connect */}
+                        {connectedJobIds.includes(job.id) && (
+                          <button
+                            className="btn btn-ghost"
+                            style={{
+                              width: '100%',
+                              fontSize: '10px',
+                              padding: '6px',
+                              borderRadius: '6px',
+                              color: '#38bdf8',
+                              borderColor: 'rgba(10, 102, 194, 0.4)',
+                              background: 'rgba(10, 102, 194, 0.1)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '4px',
+                              fontWeight: 600
+                            }}
+                            onClick={async () => {
+                              await updateStatus(job.id, 'LinkedIn_Sent');
+                              notify(`💼 Marked as LinkedIn Invite Sent! Moved to Applied tab.`);
+                            }}
+                          >
+                            ✓ Mark Invite Sent (Move to Applied)
+                          </button>
+                        )}
                       </div>
                     </div>
-                  </div>
-                ))
+                   );
+                 })
               )}
             </div>
           </div>

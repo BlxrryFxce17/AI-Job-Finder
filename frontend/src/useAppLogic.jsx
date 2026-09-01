@@ -30,6 +30,7 @@ export function useAppLogic() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
+  const [sourceFilter, setSourceFilter] = useState('All');
   const [fetchQuery, setFetchQuery] = useState('');
   const [fetchQueries, setFetchQueries] = useState(['software developer']);
   const [fetching, setFetching] = useState(false);
@@ -201,8 +202,6 @@ export function useAppLogic() {
     isBatchingRef.current = true;
     setBatchProgress(0);
     setBatchState({ active: true, currentIndex: 0, total: batchQueueRef.current.length, currentJob: null, logs: [] });
-    setTab('applied');
-    setAppliedViewType('All');
     
     let processed = 0;
     
@@ -255,32 +254,29 @@ export function useAppLogic() {
       }
       // Calculate progress based on total originally queued + newly queued
       setBatchState(prev => {
-         setBatchProgress((processed / prev.total) * 100);
-         return prev;
+        setBatchProgress((processed / prev.total) * 100);
+        return prev;
       });
     }
-    
+
     if (isBatchingRef.current) {
-        setBatchState(prev => ({ ...prev, logs: [...prev.logs, `All queued tasks complete! Closing in 3 seconds...`] }));
-        notify('Queue complete!');
-        setTimeout(() => {
-            isBatchingRef.current = false;
-            setBatchProgress(null);
-            setSelectedJobs([]);
-            setBatchState(prev => ({ ...prev, active: false }));
-            loadJobs();
-        }, 3000);
+      setBatchState(prev => ({ ...prev, logs: [...prev.logs, `All queued tasks complete! Closing in 3 seconds...`] }));
+      notify('Queue complete!');
+      setTimeout(() => {
+        isBatchingRef.current = false;
+        setBatchProgress(null);
+        setSelectedJobs([]);
+        setBatchState(prev => ({ ...prev, active: false }));
+        loadJobs();
+      }, 3000);
     }
   };
 
   const cancelBatch = () => {
-    isBatchingRef.current = false;
     batchQueueRef.current = [];
-    setBatchProgress(null);
-    setSelectedJobs([]);
-    setBatchState(prev => ({ ...prev, active: false, logs: [] }));
-    notify('Batch process killed.', 'error');
-    loadJobs();
+    isBatchingRef.current = false;
+    setBatchState(prev => ({ ...prev, active: false, logs: [...prev.logs, '🛑 Batch cancelled by user.'] }));
+    notify('Batch processing cancelled', 'info');
   };
 
   const handleProfileSave = async (e) => {
@@ -288,13 +284,13 @@ export function useAppLogic() {
     setSavingProfile(true);
     try {
       const r = await apiFetch(`${API_BASE}/api/profile`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(profile)
       });
       const p = await r.json();
       setProfile(p);
-      notify('Profile updated successfully!');
-    } catch { notify('Failed to update profile', 'error'); }
+      notify('Profile saved successfully');
+    } catch { notify('Failed to save profile', 'error'); }
     finally { setSavingProfile(false); }
   };
 
@@ -396,12 +392,12 @@ export function useAppLogic() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, statusFilter, tab]);
+  }, [search, statusFilter, sourceFilter, tab]);
 
   const activeJobs = jobs.filter(j => {
     if (tab === 'applications') return j.status === 'Found' || j.status === 'Drafting';
     if (tab === 'applied') {
-      if (!['Sent', 'Opened', 'Bounced'].includes(j.status)) return false;
+      if (!['Sent', 'Opened', 'Bounced', 'Replied'].includes(j.status)) return false;
       if (appliedViewType === 'HR') return !!j.hrName;
       if (appliedViewType === 'Jobs') return !j.hrName;
       return true;
@@ -409,9 +405,19 @@ export function useAppLogic() {
     return true;
   }).filter(j => 
     (statusFilter === 'All' || j.status === statusFilter) &&
-    (j.company.toLowerCase().includes(search.toLowerCase()) || 
-    j.role.toLowerCase().includes(search.toLowerCase()))
-  );
+    (sourceFilter === 'All' || (j.source && j.source.toLowerCase() === sourceFilter.toLowerCase())) &&
+    ((j.company && j.company.toLowerCase().includes(search.toLowerCase())) || 
+     (j.role && j.role.toLowerCase().includes(search.toLowerCase())))
+  ).sort((a, b) => {
+    if (tab === 'applied') {
+      const timeA = new Date(a.sentAt || a.updatedAt || a.createdAt || 0).getTime();
+      const timeB = new Date(b.sentAt || b.updatedAt || b.createdAt || 0).getTime();
+      return timeB - timeA; // Latest sent first
+    }
+    const timeA = new Date(a.publishedAt || a.createdAt || a.updatedAt || 0).getTime();
+    const timeB = new Date(b.publishedAt || b.createdAt || b.updatedAt || 0).getTime();
+    return timeB - timeA; // Latest found first
+  });
 
   const paginatedJobs = activeJobs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
   const totalPages = Math.ceil(activeJobs.length / itemsPerPage);
@@ -450,6 +456,7 @@ export function useAppLogic() {
     loading, setLoading,
     search, setSearch,
     statusFilter, setStatusFilter,
+    sourceFilter, setSourceFilter,
     fetchQuery, setFetchQuery,
     fetchQueries, setFetchQueries,
     fetching, setFetching,

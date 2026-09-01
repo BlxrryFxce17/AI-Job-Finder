@@ -9,12 +9,13 @@ const requireAuth = require('../middleware/requireAuth');
 const { scrapeJobsFree, findHROnLinkedIn } = require('../utils/scraper');
 const { discoverEmailForJob, sendEmailViaAPI } = require('../utils/email');
 const { callAIWithRetry } = require('../utils/ai');
+const { learnFromBounce } = require('../utils/learningEngine');
 const Profile = require('../models/Profile');
 const { generateTailoredResumePDF } = require('../utils/pdfGenerator');
 
 router.get('/', requireAuth, async (req, res) => {
   try {
-    const jobs = await Job.find({ userId: req.user.id }).sort({ publishedAt: -1, createdAt: -1 });
+    const jobs = await Job.find({ userId: req.user.id }).sort({ sentAt: -1, publishedAt: -1, createdAt: -1, updatedAt: -1 });
     res.json(jobs);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch jobs' });
@@ -238,6 +239,7 @@ router.get('/check-bounces', requireAuth, async (req, res) => {
             }
             job.status = 'Bounced';
             await job.save();
+            await learnFromBounce(job.company, failedRecipient);
             newBouncesCount++;
 
             // Auto-retry: Try to discover a new email and resend

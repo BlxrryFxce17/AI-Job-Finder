@@ -128,13 +128,13 @@ Return ONLY valid JSON: {"company": "Extracted Company", "role": "Extracted Role
 
 // Search LinkedIn for HR profile based on company
 async function findHROnLinkedIn(company, location = 'India') {
-  if (!process.env.SERPER_API_KEY) return null;
+  if (!process.env.SERPER_API_KEY || !company) return null;
 
   try {
     const query = `site:linkedin.com/in/ "HR" OR "Talent Acquisition" OR "Recruiter" "${company}" "${location}"`;
     const res = await axios.post('https://google.serper.dev/search', {
       q: query,
-      num: 3
+      num: 5
     }, {
       headers: {
         'X-API-KEY': process.env.SERPER_API_KEY,
@@ -143,10 +143,32 @@ async function findHROnLinkedIn(company, location = 'India') {
     });
 
     const organic = res.data.organic || [];
+    for (const item of organic) {
+      let rawTitle = item.title || '';
+      let cleanName = rawTitle
+        .split('|')[0]
+        .split('-')[0]
+        .split('–')[0]
+        .split(':')[0]
+        .replace(/\b(HR|Talent|Recruiter|Manager|Director|Lead|Executive|Head|Consultant|Specialist|LinkedIn)\b/gi, '')
+        .replace(/[^a-zA-Z\s]/g, '')
+        .trim();
+
+      const nameParts = cleanName.split(/\s+/).filter(Boolean);
+      // Valid personal name is typically 2-3 words
+      if (nameParts.length >= 2 && nameParts.length <= 4) {
+        return {
+          name: cleanName,
+          linkedinUrl: item.link,
+          snippet: item.snippet
+        };
+      }
+    }
+
     if (organic.length > 0) {
-      // Pick the first one
+      const fallbackName = organic[0].title.split('|')[0].split('-')[0].trim();
       return {
-        name: organic[0].title.split(' - ')[0] || 'HR Manager',
+        name: fallbackName,
         linkedinUrl: organic[0].link,
         snippet: organic[0].snippet
       };
@@ -158,3 +180,4 @@ async function findHROnLinkedIn(company, location = 'India') {
 }
 
 module.exports = { scrapeJobsFree, findHROnLinkedIn };
+
