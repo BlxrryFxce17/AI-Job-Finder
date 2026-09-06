@@ -1,6 +1,7 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 const { callAIWithRetry } = require('./ai');
+const { isSeniorRole, detectExperienceLevel, shouldExcludeSenior } = require('./jobFilter');
 
 async function scrapeJobsFree(query, location = 'India', excludeCompanies = []) {
   const jobs = [];
@@ -10,11 +11,14 @@ async function scrapeJobsFree(query, location = 'India', excludeCompanies = []) 
     return jobs;
   }
 
+  const excludeSenior = shouldExcludeSenior(query);
+  const seniorNegativeDorks = excludeSenior ? '-senior -sr -lead -principal -staff -architect -manager -director' : '';
+
   // Google Dorking for recent job postings (last 24 hours)
   const dorkQueries = [
-    `site:linkedin.com/jobs/view "${query}" "India"`,
-    `site:in.indeed.com/viewjob "${query}" "India"`,
-    `site:naukri.com/job-listings "${query}" "India"`
+    `site:linkedin.com/jobs/view "${query}" "India" ${seniorNegativeDorks}`.trim(),
+    `site:in.indeed.com/viewjob "${query}" "India" ${seniorNegativeDorks}`.trim(),
+    `site:naukri.com/job-listings "${query}" "India" ${seniorNegativeDorks}`.trim()
   ];
 
   for (const q of dorkQueries) {
@@ -99,6 +103,12 @@ Return ONLY valid JSON: {"company": "Extracted Company", "role": "Extracted Role
           }
 
           if (company !== 'Unknown Company' && role) {
+            // If searching for junior jobs, skip senior roles detected in title or JD
+            if (excludeSenior && isSeniorRole(role, fullJD)) {
+              console.log(`[Scraper] Excluded senior role for junior search: "${role}" at ${company}`);
+              continue;
+            }
+
             const companyLower = company.toLowerCase();
             const isDuplicate = excludeCompanies.some(ex => ex.length > 2 && (companyLower.includes(ex) || ex.includes(companyLower)));
             
@@ -106,10 +116,11 @@ Return ONLY valid JSON: {"company": "Extracted Company", "role": "Extracted Role
               jobs.push({
                 company,
                 role,
-              jd: fullJD,
-              applyLink: url,
-              location: location,
-              source: source,
+                jd: fullJD,
+                applyLink: url,
+                location: location,
+                source: source,
+                experienceLevel: detectExperienceLevel(role, fullJD),
                 publishedAt: new Date(), // It's from last 24h
               });
             }
@@ -179,5 +190,184 @@ async function findHROnLinkedIn(company, location = 'India') {
   return null;
 }
 
-module.exports = { scrapeJobsFree, findHROnLinkedIn };
+const KNOWN_INVALID_COMPANIES = new Set([
+  'sourcing strategist',
+  'technical recruiter',
+  'junior software developer',
+  'software developer',
+  'software engineer',
+  '6+ years experience',
+  'talent acquisition',
+  'it & engineering talent acquisition',
+  'data',
+  'tech company',
+  'tech partner',
+  'linkedin',
+  'independent',
+  'freelance',
+  'self employed',
+  'unknown'
+]);
+
+function isInvalidCompany(comp) {
+  if (!comp || typeof comp !== 'string') return true;
+  const lower = comp.toLowerCase().trim();
+  if (lower.length < 2 || lower.length > 50) return true;
+  if (KNOWN_INVALID_COMPANIES.has(lower)) return true;
+  if (/\b(recruiter|talent|acquisition|sourcer|strategist|developer|engineer|experience|years?|joiner|hiring|fresher)\b/i.test(lower)) {
+    return true;
+  }
+  return false;
+}
+
+function parseHRItem(item) {
+  const title = (item.title || '').replace(/\s*\|\s*LinkedIn$/i, '').replace(/\s*-\s*LinkedIn$/i, '').trim();
+  const snippet = item.snippet || '';
+  const link = item.link || '';
+
+  const parts = title.split(/\s*[-–—|]\s*/);
+  let name = parts[0]?.trim() || '';
+  name = name.replace(/\b(HR|Talent|Recruiter|Manager|Head|Lead|Director|Specialist)\b/gi, '').trim();
+
+  let role = parts[1]?.trim() || 'Technical Recruiter';
+  let company = parts[2]?.trim() || '';
+
+  if (/\bat\b/i.test(role) && !company) {
+    const atParts = role.split(/\bat\b/i);
+    role = atParts[0]?.trim();
+    company = atParts[1]?.trim();
+  }
+
+  // If company looks like a job title or skill, invalidate it
+  if (isInvalidCompany(company)) {
+    company = '';
+  }
+
+  // Check snippet for company if company still empty
+  if (!company) {
+    const atMatch = snippet.match(/(?:at|with|for)\s+([A-Z][A-Za-z0-9\s&.,]+?)(?:\.|\s*[-–—]|,\s*(?:India|Bengaluru|Bangalore|Mumbai|Delhi|Hyderabad|Pune)|(?:\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}))/i);
+    if (atMatch && atMatch[1] && !isInvalidCompany(atMatch[1])) {
+      company = atMatch[1].trim();
+    }
+  }
+
+  // Clean company name of trailing locations or symbols
+  company = company.replace(/\s*[-–—].*$/, '').replace(/\b(India|Bangalore|Bengaluru|Mumbai|Delhi|Gurgaon|Gurugram|Hyderabad|Pune|Area|LinkedIn)\b/gi, '').trim();
+  if (isInvalidCompany(company)) {
+    company = '';
+  }
+
+  return { name, role, company: company || '', link, snippet, rawTitle: title };
+}
+
+// Directly discover HR recruiters and talent acquisition leads on LinkedIn
+async function discoverHRProfiles(query = 'software engineer', location = 'India', existingUrls = []) {
+  if (!process.env.SERPER_API_KEY) {
+    console.log('No SERPER_API_KEY, skipping HR profile search.');
+    return [];
+  }
+
+  const cleanQuery = (query || 'software engineer').trim();
+  const searchQueries = [
+    `site:linkedin.com/in/ ("Technical Recruiter" OR "Talent Acquisition" OR "IT Recruiter") "${cleanQuery}" "${location}"`,
+    `site:linkedin.com/in/ ("HR Manager" OR "Hiring" OR "Talent Partner") "${cleanQuery}" "${location}"`
+  ];
+
+  const allItems = [];
+  for (const q of searchQueries) {
+    try {
+      const res = await axios.post('https://google.serper.dev/search', {
+        q,
+        num: 10
+      }, {
+        headers: {
+          'X-API-KEY': process.env.SERPER_API_KEY,
+          'Content-Type': 'application/json'
+        },
+        timeout: 8000
+      });
+      if (res.data && Array.isArray(res.data.organic)) {
+        allItems.push(...res.data.organic);
+      }
+    } catch (err) {
+      console.error(`[Scraper] Error in Serper HR search for "${q}":`, err.message);
+    }
+  }
+
+  // Deduplicate and filter out already known profile URLs
+  const seenUrls = new Set((existingUrls || []).map(u => (u || '').toLowerCase().trim()));
+  const uniqueItems = [];
+  for (const item of allItems) {
+    if (!item.link) continue;
+    const lowerLink = item.link.toLowerCase().trim();
+    if (!seenUrls.has(lowerLink)) {
+      seenUrls.add(lowerLink);
+      uniqueItems.push(item);
+    }
+  }
+
+  if (uniqueItems.length === 0) return [];
+
+  // Parse candidate profiles using regex
+  const candidates = uniqueItems.map(parseHRItem).filter(c => {
+    const isRecruiter = /\b(recruiter|talent|hr|hiring|staffing|sourcer|people|human resources|ta\b)/i.test(c.role) ||
+                        /\b(recruiter|talent|hr|hiring|staffing|sourcer|people|human resources|ta\b)/i.test(c.snippet);
+    return isRecruiter && c.name && c.name.length >= 2;
+  });
+
+  if (candidates.length === 0) return [];
+
+  // Single fast batch AI refinement to accurately extract Company and Role
+  try {
+    const prompt = `You are an expert at extracting recruiter data from Google Search LinkedIn snippets.
+Extract the recruiter's exact personal Name, current professional Recruiting Role, and current corporate Employer (Company).
+
+CRITICAL RULES:
+1. "name": The person's first and last name only (e.g. "Priyanka Reddy", "Abish Balakrishnan", "Divyalakshmi K").
+2. "role": Their professional recruiting title (e.g. "Senior Technical Recruiter", "Certified Technical Recruiter", "HR Manager").
+3. "company": The actual business or corporate entity they work at (e.g. "Workcog Inc", "Numentica", "VIVA USA Inc", "Teknowiz", "Professional Peers").
+   - Notice that headlines often contain buzzwords like "Sourcing Strategist" or "Data-Driven Hiring" which are NOT companies. Look closely at the snippet for the real company name!
+   - NEVER use job titles or experience phrases (e.g. "6+ Years Experience") as company.
+   - NEVER use "LinkedIn", "Data", "Tech Company", "India" as company.
+   - If no distinct corporate employer name exists in the title or snippet, set "company": null.
+
+Items:
+${candidates.slice(0, 10).map((it, idx) => `[${idx}] Title: ${it.rawTitle || it.role}\nSnippet: ${it.snippet}`).join('\n\n')}
+
+Return JSON array of objects: [{"index": number, "name": string, "role": string, "company": string | null}]
+Return ONLY valid JSON array.`;
+
+    const aiRes = await callAIWithRetry(prompt, 2, 900);
+    const jsonMatch = aiRes.text.match(/\[[\s\S]*\]/);
+    if (jsonMatch) {
+      const refined = JSON.parse(jsonMatch[0]);
+      if (Array.isArray(refined)) {
+        refined.forEach(r => {
+          if (candidates[r.index]) {
+            if (r.name && r.name.length >= 2) candidates[r.index].name = r.name.trim();
+            if (r.role) candidates[r.index].role = r.role.trim();
+            if (r.company && !isInvalidCompany(r.company)) {
+              candidates[r.index].company = r.company.trim();
+            } else {
+              candidates[r.index].company = '';
+            }
+          }
+        });
+      }
+    }
+  } catch (aiErr) {
+    console.log('[Scraper] Batch AI HR refinement skipped:', aiErr.message);
+  }
+
+  return candidates.map(c => ({
+    name: c.name,
+    role: c.role || 'Technical Recruiter',
+    company: (c.company && !isInvalidCompany(c.company)) ? c.company : 'Direct Recruiter / Agency',
+    link: c.link,
+    snippet: c.snippet,
+    location: location
+  }));
+}
+
+module.exports = { scrapeJobsFree, findHROnLinkedIn, discoverHRProfiles, isInvalidCompany };
 

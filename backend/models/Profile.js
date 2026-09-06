@@ -14,6 +14,7 @@ const profileSchema = new mongoose.Schema({
   experienceLevel: { type: String, default: '' },
   tone: { type: String, default: 'Professional' },
   enableFlex: { type: Boolean, default: true },
+  enableAutoFollowUp: { type: Boolean, default: true },
   aiInstructions: { type: String, default: '' },
   resumeFilename: { type: String, default: '' }
 });

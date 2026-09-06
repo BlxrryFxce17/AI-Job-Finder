@@ -23,7 +23,12 @@ const jobSchema = new mongoose.Schema({
     day: Number,
     sent: { type: Boolean, default: false }
   }],
-  source: { type: String, default: 'Manual' }
+  source: { type: String, default: 'Manual' },
+  experienceLevel: { type: String, default: '' },
+  salary: { type: String, default: '' },
+  recruiterEmail: { type: String, default: '' },
+  matchedThreadId: { type: String, default: '' },
+  lastRepliedAt: { type: Date }
 }, { timestamps: true });
 
 module.exports = mongoose.model('Job', jobSchema);

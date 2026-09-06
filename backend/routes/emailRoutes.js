@@ -6,7 +6,7 @@ const User = require('../models/User');
 const Profile = require('../models/Profile');
 const requireAuth = require('../middleware/requireAuth');
 const { callAIWithRetry } = require('../utils/ai');
-const { sendEmailViaAPI, discoverEmailForJob, getInboxReplies, verifyEmail } = require('../utils/email');
+const { sendEmailViaAPI, discoverEmailForJob, resolveCompanyDomain, getInboxReplies, verifyEmail } = require('../utils/email');
 const { generateTailoredResumePDF } = require('../utils/pdfGenerator');
 
 async function getProfile(userId) {
@@ -26,18 +26,11 @@ router.post('/verify-email', requireAuth, async (req, res) => {
 });
 
 router.post('/discover-email', requireAuth, async (req, res) => {
-  const { company, jd, failedEmails = [], hrName = null, hrLinkedInUrl = null } = req.body;
+  const { company, jd, failedEmails = [], hrName = null, hrLinkedInUrl = null, applyLink = null } = req.body;
   if (!company) return res.status(400).json({ error: 'Company name required' });
   
-  let domain = company.toLowerCase().replace(/[^a-z0-9]/g, '') + '.com';
-  try {
-    const clearbitRes = await axios.get(`https://autocomplete.clearbit.com/v1/companies/suggest?query=${encodeURIComponent(company)}`);
-    if (clearbitRes.data && clearbitRes.data.length > 0) {
-      domain = clearbitRes.data[0].domain;
-    }
-  } catch (err) { }
-
-  const result = await discoverEmailForJob(company, domain, jd, failedEmails, callAIWithRetry, hrName, hrLinkedInUrl);
+  const domain = await resolveCompanyDomain(company, applyLink);
+  const result = await discoverEmailForJob(company, domain, jd, failedEmails, callAIWithRetry, hrName, hrLinkedInUrl, applyLink);
   res.json(result);
 });
 
@@ -436,6 +429,120 @@ ${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructio
   }
 });
 
+function classifyEmailCategory(subject = '', body = '', snippet = '') {
+  const text = `${subject} ${body} ${snippet}`.toLowerCase();
+  
+  if (/\b(interview|round|schedule|screening|zoom|google meet|teams link|calendar invite|availability|call with|chat with|shortlist|discuss the role|phone screen|lets connect|let's connect|lets talk|let's talk|connect on|reschedule)\b/i.test(text)) {
+    return { category: 'Interview', label: '🎉 Interview Invite', color: '#10b981', bg: 'rgba(16, 185, 129, 0.15)', border: 'rgba(16, 185, 129, 0.3)' };
+  }
+  if (/\b(assignment|assessment|hackerrank|leetcode|codility|take[- ]home|test link|coding challenge|task|technical evaluation)\b/i.test(text)) {
+    return { category: 'Assessment', label: '📝 Tech Assessment', color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.15)', border: 'rgba(245, 158, 11, 0.3)' };
+  }
+  if (/\b(notice period|current ctc|expected ctc|resume|salary expectations|portfolio|experience details|relocation|years of experience|preference of location|comfortable to relocate)\b/i.test(text)) {
+    return { category: 'Info_Request', label: '💬 Recruiter Inquiry', color: '#38bdf8', bg: 'rgba(56, 189, 248, 0.15)', border: 'rgba(56, 189, 248, 0.3)' };
+  }
+  if (/\b(unfortunately|regret to inform|pursue other candidates|not moving forward|position has been filled|not a match|cannot offer|filled the position)\b/i.test(text)) {
+    return { category: 'Rejection', label: '❌ Not Moving Forward', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)', border: 'rgba(239, 68, 68, 0.3)' };
+  }
+  return { category: 'General', label: '📩 Direct Reply', color: '#a78bfa', bg: 'rgba(167, 139, 250, 0.15)', border: 'rgba(167, 139, 250, 0.3)' };
+}
+
+function findMatchingJob(emailItem, jobs, userEmail = '') {
+  const myEmail = (userEmail || '').toLowerCase().trim();
+
+  // Collect all non-user email addresses and domains involved in this thread
+  const threadEmails = new Set();
+  const threadDomains = new Set();
+
+  const addEmail = (raw) => {
+    if (!raw) return;
+    const clean = (raw.match(/<([^>]+)>/)?.[1] || raw).toLowerCase().trim();
+    if (clean && clean !== myEmail) {
+      threadEmails.add(clean);
+      if (clean.includes('@')) {
+        const d = clean.split('@')[1].toLowerCase().trim();
+        threadDomains.add(d);
+      }
+    }
+  };
+
+  addEmail(emailItem.from);
+  addEmail(emailItem.fromFull);
+
+  if (Array.isArray(emailItem.threadMessages)) {
+    for (const tm of emailItem.threadMessages) {
+      addEmail(tm.from);
+    }
+  }
+
+  const fromName = (emailItem.fromFull || emailItem.from || '').toLowerCase();
+  const subjectLower = (emailItem.subject || '').toLowerCase();
+
+  const genericDomains = [
+    'gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'icloud.com',
+    'naukri.com', 'internshala.com', 'atlassian.net', 'wellfound.com', 'linkedin.com',
+    'workablemail.com', 'myworkday.com', 'workday.com', 'greenhouse.io', 'lever.co',
+    'smartrecruiters.com', 'ashbyhq.com', 'jobvite.com', 'icims.com', 'bamboohr.com'
+  ];
+
+  for (const j of jobs) {
+    // 1. Explicit thread linkage (manual link or previously confirmed thread)
+    if (j.matchedThreadId && emailItem.threadId && j.matchedThreadId === emailItem.threadId) {
+      return j;
+    }
+
+    // 2. Exact Recruiter Email match in thread participants (excluding user's own email)
+    const r1 = j.emailRecipient ? j.emailRecipient.toLowerCase().trim() : '';
+    const r2 = j.recruiterEmail ? j.recruiterEmail.toLowerCase().trim() : '';
+    if (r1 && r1 !== myEmail && threadEmails.has(r1)) {
+      return j;
+    }
+    if (r2 && r2 !== myEmail && threadEmails.has(r2)) {
+      return j;
+    }
+
+    // 3. Exact corporate company domain match (e.g. neerinteractives.com)
+    if (j.emailRecipient && j.emailRecipient.includes('@')) {
+      const jDomain = j.emailRecipient.split('@')[1].toLowerCase().trim();
+      if (!genericDomains.includes(jDomain) && threadDomains.has(jDomain)) {
+        return j;
+      }
+    }
+
+    // 4. Company Name match (strictly word-bounded, avoiding false positives like 'soft' in 'software')
+    if (j.company && j.company.trim().length >= 3) {
+      const compRaw = j.company.toLowerCase().trim();
+      const compClean = compRaw
+        .replace(/\b(enterprises|technologies|solutions|software|systems|services|pvt|ltd|limited|private|llc|inc|corp|corporation|group|india|manufacturing|kft)\b/gi, '')
+        .trim();
+
+      // Words to ignore as company names because they are generic words
+      const genericWords = ['career', 'creed', 'soft', 'solution', 'service', 'enterprise', 'system', 'tech', 'financial', 'global', 'staffing', 'consulting', 'hr'];
+      const testNames = [compRaw, compClean].filter(n => n && n.length >= 4 && !genericWords.includes(n));
+
+      for (const name of testNames) {
+        const regex = new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+        if (regex.test(subjectLower) || regex.test(fromName)) {
+          return j;
+        }
+      }
+    }
+
+    // 5. Specific Role match ONLY IF company is also referenced
+    if (j.role && j.role.trim().length >= 6 && j.company && j.company.trim().length >= 3) {
+      const roleClean = j.role.toLowerCase().trim();
+      const compClean = j.company.toLowerCase().trim();
+      if (subjectLower.includes(roleClean) && subjectLower.includes(compClean)) {
+        return j;
+      }
+    }
+  }
+
+  return null;
+}
+
+const inboxCache = new Map(); // userId -> { timestamp, data }
+
 router.get('/inbox', requireAuth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
@@ -443,29 +550,190 @@ router.get('/inbox', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'No Google account connected.' });
     }
 
-    // Get all unique HR emails we've sent to
-    const jobs = await Job.find({ userId: req.user.id, emailRecipient: { $exists: true, $ne: null } });
-    const hrEmails = [...new Set(jobs.map(j => j.emailRecipient))];
+    const searchQuery = (req.query.q || '').trim();
+    const forceRefresh = req.query.force === 'true';
 
-    if (hrEmails.length === 0) {
-      return res.json({ replies: [] });
+    // Serve from fast 30s cache if not searching and not forcing refresh
+    const cacheKey = req.user.id;
+    const cached = inboxCache.get(cacheKey);
+    if (!forceRefresh && !searchQuery && cached && (Date.now() - cached.timestamp < 30000)) {
+      return res.json({ success: true, replies: cached.data });
     }
 
-    const replies = await getInboxReplies(user, hrEmails);
-    res.json({ replies });
+    // Get all jobs sorted by most recently sent / created FIRST
+    const jobs = await Job.find({ userId: req.user.id }).sort({ sentAt: -1, createdAt: -1, _id: -1 });
+
+    const hrEmails = [...new Set(jobs.map(j => j.emailRecipient || j.recruiterEmail).filter(Boolean))];
+    const companyDomains = [...new Set(jobs.map(j => {
+      if (j.emailRecipient && j.emailRecipient.includes('@')) {
+        return j.emailRecipient.split('@')[1].toLowerCase().trim();
+      }
+      return null;
+    }).filter(Boolean))];
+
+    const replies = await getInboxReplies(user, {
+      hrEmails,
+      searchQuery,
+      companyDomains
+    });
+    
+    // Enrich with classification, company link, and update status
+    const enrichedReplies = [];
+    for (const r of replies) {
+      const fromEmail = (r.from.match(/<([^>]+)>/)?.[1] || r.from).toLowerCase().trim();
+
+      // Aggregate thread messages for accurate classification context
+      let classificationBody = r.body || r.snippet || '';
+      if (Array.isArray(r.threadMessages) && r.threadMessages.length > 0) {
+        classificationBody = r.threadMessages
+          .filter(tm => !tm.isMe)
+          .map(tm => tm.body)
+          .join(' ');
+      }
+      const category = classifyEmailCategory(r.subject, classificationBody, r.snippet);
+
+      // Match to job with multi-tiered heuristics (excluding candidate's own email from recruiter matches)
+      const matchedJob = findMatchingJob(r, jobs, user.email);
+
+      // ONLY list emails that belong to jobs used with AI Job Finder!
+      // (If user explicitly typed a search in the scanner, allow showing it so they can link it)
+      if (!matchedJob && !searchQuery) {
+        continue;
+      }
+
+      // Auto-update job status to Replied if it was Sent or Opened
+      if (matchedJob && ['Sent', 'Opened'].includes(matchedJob.status)) {
+        await Job.updateOne(
+          { _id: matchedJob._id },
+          { 
+            status: 'Replied',
+            recruiterEmail: fromEmail,
+            lastRepliedAt: new Date(),
+            ...(r.threadId && !matchedJob.matchedThreadId ? { matchedThreadId: r.threadId } : {})
+          }
+        );
+        matchedJob.status = 'Replied';
+      }
+
+      enrichedReplies.push({
+        ...r,
+        categoryInfo: category,
+        matchedJob: matchedJob ? {
+          id: matchedJob.id,
+          company: matchedJob.company,
+          role: matchedJob.role,
+          status: matchedJob.status,
+          emailRecipient: matchedJob.emailRecipient || fromEmail
+        } : null
+      });
+    }
+
+    // Sort all replies strictly newest-first (latest timestamp at index 0)
+    enrichedReplies.sort((a, b) => {
+      const timeA = a.timestamp || (a.date ? new Date(a.date).getTime() : 0);
+      const timeB = b.timestamp || (b.date ? new Date(b.date).getTime() : 0);
+      return timeB - timeA;
+    });
+
+    // Cache the enriched replies for 30s to prevent rapid quota depletion
+    if (!searchQuery) {
+      inboxCache.set(cacheKey, { timestamp: Date.now(), data: enrichedReplies });
+    }
+
+    res.json({ replies: enrichedReplies });
   } catch (err) {
     console.error('Error fetching inbox:', err);
     res.status(500).json({ error: 'Failed to fetch inbox replies' });
   }
 });
 
+router.post('/inbox/link-job', requireAuth, async (req, res) => {
+  try {
+    const { jobId, messageId, threadId, fromEmail, createNew, company, role } = req.body;
+
+    let targetJob = null;
+    if (createNew) {
+      if (!company || !company.trim()) {
+        return res.status(400).json({ error: 'Company name is required to create a new application record.' });
+      }
+      targetJob = new Job({
+        userId: req.user.id,
+        id: 'manual-' + Date.now(),
+        company: company.trim(),
+        role: (role || 'Job Applicant').trim(),
+        emailRecipient: (fromEmail || '').trim(),
+        recruiterEmail: (fromEmail || '').trim(),
+        status: 'Replied',
+        sentAt: new Date(),
+        lastRepliedAt: new Date(),
+        matchedThreadId: threadId || ''
+      });
+      await targetJob.save();
+    } else if (jobId) {
+      targetJob = await Job.findOne({ id: jobId, userId: req.user.id });
+      if (!targetJob) {
+        targetJob = await Job.findOne({ _id: jobId, userId: req.user.id });
+      }
+      if (!targetJob) {
+        return res.status(404).json({ error: 'Job application not found.' });
+      }
+
+      targetJob.status = 'Replied';
+      if (fromEmail) {
+        targetJob.recruiterEmail = fromEmail.trim();
+        if (!targetJob.emailRecipient) {
+          targetJob.emailRecipient = fromEmail.trim();
+        }
+      }
+      if (threadId) {
+        targetJob.matchedThreadId = threadId;
+      }
+      targetJob.lastRepliedAt = new Date();
+      await targetJob.save();
+    } else {
+      return res.status(400).json({ error: 'Please provide a jobId or specify createNew: true.' });
+    }
+
+    inboxCache.delete(req.user.id);
+
+    res.json({
+      success: true,
+      message: `Successfully linked to ${targetJob.company}!`,
+      matchedJob: {
+        id: targetJob.id,
+        company: targetJob.company,
+        role: targetJob.role,
+        status: targetJob.status,
+        emailRecipient: targetJob.emailRecipient,
+        recruiterEmail: targetJob.recruiterEmail
+      }
+    });
+  } catch (err) {
+    console.error('Error linking job application:', err);
+    res.status(500).json({ error: 'Failed to link job application' });
+  }
+});
+
 router.post('/inbox/draft-reply', requireAuth, async (req, res) => {
   try {
-    const { from, subject, body } = req.body;
+    const { from, subject, body, intent = 'general' } = req.body;
     const profile = await getProfile(req.user.id);
 
-    const prompt = `You are an elite software engineer named ${profile.name}. 
-You just received the following reply from a hiring manager/recruiter:
+    let intentGuidance = 'Draft 3 distinct, highly professional, and concise replies to this email.';
+    if (intent === 'interview_accept') {
+      intentGuidance = 'Express sincere gratitude and enthusiasm for the interview invitation. Confirm availability and propose 2-3 specific time windows (morning and afternoon) over the coming 2-3 business days. Mention looking forward to discussing your engineering skills.';
+    } else if (intent === 'info_confirm') {
+      intentGuidance = 'Politely and clearly confirm your details: available to start immediately or on short 15-day notice, current location, open and flexible to discuss compensation according to standard benchmarks, and attach/reiterate your portfolio/GitHub.';
+    } else if (intent === 'polite_inquiry') {
+      intentGuidance = 'Thank the recruiter warmly, confirm interest in the role, and ask 1-2 thoughtful, insightful questions regarding the team technical stack, engineering culture, or next steps in the process.';
+    }
+
+    const prompt = `You are an elite software engineer named ${profile.name || 'Akash V'}.
+Candidate Title: ${profile.title || 'Software Developer'}
+Candidate Skills: ${(profile.skills || []).join(', ') || 'React, Node.js, Python, MongoDB'}
+Candidate Phone: ${profile.phone || ''}
+
+You just received the following email from a hiring manager or recruiter:
 From: ${from}
 Subject: ${subject}
 Message:
@@ -473,22 +741,33 @@ Message:
 ${body}
 """
 
-Please draft 3 distinct, highly professional, and concise replies to this email. 
+Goal / Objective:
+${intentGuidance}
+
+Draft 3 distinct options (Option 1: Warm & Enthusiastic, Option 2: Direct & Professional, Option 3: Confident & Concise).
 Separate each draft using the exact delimiter "===DRAFT===" on its own line.
-Do not include any conversational text, internal thoughts, JSON, or markdown blocks. Just the 3 drafts separated by the delimiter.`;
+Do not include any conversational text, explanations, or markdown code fences. Return ONLY the drafts separated by the delimiter.`;
 
     const response = await callAIWithRetry(prompt, 3, 2000);
     let rawText = response.text.replace(/```(?:html|json|markdown)?\s*([\s\S]*?)```/g, '$1').trim();
     
-    let draftOptions = rawText.split('===DRAFT===').map(s => s.trim()).filter(s => s.length > 20).slice(0, 3);
+    let draftOptions = rawText
+      .split(/(?:={2,}\s*(?:DRAFT|OPTION)?\s*\d*\s*={2,}|(?:\n|^)(?:Option\s+\d+|Draft\s+\d+)\s*[:\-])/i)
+      .map(s => s.trim())
+      .filter(s => s.length > 25);
     
-    // Fallback just in case it still uses newlines
+    // Fallback just in case it uses multi-newlines
     if (draftOptions.length < 2) {
-      const fallbackOptions = rawText.split(/\n\s*\n/).map(s => s.trim()).filter(s => s.length > 20);
+      const fallbackOptions = rawText.split(/\n\s*\n\s*\n/).map(s => s.trim()).filter(s => s.length > 25);
       if (fallbackOptions.length >= 2) {
         draftOptions = fallbackOptions.slice(0, 3);
       }
     }
+
+    if (draftOptions.length === 0 && rawText.length > 20) {
+      draftOptions = [rawText];
+    }
+    draftOptions = draftOptions.slice(0, 3);
 
     res.json({ drafts: draftOptions });
   } catch (err) {
@@ -534,4 +813,16 @@ router.post('/inbox/send-reply', requireAuth, async (req, res) => {
   }
 });
 
+router.post('/inbox/update-status', requireAuth, async (req, res) => {
+  try {
+    const { jobId, status } = req.body;
+    if (!jobId || !status) return res.status(400).json({ error: 'jobId and status required' });
+    await Job.updateOne({ id: jobId, userId: req.user.id }, { status });
+    res.json({ success: true, status });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update job status' });
+  }
+});
+
+router.classifyEmailCategory = classifyEmailCategory;
 module.exports = router;

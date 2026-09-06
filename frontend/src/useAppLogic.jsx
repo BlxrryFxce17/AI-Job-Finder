@@ -15,6 +15,81 @@ export const NAV = [
 
 export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
+// Senior role detection helpers
+export const isSeniorJob = (role = '', jd = '') => {
+  const SENIOR_TITLE_REGEX = /\b(sr\.?|senior|lead|principal|staff|architect|director|vp|vice president|manager|head of|sde[- ]?(3|iii)|engineer[- ]?(3|iii)|level[- ]?3)\b/i;
+  const SENIOR_EXP_REGEX = /(?:5\+|[5-9]|\d{2})\+?\s*(?:-\s*\d+\s*)?(?:years?|yrs?)(?:\s+of)?\s+experience|minimum\s+(?:of\s+)?(?:5|[6-9]|\d{2})\+?\s*(?:years?|yrs?)/i;
+  return SENIOR_TITLE_REGEX.test(role) || SENIOR_EXP_REGEX.test(jd);
+};
+
+// Junior role detection helpers
+export const isJuniorJob = (role = '', jd = '') => {
+  if (isSeniorJob(role, jd)) return false;
+  const JUNIOR_TITLE_REGEX = /\b(jr\.?|junior|entry|entry[- ]level|fresher|freshers|intern|internship|associate|trainee|graduate|grad|sde[- ]?(1|i)\b|engineer[- ]?(1|i)\b|level[- ]?1)\b/i;
+  const JUNIOR_EXP_REGEX = /(?:0[- ](?:to[- ])?[1-2]|0\+?|[1-2])\s*(?:years?|yrs?)(?:\s+of)?\s+experience|\b(freshers?|no experience|entry[- ]level|recent graduates?)\b/i;
+  return JUNIOR_TITLE_REGEX.test(role) || JUNIOR_EXP_REGEX.test(jd);
+};
+
+export const getJobLevel = (job) => {
+  if (!job) return 'Mid';
+  if (isSeniorJob(job.role || '', job.jd || '')) return 'Senior';
+  if (isJuniorJob(job.role || '', job.jd || '')) return 'Junior';
+  if (job.experienceLevel && ['Junior', 'Mid', 'Senior'].includes(job.experienceLevel)) {
+    return job.experienceLevel;
+  }
+  return 'Mid';
+};
+
+const isJuniorQuery = (q = '') => {
+  return /\b(jr\.?|junior|entry|entry[- ]level|fresher|freshers|intern|internship|associate|trainee|graduate)\b/i.test(q);
+};
+
+export const extractPackage = (salaryStr = '', jd = '') => {
+  if (salaryStr && salaryStr.trim()) return salaryStr.trim();
+  if (!jd) return '';
+
+  // 1. LPA / Lacs / Lakhs patterns (e.g. 4-8 LPA, 6 LPA, 5.5 to 8 Lakhs, INR 6,00,000 - 10,00,000 PA)
+  const lpaMatch = jd.match(/(?:(?:INR|Rs\.?|₹)\s*)?(\d+(?:\.\d+)?\s*(?:-|to)\s*\d+(?:\.\d+)?|\d+(?:\.\d+)?)\s*(?:LPA|Lacs?|Lakhs?)(?:\s*(?:per\s+annum|P\.?A\.?))?/i);
+  if (lpaMatch) return lpaMatch[0].trim();
+
+  // 2. Rupee monthly ranges (e.g. ₹25,000 - ₹45,000 / month, 30k - 50k / month)
+  const rupeeKMatch = jd.match(/(?:(?:INR|Rs\.?|₹)\s*)?(\d+k)\s*(?:-|to)\s*(?:(?:INR|Rs\.?|₹)\s*)?(\d+k)(?:\s*(?:\/|per\s+)?(?:month|mo|pm|year|yr|annum))?/i);
+  if (rupeeKMatch) return rupeeKMatch[0].trim();
+
+  const rupeeMonthlyMatch = jd.match(/(?:(?:INR|Rs\.?|₹)\s*)(\d{1,3}(?:,\d{3})+)\s*(?:-|to)\s*(?:(?:INR|Rs\.?|₹)\s*)?(\d{1,3}(?:,\d{3})+)(?:\s*(?:\/|per\s+)?(?:month|mo|pm))?/i);
+  if (rupeeMonthlyMatch) return rupeeMonthlyMatch[0].trim();
+
+  // 3. Annual rupee ranges (e.g. ₹4,00,000 - ₹7,00,000)
+  const rupeeAnnualMatch = jd.match(/(?:(?:INR|Rs\.?|₹)\s*)(\d{1,3}(?:,\d{3})+)\s*(?:-|to)\s*(?:(?:INR|Rs\.?|₹)\s*)?(\d{1,3}(?:,\d{3})+)(?:\s*(?:per\s+annum|P\.?A\.?|PA|\/yr))?/i);
+  if (rupeeAnnualMatch) return rupeeAnnualMatch[0].trim();
+
+  // 4. Foreign currency rates (e.g. $50k - $80k, $40 - $60 / hr, $60,000 - $90,000)
+  const foreignMatch = jd.match(/(?:[\$€£]|USD|EUR|GBP)\s*(\d+(?:,\d{3})*(?:k)?)\s*(?:-|to)\s*(?:[\$€£]|USD|EUR|GBP)?\s*(\d+(?:,\d{3})*(?:k)?)(?:\s*(?:\/|per\s+)?(?:yr|year|hr|hour))?/i);
+  if (foreignMatch) return foreignMatch[0].trim();
+
+  return '';
+};
+
+export const extractWorkMode = (location = '', jd = '') => {
+  const text = `${location} ${jd}`.toLowerCase();
+  if (/\bremote\b|work from home|\bwfh\b/i.test(text)) return 'Remote';
+  if (/\bhybrid\b/i.test(text)) return 'Hybrid';
+  if (/\bon-?site\b|\bin-?office\b/i.test(text)) return 'On-site';
+  return '';
+};
+
+export const parseRoleDisplay = (rawRole = '') => {
+  if (!rawRole) return { title: 'General Position', meta: [] };
+  let cleaned = rawRole.replace(/^(?:[A-Za-z0-9&., ]+\s+)?(?:Hiring|Hiring For|Urgent Opening For|Looking For)\s*:\s*/i, '').trim();
+  if (cleaned.includes('|')) {
+    const parts = cleaned.split('|').map(p => p.trim()).filter(Boolean);
+    const title = parts[0];
+    const meta = parts.slice(1);
+    return { title, meta };
+  }
+  return { title: cleaned, meta: [] };
+};
+
 export function useAppLogic() {
   const [token, setToken] = useState(localStorage.getItem('token') || null);
   const [theme, setTheme] = useState(localStorage.getItem('theme') || 'dark');
@@ -31,6 +106,7 @@ export function useAppLogic() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [sourceFilter, setSourceFilter] = useState('All');
+  const [experienceFilter, setExperienceFilter] = useState('All');
   const [fetchQuery, setFetchQuery] = useState('');
   const [fetchQueries, setFetchQueries] = useState(['software developer']);
   const [fetching, setFetching] = useState(false);
@@ -122,6 +198,10 @@ export function useAppLogic() {
       const r = await apiFetch(`${API_BASE}/api/profile`);
       const p = await r.json();
       setProfile(p);
+      if (p.experienceLevel && isJuniorQuery(p.experienceLevel)) {
+        setExperienceFilter(prev => prev === 'All' ? 'Junior' : prev);
+        setFetchQueries(prev => (prev.length === 1 && prev[0] === 'software developer') ? ['junior software developer', 'fresher software engineer'] : prev);
+      }
     } catch (err) { }
   };
 
@@ -219,7 +299,14 @@ export function useAppLogic() {
           setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Discovering HR email...`] }));
           const discRes = await apiFetch(`${API_BASE}/api/discover-email`, {
              method: 'POST', headers: { 'Content-Type': 'application/json' },
-             body: JSON.stringify({ company: job.company, jd: job.jd })
+             body: JSON.stringify({
+               company: job.company,
+               jd: job.jd,
+               hrName: job.hrName || null,
+               hrLinkedInUrl: job.hrLinkedIn || null,
+               applyLink: job.applyLink || null,
+               failedEmails: job.failedEmails || []
+             })
           });
           const discData = await discRes.json();
           discoveredEmail = discData.email || '';
@@ -335,10 +422,11 @@ export function useAppLogic() {
     notify(`${selectedJobs.length} jobs deleted`);
   };
 
-  const fetchInbox = async () => {
+  const fetchInbox = async (searchQuery = '') => {
     setInboxLoading(true);
     try {
-      const res = await apiFetch(`${API_BASE}/api/inbox`);
+      const qParam = searchQuery && searchQuery.trim() ? `?q=${encodeURIComponent(searchQuery.trim())}` : '';
+      const res = await apiFetch(`${API_BASE}/api/inbox${qParam}`);
       if (res.ok) {
         const data = await res.json();
         setInboxReplies(data.replies || []);
@@ -366,12 +454,16 @@ export function useAppLogic() {
     try {
       const r = await apiFetch(`${API_BASE}/api/jobs/fetch-jobs`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ queries: fetchQueries, useApify })
+        body: JSON.stringify({
+          queries: fetchQueries,
+          useApify,
+          experience: experienceFilter
+        })
       });
       const d = await r.json();
       notify(d.message || 'Jobs fetched');
       loadJobs();
-    } catch { notify('Failed to fetch from Adzuna', 'error'); }
+    } catch { notify('Failed to fetch jobs', 'error'); }
     finally { setFetching(false); }
   };
 
@@ -394,21 +486,43 @@ export function useAppLogic() {
     setCurrentPage(1);
   }, [search, statusFilter, sourceFilter, tab]);
 
-  const activeJobs = jobs.filter(j => {
+  const trimmedSearch = (search || '').trim();
+
+  const activeJobs = (jobs || []).filter(j => {
+    if (!j) return false;
     if (tab === 'applications') return j.status === 'Found' || j.status === 'Drafting';
     if (tab === 'applied') {
-      if (!['Sent', 'Opened', 'Bounced', 'Replied'].includes(j.status)) return false;
+      const isAppliedStatus = ['Sent', 'Opened', 'Bounced', 'Replied', 'LinkedIn_Sent', 'LinkedIn_Connected', 'LinkedIn_Replied'].includes(j.status);
+      if (!isAppliedStatus) return false;
       if (appliedViewType === 'HR') return !!j.hrName;
       if (appliedViewType === 'Jobs') return !j.hrName;
       return true;
     }
     return true;
-  }).filter(j => 
-    (statusFilter === 'All' || j.status === statusFilter) &&
-    (sourceFilter === 'All' || (j.source && j.source.toLowerCase() === sourceFilter.toLowerCase())) &&
-    ((j.company && j.company.toLowerCase().includes(search.toLowerCase())) || 
-     (j.role && j.role.toLowerCase().includes(search.toLowerCase())))
-  ).sort((a, b) => {
+  }).filter(j => {
+    // 1. Status Filter
+    if (statusFilter !== 'All' && j.status !== statusFilter) return false;
+
+    // 2. Source / Portal Filter
+    if (sourceFilter !== 'All' && (!j.source || j.source.toLowerCase() !== sourceFilter.toLowerCase())) return false;
+
+    // 3. Search Box Tokenized Matching
+    if (!trimmedSearch) return true;
+
+    const searchTokens = trimmedSearch.split(/\s+/).filter(Boolean);
+    const roleLower = (j.role || '').toLowerCase();
+    const companyLower = (j.company || '').toLowerCase();
+    const jdLower = (j.jd || '').toLowerCase();
+    const locLower = (j.location || '').toLowerCase();
+
+    return searchTokens.every(token => {
+      // If token is a junior indicator, verify the job is junior
+      if (/\b(jr\.?|junior|entry|fresher|intern|associate)\b/i.test(token)) {
+        return isJuniorJob(j.role, j.jd) || roleLower.includes(token);
+      }
+      return roleLower.includes(token) || companyLower.includes(token) || locLower.includes(token) || jdLower.includes(token);
+    });
+  }).sort((a, b) => {
     if (tab === 'applied') {
       const timeA = new Date(a.sentAt || a.updatedAt || a.createdAt || 0).getTime();
       const timeB = new Date(b.sentAt || b.updatedAt || b.createdAt || 0).getTime();
@@ -421,6 +535,24 @@ export function useAppLogic() {
 
   const paginatedJobs = activeJobs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
   const totalPages = Math.ceil(activeJobs.length / itemsPerPage);
+
+  const handlePurgeSeniorJobs = async () => {
+    if (!window.confirm("Are you sure you want to remove all Senior/Lead job postings that you are not qualified for?")) {
+      return;
+    }
+    try {
+      const res = await apiFetch(`${API_BASE}/api/jobs/purge-senior`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        notify(data.message || `Removed ${data.deletedCount} senior roles.`);
+        loadJobs();
+      } else {
+        notify(data.error || 'Failed to remove senior jobs', 'error');
+      }
+    } catch (err) {
+      notify('Failed to purge senior jobs', 'error');
+    }
+  };
 
   const exportToCSV = () => {
     if (jobs.length === 0) {
@@ -457,6 +589,7 @@ export function useAppLogic() {
     search, setSearch,
     statusFilter, setStatusFilter,
     sourceFilter, setSourceFilter,
+    experienceFilter, setExperienceFilter,
     fetchQuery, setFetchQuery,
     fetchQueries, setFetchQueries,
     fetching, setFetching,
@@ -490,6 +623,13 @@ export function useAppLogic() {
     handleResumeUpload,
     handleDelete,
     handleBatchDelete,
+    handlePurgeSeniorJobs,
+    getJobLevel,
+    isSeniorJob,
+    isJuniorJob,
+    extractPackage,
+    extractWorkMode,
+    parseRoleDisplay,
     handleFetchJobs,
     addFetchQuery,
     removeFetchQuery,
@@ -503,3 +643,5 @@ export function useAppLogic() {
     fetchInbox
   };
 }
+
+

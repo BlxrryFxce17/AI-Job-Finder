@@ -59,7 +59,26 @@ const PLACEHOLDER_USERNAMES = [
   'undefined'
 ];
 
-const GENERIC_BOT_USERNAMES = [
+const NON_RECIPIENT_USERNAMES = [
+  'noreply',
+  'no-reply',
+  'donotreply',
+  'auto-reply',
+  'automated',
+  'mailer-daemon',
+  'postmaster',
+  'abuse',
+  'security',
+  'billing',
+  'invoices',
+  'support',
+  'help',
+  'admin',
+  'root',
+  'daemon'
+];
+
+const RECRUITING_INBOX_USERNAMES = [
   'careers',
   'career',
   'jobs',
@@ -68,13 +87,20 @@ const GENERIC_BOT_USERNAMES = [
   'recruitment',
   'talent',
   'people',
+  'apply',
+  'resumes',
+  'cv',
+  'hr',
+  'hrd',
+  'hiring'
+];
+
+const GENERIC_BOT_USERNAMES = [
+  ...NON_RECIPIENT_USERNAMES,
+  ...RECRUITING_INBOX_USERNAMES,
   'info',
   'contact',
   'contactus',
-  'support',
-  'admin',
-  'help',
-  'apply',
   'team',
   'inquiries',
   'press',
@@ -85,23 +111,29 @@ const GENERIC_BOT_USERNAMES = [
   'hello',
   'work',
   'joinus',
-  'hire',
-  'hiring',
-  'resumes',
-  'cv',
-  'hr',
-  'hrd',
-  'noreply',
-  'no-reply',
-  'donotreply',
-  'auto-reply',
-  'automated',
-  'mailer-daemon',
-  'postmaster'
+  'hire'
 ];
 
 /**
- * Checks if an email is a generic bot / shared inbox alias rather than a real person.
+ * Checks if an email is a system bot, bounce handler, or non-deliverable mailbox.
+ */
+function isNonRecipientEmail(email) {
+  if (!email || typeof email !== 'string') return false;
+  const user = email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+  return NON_RECIPIENT_USERNAMES.includes(user);
+}
+
+/**
+ * Checks if an email is an official company hiring / talent acquisition mailbox.
+ */
+function isRecruitingEmail(email) {
+  if (!email || typeof email !== 'string') return false;
+  const user = email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+  return RECRUITING_INBOX_USERNAMES.includes(user);
+}
+
+/**
+ * Checks if an email is a generic shared inbox alias rather than a named individual.
  */
 function isGenericEmail(email) {
   if (!email || typeof email !== 'string') return false;
@@ -304,5 +336,9 @@ module.exports = {
   verifyWithHunter,
   verifyEmail,
   isGenericEmail,
+  isNonRecipientEmail,
+  isRecruitingEmail,
+  NON_RECIPIENT_USERNAMES,
+  RECRUITING_INBOX_USERNAMES,
   GENERIC_BOT_USERNAMES
 };

@@ -1,4 +1,8 @@
 require('dotenv').config();
+const dns = require('dns');
+// Set public DNS servers to prevent SRV lookup failures (ESERVFAIL) on local network resolvers
+dns.setServers(['8.8.8.8', '1.1.1.1']);
+
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
@@ -123,7 +127,12 @@ Guidelines:
           }
         }
 
-        // Send the email
+        // Send the email automatically ONLY if auto follow-up is enabled in user profile
+        if (profile.enableAutoFollowUp === false) {
+          console.log(`[Cron] Auto follow-up is OFF for ${user.email}. Saved Day ${targetDay} draft in database/memory for ${job.company}, skipping auto-send.`);
+          continue;
+        }
+
         if (draftToSend) {
           try {
             console.log(`[Cron] Sending Day ${targetDay} follow-up to ${job.emailRecipient}`);

@@ -35,11 +35,11 @@ router.get('/', requireAuth, async (req, res) => {
   }
 });
 
-router.put('/', requireAuth, async (req, res) => {
+const updateProfileHandler = async (req, res) => {
   try {
     const profile = await getProfile(req.user.id);
 
-    const allowedFields = ['name', 'title', 'phone', 'linkedin', 'github', 'tone', 'experienceLevel', 'enableFlex', 'aiInstructions'];
+    const allowedFields = ['name', 'title', 'phone', 'linkedin', 'github', 'tone', 'experienceLevel', 'enableFlex', 'enableAutoFollowUp', 'aiInstructions'];
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) {
         profile[field] = req.body[field];
@@ -55,7 +55,10 @@ router.put('/', requireAuth, async (req, res) => {
     console.error('Profile Update Error:', err);
     res.status(500).json({ error: 'Failed to update profile' });
   }
-});
+};
+
+router.put('/', requireAuth, updateProfileHandler);
+router.post('/', requireAuth, updateProfileHandler);
 
 router.post('/resume', requireAuth, upload.single('resume'), async (req, res) => {
   try {
