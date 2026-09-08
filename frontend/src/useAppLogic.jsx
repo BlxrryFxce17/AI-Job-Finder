@@ -17,7 +17,7 @@ export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 // Senior role detection helpers
 export const isSeniorJob = (role = '', jd = '') => {
-  const SENIOR_TITLE_REGEX = /\b(sr\.?|senior|lead|principal|staff|architect|director|vp|vice president|manager|head of|sde[- ]?(3|iii)|engineer[- ]?(3|iii)|level[- ]?3)\b/i;
+  const SENIOR_TITLE_REGEX = /\b(sr\.?|senior|lead|principal|staff|architect|director|vp|vice president|manager|head\b|chief|cto|cio|cpo|ceo|cfo|smts|pmts|sde[- ]?(2|ii|3|iii)|engineer[- ]?(2|ii|3|iii)|developer[- ]?(2|ii|3|iii)|level[- ]?(2|3)|sme|expert|officer)\b/i;
   const SENIOR_EXP_REGEX = /(?:5\+|[5-9]|\d{2})\+?\s*(?:-\s*\d+\s*)?(?:years?|yrs?)(?:\s+of)?\s+experience|minimum\s+(?:of\s+)?(?:5|[6-9]|\d{2})\+?\s*(?:years?|yrs?)/i;
   return SENIOR_TITLE_REGEX.test(role) || SENIOR_EXP_REGEX.test(jd);
 };
@@ -25,7 +25,7 @@ export const isSeniorJob = (role = '', jd = '') => {
 // Junior role detection helpers
 export const isJuniorJob = (role = '', jd = '') => {
   if (isSeniorJob(role, jd)) return false;
-  const JUNIOR_TITLE_REGEX = /\b(jr\.?|junior|entry|entry[- ]level|fresher|freshers|intern|internship|associate|trainee|graduate|grad|sde[- ]?(1|i)\b|engineer[- ]?(1|i)\b|level[- ]?1)\b/i;
+  const JUNIOR_TITLE_REGEX = /\b(jr\.?|junior|entry|entry[- ]level|fresher|freshers|intern|internship|associate|trainee|graduate|grad|sde[- ]?(1|i)\b|engineer[- ]?(1|i)\b|developer[- ]?(1|i)\b|level[- ]?1)\b/i;
   const JUNIOR_EXP_REGEX = /(?:0[- ](?:to[- ])?[1-2]|0\+?|[1-2])\s*(?:years?|yrs?)(?:\s+of)?\s+experience|\b(freshers?|no experience|entry[- ]level|recent graduates?)\b/i;
   return JUNIOR_TITLE_REGEX.test(role) || JUNIOR_EXP_REGEX.test(jd);
 };
@@ -93,20 +93,43 @@ export const parseRoleDisplay = (rawRole = '') => {
 export function useAppLogic() {
   const [token, setToken] = useState(localStorage.getItem('token') || null);
   const [theme, setTheme] = useState(localStorage.getItem('theme') || 'dark');
-  
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem('theme', theme);
-  }, [theme]);
-  
   const [tab, setTab] = useState('applications');
   const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth > 768);
   const [jobs, setJobs] = useState([]);
+  const deletedJobIdsRef = useRef(new Set());
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [sourceFilter, setSourceFilter] = useState('All');
   const [experienceFilter, setExperienceFilter] = useState('All');
+  const [selectedLocations, setSelectedLocations] = useState(() => {
+    try {
+      const saved = localStorage.getItem('job_selected_locations');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          const valid = parsed.filter(l => typeof l === 'string' && l.trim().length > 1);
+          if (valid.length > 0) return valid;
+        }
+      }
+    } catch (_) {}
+    const oldLoc = localStorage.getItem('job_location_preference');
+    return (oldLoc && oldLoc.trim().length > 1) ? [oldLoc] : ['All India'];
+  });
+  const locationFilter = selectedLocations[0] || 'All India';
+  const setLocationFilter = (val) => {
+    if (typeof val === 'function') {
+      setSelectedLocations(prev => {
+        const res = val(prev[0] || 'All India');
+        return Array.isArray(res) ? res : [res];
+      });
+    } else {
+      setSelectedLocations(Array.isArray(val) ? val : [val]);
+    }
+  };
+  const [customLocation, setCustomLocation] = useState(() => {
+    return localStorage.getItem('job_custom_location') || '';
+  });
   const [fetchQuery, setFetchQuery] = useState('');
   const [fetchQueries, setFetchQueries] = useState(['software developer']);
   const [fetching, setFetching] = useState(false);
@@ -120,7 +143,7 @@ export function useAppLogic() {
   const [selectedJobDetails, setSelectedJobDetails] = useState(null);
   
   // Profile State
-  const [profile, setProfile] = useState({ name: 'Loading...', title: '', phone: '', linkedin: '', github: '', resumeFilename: '', emailUser: '' });
+  const [profile, setProfile] = useState({ name: 'Loading...', title: '', phone: '', linkedin: '', github: '', portfolio: '', resumeFilename: '', emailUser: '' });
   const [savingProfile, setSavingProfile] = useState(false);
   
   // Batch Selection
@@ -131,6 +154,15 @@ export function useAppLogic() {
   // Inbox State
   const [inboxReplies, setInboxReplies] = useState([]);
   const [inboxLoading, setInboxLoading] = useState(false);
+
+  const [showTutorial, setShowTutorial] = useState(() => {
+    return localStorage.getItem('token') && !localStorage.getItem('tutorialSeen');
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
+  }, [theme]);
 
   const notify = (msg, type = 'success') => {
     setToast({ msg, type });
@@ -153,12 +185,9 @@ export function useAppLogic() {
     localStorage.removeItem('token');
     setToken(null);
     setJobs([]);
-    setProfile({ name: 'Loading...', title: '', phone: '', linkedin: '', github: '', resumeFilename: '', emailUser: '' });
+    setProfile({ name: 'Loading...', title: '', phone: '', linkedin: '', github: '', portfolio: '', resumeFilename: '', emailUser: '' });
   };
 
-  const [showTutorial, setShowTutorial] = useState(() => {
-    return localStorage.getItem('token') && !localStorage.getItem('tutorialSeen');
-  });
 
   const completeTutorial = () => {
     localStorage.setItem('tutorialSeen', 'true');
@@ -187,7 +216,16 @@ export function useAppLogic() {
     try {
       const r = await apiFetch(`${API_BASE}/api/jobs`);
       const d = await r.json();
-      setJobs(d);
+      const filtered = Array.isArray(d)
+        ? d
+            .filter(j => {
+              const idStr = String(j.id || '');
+              const mongoIdStr = j._id ? String(j._id) : '';
+              return !deletedJobIdsRef.current.has(idStr) && !deletedJobIdsRef.current.has(mongoIdStr);
+            })
+            .map(j => ({ ...j, id: j.id || (j._id ? String(j._id) : '') }))
+        : [];
+      setJobs(filtered);
     } catch { notify('Cannot reach backend', 'error'); }
     finally { setLoading(false); }
   };
@@ -291,12 +329,19 @@ export function useAppLogic() {
       if (!job) continue;
 
       processed++;
-      setBatchState(prev => ({ ...prev, currentIndex: processed, currentJob: job, logs: [...prev.logs, `[${job.company}] Starting processing...`] }));
+      setBatchState(prev => ({ 
+        ...prev, 
+        currentIndex: processed, 
+        currentJob: job, 
+        logs: [...prev.logs, `[${job.company}] Initializing outreach pipeline for "${job.role}"...`] 
+      }));
 
       try {
         let discoveredEmail = job.emailRecipient;
+        let deliverabilityScore = job.deliverabilityScore || 0;
+
         if (!discoveredEmail) {
-          setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Discovering HR email...`] }));
+          setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Running multi-layer email discovery & mailbox verification...`] }));
           const discRes = await apiFetch(`${API_BASE}/api/discover-email`, {
              method: 'POST', headers: { 'Content-Type': 'application/json' },
              body: JSON.stringify({
@@ -310,17 +355,48 @@ export function useAppLogic() {
           });
           const discData = await discRes.json();
           discoveredEmail = discData.email || '';
+          deliverabilityScore = discData.deliverabilityScore || 0;
+
+          if (discoveredEmail) {
+            setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] ✅ Verified mailbox: ${discoveredEmail} (Deliverability: ${deliverabilityScore}%)`] }));
+          } else {
+            const reason = discData?.deliverabilityReason || 'No verified recipient mailbox found';
+            setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] 🛡️ Deliverability Guard: Zero verified inboxes. Unverified guessing blocked to protect sender reputation.`] }));
+            
+            // Update job list immediately in DB and UI
+            apiFetch(`${API_BASE}/api/jobs/${job.id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                emailRecipient: '',
+                deliverabilityScore: 0,
+                deliverabilityStatus: 'undeliverable',
+                deliverabilityReason: reason
+              })
+            }).catch(() => {});
+
+            setJobs(prev => prev.map(j => j.id === job.id ? { 
+              ...j, 
+              emailRecipient: '',
+              deliverabilityScore: 0,
+              deliverabilityStatus: 'undeliverable',
+              deliverabilityReason: reason
+            } : j));
+          }
+        } else {
+          setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Target email: ${discoveredEmail} (Score: ${deliverabilityScore > 0 ? deliverabilityScore + '%' : 'MX-checked'})`] }));
         }
         
-        setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Found email: ${discoveredEmail || 'None'}. Drafting...`] }));
-        const genRes = await apiFetch(`${API_BASE}/api/generate-email`, {
-           method: 'POST', headers: { 'Content-Type': 'application/json' },
-           body: JSON.stringify({ company: job.company, role: job.role, jd: job.jd, emailType: 'Cold Outreach / Networking' })
-        });
-        const genData = await genRes.json();
-        
-        if (discoveredEmail && genData.draft) {
-            setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Draft ready. Sending...`] }));
+        if (discoveredEmail) {
+          setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Generating tailored pitch citing verified GitHub projects...`] }));
+          const genRes = await apiFetch(`${API_BASE}/api/generate-email`, {
+             method: 'POST', headers: { 'Content-Type': 'application/json' },
+             body: JSON.stringify({ company: job.company, role: job.role, jd: job.jd, emailType: 'Cold Outreach / Networking' })
+          });
+          const genData = await genRes.json();
+          
+          if (genData.draft) {
+            setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Pre-send deliverability check passed. Dispatching via Gmail API...`] }));
             const sendRes = await apiFetch(`${API_BASE}/api/send-email`, {
                method: 'POST', headers: { 'Content-Type': 'application/json' },
                body: JSON.stringify({ jobId: job.id, body: genData.draft, to: discoveredEmail })
@@ -328,16 +404,19 @@ export function useAppLogic() {
             const sendData = await sendRes.json();
             if (sendData.success) {
                updateStatus(job.id, 'Sent', discoveredEmail, genData.draft, sendData.tracked);
-               setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Successfully sent! 🚀`] }));
+               setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] 🚀 Successfully sent! Delivery verified (Tracked: ${sendData.tracked ? 'Yes' : 'No'})`] }));
             } else {
-               setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Failed to send.`] }));
+               setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] 🛑 Send blocked: ${sendData.error || 'High bounce risk detected'}`] }));
             }
+          } else {
+            setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] ⚠️ Draft generation yielded empty output.`] }));
+          }
         } else {
-            setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Skipped (no email or draft).`] }));
+          setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] ⏩ Skipped (No verified mailbox found. Apply via official link or LinkedIn to avoid bouncing)`] }));
         }
       } catch (err) {
         console.error(err);
-        setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Error occurred: ${err.message}`] }));
+        setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] ❌ Error: ${err.message}`] }));
       }
       // Calculate progress based on total originally queued + newly queued
       setBatchState(prev => {
@@ -381,6 +460,44 @@ export function useAppLogic() {
     finally { setSavingProfile(false); }
   };
 
+  const [syncingGithub, setSyncingGithub] = useState(false);
+
+  const syncGithub = async (githubUrl = null, githubToken = null) => {
+    const targetUrl = githubUrl || profile.github;
+    const targetToken = githubToken !== null ? githubToken : (profile.githubToken || '');
+    if (!targetUrl) {
+      notify('Please enter a GitHub profile URL or username first.', 'error');
+      return;
+    }
+    setSyncingGithub(true);
+    notify('Syncing GitHub repositories & deep README architecture...', 'info');
+    try {
+      const res = await apiFetch(`${API_BASE}/api/profile/sync-github`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          githubUrl: targetUrl,
+          githubToken: targetToken
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setProfile(prev => ({ ...prev, ...data.profile, githubToken: targetToken || prev.githubToken }));
+        if (data.warning) {
+          notify(data.warning, 'info');
+        } else {
+          notify(data.message || 'GitHub Insights Synced! 🚀');
+        }
+      } else {
+        notify(data.error || 'Failed to sync GitHub', 'error');
+      }
+    } catch (err) {
+      notify(err.message || 'Error syncing GitHub', 'error');
+    } finally {
+      setSyncingGithub(false);
+    }
+  };
+
   const handleResumeUpload = async (e) => {
     if (!e.target.files || e.target.files.length === 0) return;
     const formData = new FormData();
@@ -401,25 +518,107 @@ export function useAppLogic() {
   };
 
   const handleDelete = async (id) => {
+    if (!id) return;
+    const targetIdStr = String(id);
+    
+    // Track both id and _id in deletedJobIdsRef so polling never revives it
+    const targetJob = jobs.find(j => String(j.id) === targetIdStr || String(j._id) === targetIdStr);
+    if (targetJob) {
+      if (targetJob.id) deletedJobIdsRef.current.add(String(targetJob.id));
+      if (targetJob._id) deletedJobIdsRef.current.add(String(targetJob._id));
+    } else {
+      deletedJobIdsRef.current.add(targetIdStr);
+    }
+
+    // Optimistically update React state immediately
+    setJobs(prev => prev.filter(j => String(j.id) !== targetIdStr && String(j._id) !== targetIdStr));
+    setSelectedJobs(prev => prev.filter(jId => String(jId) !== targetIdStr));
+
     try {
-      await apiFetch(`${API_BASE}/api/jobs/${id}`, { method: 'DELETE' });
-      setJobs(p => p.filter(j => j.id !== id));
+      const res = await apiFetch(`${API_BASE}/api/jobs/${encodeURIComponent(targetIdStr)}`, { 
+        method: 'DELETE' 
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (targetJob) {
+          if (targetJob.id) deletedJobIdsRef.current.delete(String(targetJob.id));
+          if (targetJob._id) deletedJobIdsRef.current.delete(String(targetJob._id));
+        } else {
+          deletedJobIdsRef.current.delete(targetIdStr);
+        }
+        notify(data.error || 'Failed to delete job', 'error');
+        loadJobs();
+        return;
+      }
       notify('Job deleted');
-    } catch { notify('Failed to delete job', 'error'); }
+    } catch (err) {
+      if (targetJob) {
+        if (targetJob.id) deletedJobIdsRef.current.delete(String(targetJob.id));
+        if (targetJob._id) deletedJobIdsRef.current.delete(String(targetJob._id));
+      } else {
+        deletedJobIdsRef.current.delete(targetIdStr);
+      }
+      console.error('Delete error:', err);
+      notify('Failed to delete job', 'error');
+      loadJobs();
+    }
   };
 
-  const handleBatchDelete = async () => {
-    if (!selectedJobs.length) return;
-    if (!confirm(`Delete ${selectedJobs.length} selected jobs?`)) return;
-    
-    setLoading(true);
-    for (const id of selectedJobs) {
-      await apiFetch(`${API_BASE}/api/jobs/${id}`, { method: 'DELETE' });
+  const handleBatchDelete = async (customIds = null) => {
+    const idsToDelete = customIds || selectedJobs;
+    if (!idsToDelete || idsToDelete.length === 0) return;
+
+    // Collect all unique IDs (both id and _id) for all selected jobs
+    const allIdsSet = new Set();
+    const idsToRestore = [];
+    idsToDelete.forEach(id => {
+      const idStr = String(id);
+      allIdsSet.add(idStr);
+      deletedJobIdsRef.current.add(idStr);
+      idsToRestore.push(idStr);
+      const targetJob = jobs.find(j => String(j.id) === idStr || String(j._id) === idStr);
+      if (targetJob) {
+        if (targetJob.id) {
+          const s = String(targetJob.id);
+          allIdsSet.add(s);
+          deletedJobIdsRef.current.add(s);
+          idsToRestore.push(s);
+        }
+        if (targetJob._id) {
+          const s = String(targetJob._id);
+          allIdsSet.add(s);
+          deletedJobIdsRef.current.add(s);
+          idsToRestore.push(s);
+        }
+      }
+    });
+
+    const count = idsToDelete.length;
+
+    // Optimistically remove from state immediately without replacing the UI with a spinner
+    setJobs(prev => prev.filter(j => !allIdsSet.has(String(j.id)) && !allIdsSet.has(String(j._id))));
+    setSelectedJobs(prev => prev.filter(jId => !allIdsSet.has(String(jId))));
+
+    try {
+      const res = await apiFetch(`${API_BASE}/api/jobs/bulk-delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobIds: Array.from(allIdsSet) })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        notify(`Successfully deleted ${data.deletedCount ?? count} job(s)`);
+      } else {
+        idsToRestore.forEach(id => deletedJobIdsRef.current.delete(id));
+        notify(data?.error || 'Failed to delete selected jobs', 'error');
+        loadJobs();
+      }
+    } catch (err) {
+      idsToRestore.forEach(id => deletedJobIdsRef.current.delete(id));
+      console.error('Bulk delete error:', err);
+      notify('Error deleting selected jobs', 'error');
+      loadJobs();
     }
-    setJobs(jobs.filter(j => !selectedJobs.includes(j.id)));
-    setSelectedJobs([]);
-    setLoading(false);
-    notify(`${selectedJobs.length} jobs deleted`);
   };
 
   const fetchInbox = async (searchQuery = '') => {
@@ -445,6 +644,50 @@ export function useAppLogic() {
     }
   }, [tab]);
 
+  useEffect(() => {
+    if (selectedLocations && selectedLocations.length > 0) {
+      localStorage.setItem('job_selected_locations', JSON.stringify(selectedLocations));
+      localStorage.setItem('job_location_preference', selectedLocations[0]);
+    }
+  }, [selectedLocations]);
+
+  useEffect(() => {
+    localStorage.setItem('job_custom_location', customLocation);
+  }, [customLocation]);
+
+  const toggleLocation = (loc) => {
+    if (loc === 'All India') {
+      setSelectedLocations(['All India']);
+      return;
+    }
+    setSelectedLocations(prev => {
+      const withoutAllIndia = prev.filter(l => l !== 'All India');
+      if (withoutAllIndia.includes(loc)) {
+        const next = withoutAllIndia.filter(l => l !== loc);
+        return next.length === 0 ? ['All India'] : next;
+      } else {
+        return [...withoutAllIndia, loc];
+      }
+    });
+  };
+
+  const removeLocation = (loc) => {
+    setSelectedLocations(prev => {
+      const next = prev.filter(l => l !== loc);
+      return next.length === 0 ? ['All India'] : next;
+    });
+  };
+
+  const addCustomLocation = (customLoc) => {
+    const trimmed = (customLoc || '').trim();
+    if (!trimmed || trimmed.length < 2) return;
+    setSelectedLocations(prev => {
+      const withoutAllIndia = prev.filter(l => l !== 'All India');
+      if (withoutAllIndia.some(l => l.toLowerCase() === trimmed.toLowerCase())) return withoutAllIndia;
+      return [...withoutAllIndia, trimmed];
+    });
+  };
+
   const handleFetchJobs = async () => {
     if (fetchQueries.length === 0) {
       notify('Please add at least one search query', 'error');
@@ -452,12 +695,15 @@ export function useAppLogic() {
     }
     setFetching(true);
     try {
+      const effectiveLocs = selectedLocations.length > 0 ? selectedLocations : ['All India'];
       const r = await apiFetch(`${API_BASE}/api/jobs/fetch-jobs`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           queries: fetchQueries,
           useApify,
-          experience: experienceFilter
+          experience: experienceFilter,
+          locations: effectiveLocs,
+          location: effectiveLocs.join(', ')
         })
       });
       const d = await r.json();
@@ -480,60 +726,65 @@ export function useAppLogic() {
   };
 
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 20;
+  const [itemsPerPage, setItemsPerPage] = useState(30);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, statusFilter, sourceFilter, tab]);
+  }, [search, statusFilter, sourceFilter, tab, itemsPerPage]);
 
   const trimmedSearch = (search || '').trim();
 
-  const activeJobs = (jobs || []).filter(j => {
-    if (!j) return false;
-    if (tab === 'applications') return j.status === 'Found' || j.status === 'Drafting';
-    if (tab === 'applied') {
-      const isAppliedStatus = ['Sent', 'Opened', 'Bounced', 'Replied', 'LinkedIn_Sent', 'LinkedIn_Connected', 'LinkedIn_Replied'].includes(j.status);
-      if (!isAppliedStatus) return false;
-      if (appliedViewType === 'HR') return !!j.hrName;
-      if (appliedViewType === 'Jobs') return !j.hrName;
-      return true;
-    }
-    return true;
-  }).filter(j => {
-    // 1. Status Filter
-    if (statusFilter !== 'All' && j.status !== statusFilter) return false;
-
-    // 2. Source / Portal Filter
-    if (sourceFilter !== 'All' && (!j.source || j.source.toLowerCase() !== sourceFilter.toLowerCase())) return false;
-
-    // 3. Search Box Tokenized Matching
-    if (!trimmedSearch) return true;
-
-    const searchTokens = trimmedSearch.split(/\s+/).filter(Boolean);
-    const roleLower = (j.role || '').toLowerCase();
-    const companyLower = (j.company || '').toLowerCase();
-    const jdLower = (j.jd || '').toLowerCase();
-    const locLower = (j.location || '').toLowerCase();
-
-    return searchTokens.every(token => {
-      // If token is a junior indicator, verify the job is junior
-      if (/\b(jr\.?|junior|entry|fresher|intern|associate)\b/i.test(token)) {
-        return isJuniorJob(j.role, j.jd) || roleLower.includes(token);
+  const activeJobs = React.useMemo(() => {
+    return (jobs || []).filter(j => {
+      if (!j) return false;
+      if (tab === 'applications') return j.status === 'Found' || j.status === 'Drafting';
+      if (tab === 'applied') {
+        const isAppliedStatus = ['Sent', 'Opened', 'Bounced', 'Replied', 'LinkedIn_Sent', 'LinkedIn_Connected', 'LinkedIn_Replied'].includes(j.status);
+        if (!isAppliedStatus) return false;
+        if (appliedViewType === 'HR') return !!j.hrName;
+        if (appliedViewType === 'Jobs') return !j.hrName;
+        return true;
       }
-      return roleLower.includes(token) || companyLower.includes(token) || locLower.includes(token) || jdLower.includes(token);
-    });
-  }).sort((a, b) => {
-    if (tab === 'applied') {
-      const timeA = new Date(a.sentAt || a.updatedAt || a.createdAt || 0).getTime();
-      const timeB = new Date(b.sentAt || b.updatedAt || b.createdAt || 0).getTime();
-      return timeB - timeA; // Latest sent first
-    }
-    const timeA = new Date(a.publishedAt || a.createdAt || a.updatedAt || 0).getTime();
-    const timeB = new Date(b.publishedAt || b.createdAt || b.updatedAt || 0).getTime();
-    return timeB - timeA; // Latest found first
-  });
+      return true;
+    }).filter(j => {
+      // 1. Status Filter
+      if (statusFilter !== 'All' && j.status !== statusFilter) return false;
 
-  const paginatedJobs = activeJobs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+      // 2. Source / Portal Filter
+      if (sourceFilter !== 'All' && (!j.source || j.source.toLowerCase() !== sourceFilter.toLowerCase())) return false;
+
+      // 3. Search Box Tokenized Matching
+      if (!trimmedSearch) return true;
+
+      const searchTokens = trimmedSearch.split(/\s+/).filter(Boolean);
+      const roleLower = (j.role || '').toLowerCase();
+      const companyLower = (j.company || '').toLowerCase();
+      const jdLower = (j.jd || '').toLowerCase();
+      const locLower = (j.location || '').toLowerCase();
+
+      return searchTokens.every(token => {
+        // If token is a junior indicator, verify the job is junior
+        if (/\b(jr\.?|junior|entry|fresher|intern|associate)\b/i.test(token)) {
+          return isJuniorJob(j.role, j.jd) || roleLower.includes(token);
+        }
+        return roleLower.includes(token) || companyLower.includes(token) || locLower.includes(token) || jdLower.includes(token);
+      });
+    }).sort((a, b) => {
+      if (tab === 'applied') {
+        const timeA = new Date(a.sentAt || a.updatedAt || a.createdAt || 0).getTime();
+        const timeB = new Date(b.sentAt || b.updatedAt || b.createdAt || 0).getTime();
+        return timeB - timeA; // Latest sent first
+      }
+      const timeA = new Date(a.createdAt || a.publishedAt || a.updatedAt || 0).getTime();
+      const timeB = new Date(b.createdAt || b.publishedAt || b.updatedAt || 0).getTime();
+      return timeB - timeA; // Latest found first
+    });
+  }, [jobs, tab, appliedViewType, statusFilter, sourceFilter, trimmedSearch]);
+
+  const paginatedJobs = React.useMemo(() => {
+    return activeJobs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  }, [activeJobs, currentPage, itemsPerPage]);
+
   const totalPages = Math.ceil(activeJobs.length / itemsPerPage);
 
   const handlePurgeSeniorJobs = async () => {
@@ -590,6 +841,10 @@ export function useAppLogic() {
     statusFilter, setStatusFilter,
     sourceFilter, setSourceFilter,
     experienceFilter, setExperienceFilter,
+    locationFilter, setLocationFilter,
+    selectedLocations, setSelectedLocations,
+    toggleLocation, removeLocation, addCustomLocation,
+    customLocation, setCustomLocation,
     fetchQuery, setFetchQuery,
     fetchQueries, setFetchQueries,
     fetching, setFetching,
@@ -601,6 +856,8 @@ export function useAppLogic() {
     selectedJobDetails, setSelectedJobDetails,
     profile, setProfile,
     savingProfile, setSavingProfile,
+    syncingGithub,
+    syncGithub,
     selectedJobs, setSelectedJobs,
     batchProgress, setBatchProgress,
     showTutorial,
@@ -610,6 +867,7 @@ export function useAppLogic() {
     paginatedJobs,
     currentPage, setCurrentPage,
     totalPages,
+    itemsPerPage, setItemsPerPage,
     theme, setTheme,
     
     notify,

@@ -1,9 +1,11 @@
 import React from 'react';
 import { NAV, API_BASE } from './useAppLogic.jsx';
+import GitHubPortfolioCard from './GitHubPortfolioCard';
+import { cleanDraftText } from './textCleaner';
 
 function cleanEmailBody(body) {
   if (!body) return { clean: '', quoted: '' };
-  
+
   // Collapse excessive blank lines
   const normalized = body.replace(/(\r?\n\s*){3,}/g, '\n\n');
   const lines = normalized.split(/\r?\n/);
@@ -19,14 +21,14 @@ function cleanEmailBody(body) {
     if (!inQuote) {
       // 1. Check for Zoho (---- On ... wrote ----), Gmail, Outlook, Thunderbird headers
       if (/^On\s+.+wrote\b/i.test(stripped) ||
-          /^On\s+.+wrote\b/i.test(trimmed) ||
-          /^(original message|forwarded message)/i.test(stripped) ||
-          /^-+\s*Original Message\s*-+/i.test(trimmed) ||
-          /^-+\s*Forwarded message\s*-+/i.test(trimmed) ||
-          /^_{10,}$/.test(trimmed) ||
-          /^-{10,}$/.test(trimmed) ||
-          trimmed.startsWith('>') ||
-          trimmed.startsWith('&gt;')) {
+        /^On\s+.+wrote\b/i.test(trimmed) ||
+        /^(original message|forwarded message)/i.test(stripped) ||
+        /^-+\s*Original Message\s*-+/i.test(trimmed) ||
+        /^-+\s*Forwarded message\s*-+/i.test(trimmed) ||
+        /^_{10,}$/.test(trimmed) ||
+        /^-{10,}$/.test(trimmed) ||
+        trimmed.startsWith('>') ||
+        trimmed.startsWith('&gt;')) {
         inQuote = true;
       }
       // 2. Multi-line "On ... \n ... wrote" or "---- On ... \n ... wrote ----"
@@ -122,7 +124,7 @@ function FollowUpRow({ job, f, API_BASE, token, setJobs, jobs, notify }) {
       overflow: 'hidden',
       marginBottom: '8px',
     }}>
-      <div 
+      <div
         style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: '8px', cursor: 'pointer' }}
         onClick={() => setExpanded(!expanded)}
       >
@@ -157,7 +159,7 @@ function FollowUpRow({ job, f, API_BASE, token, setJobs, jobs, notify }) {
             </div>
           </div>
         </div>
-        
+
         <div style={{ fontSize: '13px', color: 'var(--text-3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {f.draft ? f.draft.replace(/\n/g, ' ') : 'No draft content'}
         </div>
@@ -165,12 +167,12 @@ function FollowUpRow({ job, f, API_BASE, token, setJobs, jobs, notify }) {
 
       {expanded && (
         <div style={{ borderTop: '1px solid var(--border)', background: 'var(--surface-1)' }}>
-          <div style={{ 
-            padding: '16px', 
-            fontSize: '13px', 
-            lineHeight: '1.6', 
-            whiteSpace: 'pre-wrap', 
-            color: 'var(--text-1)' 
+          <div style={{
+            padding: '16px',
+            fontSize: '13px',
+            lineHeight: '1.6',
+            whiteSpace: 'pre-wrap',
+            color: 'var(--text-1)'
           }}>
             {f.draft}
           </div>
@@ -260,6 +262,8 @@ export default function MobileApp(props) {
     selectedJobDetails, setSelectedJobDetails,
     profile, setProfile,
     savingProfile, setSavingProfile,
+    syncingGithub,
+    syncGithub,
     selectedJobs, setSelectedJobs,
     batchProgress, setBatchProgress,
     batchState, setBatchState,
@@ -290,6 +294,15 @@ export default function MobileApp(props) {
     setSourceFilter,
     experienceFilter,
     setExperienceFilter,
+    locationFilter,
+    setLocationFilter,
+    selectedLocations,
+    setSelectedLocations,
+    toggleLocation,
+    removeLocation,
+    addCustomLocation,
+    customLocation,
+    setCustomLocation,
     handlePurgeSeniorJobs,
     getJobLevel,
     isSeniorJob,
@@ -311,6 +324,43 @@ export default function MobileApp(props) {
 
   // HR Dashboard State for Mobile
   const [hrFilter, setHrFilter] = React.useState('all');
+  const [hrLocation, setHrLocation] = React.useState(() => locationFilter || 'All India');
+  const [customHrLocation, setCustomHrLocation] = React.useState('');
+  const [hrLocations, setHrLocations] = React.useState(() => {
+    try {
+      const saved = localStorage.getItem('hr_selected_locations');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (_) {}
+    return ['All India'];
+  });
+  const toggleHrLocation = (loc) => {
+    setHrLocations(prev => {
+      let next;
+      if (loc === 'All India') next = ['All India'];
+      else {
+        const withoutAll = prev.filter(l => l !== 'All India');
+        if (withoutAll.includes(loc)) {
+          next = withoutAll.filter(l => l !== loc);
+          if (next.length === 0) next = ['All India'];
+        } else {
+          next = [...withoutAll, loc];
+        }
+      }
+      try { localStorage.setItem('hr_selected_locations', JSON.stringify(next)); } catch (_) {}
+      return next;
+    });
+  };
+  const removeHrLocation = (loc) => {
+    setHrLocations(prev => {
+      const next = prev.filter(l => l !== loc);
+      const res = next.length === 0 ? ['All India'] : next;
+      try { localStorage.setItem('hr_selected_locations', JSON.stringify(res)); } catch (_) {}
+      return res;
+    });
+  };
   const [copyingNoteId, setCopyingNoteId] = React.useState(null);
   const [discoveringHrId, setDiscoveringHrId] = React.useState(null);
   const [editingEmailId, setEditingEmailId] = React.useState(null);
@@ -331,6 +381,13 @@ export default function MobileApp(props) {
   const [isCreatingNewJob, setIsCreatingNewJob] = React.useState(false);
   const [newJobCompany, setNewJobCompany] = React.useState('');
   const [newJobRole, setNewJobRole] = React.useState('');
+
+  // Auto-clean selectedDraft if raw markdown asterisks or bullet markdown exist
+  React.useEffect(() => {
+    if (selectedDraft && (selectedDraft.includes('**') || selectedDraft.includes('__') || /(?:^|\n)\s*[*+-]\s+/m.test(selectedDraft))) {
+      setSelectedDraft(prev => cleanDraftText(prev, props.profile));
+    }
+  }, [selectedDraft, props.profile]);
 
   const openLinkModal = () => {
     if (activeReplyIndex === null || !props.inboxReplies || !props.inboxReplies[activeReplyIndex]) return;
@@ -464,9 +521,10 @@ export default function MobileApp(props) {
       });
       const data = await res.json();
       if (data.drafts && data.drafts.length > 0) {
-        setDraftOptions(data.drafts);
-        setSelectedDraft(data.drafts[0]);
-        notify(`✨ Generated ${data.drafts.length} AI reply options!`, 'success');
+        const cleaned = data.drafts.map(d => cleanDraftText(d, props.profile));
+        setDraftOptions(cleaned);
+        setSelectedDraft(cleaned[0]);
+        notify(`✨ Generated ${cleaned.length} AI reply options!`, 'success');
       } else {
         notify('Failed to generate drafts.', 'error');
       }
@@ -534,7 +592,9 @@ export default function MobileApp(props) {
   const handleDeepDiscoverHrEmail = async (job) => {
     setDiscoveringHrId(job.id);
     try {
-      notify(`🔍 Scanning web & pattern databases for ${job.hrName}...`, 'info');
+      const targetLabel = job.hrName ? `${job.hrName} at ${job.company}` : (job.company || 'company');
+      notify(`🔍 Scanning web & pattern databases for ${targetLabel}...`, 'info');
+      const effectiveLoc = job.location || (locationFilter === 'Custom' ? customLocation : locationFilter) || 'India';
       const res = await props.apiFetch(`${API_BASE}/api/discover-email`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -543,20 +603,54 @@ export default function MobileApp(props) {
           jd: job.jd || '',
           failedEmails: job.failedEmails || [],
           hrName: job.hrName,
-          hrLinkedInUrl: job.hrLinkedIn
+          hrLinkedInUrl: job.hrLinkedIn,
+          location: effectiveLoc
         })
       });
       const data = await res.json();
       if (data && data.email) {
+        const updatePayload = {
+          emailRecipient: data.email,
+          deliverabilityScore: data.deliverabilityScore || 85,
+          deliverabilityStatus: data.deliverabilityStatus || 'deliverable',
+          deliverabilityReason: data.deliverabilityReason || 'Verified deliverable mailbox'
+        };
+        if (data.hrName && !job.hrName) updatePayload.hrName = data.hrName;
+        if (data.hrLinkedIn && !job.hrLinkedIn) updatePayload.hrLinkedIn = data.hrLinkedIn;
+
         await props.apiFetch(`${API_BASE}/api/jobs/${job.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ emailRecipient: data.email })
-        });
-        setJobs(prev => prev.map(j => j.id === job.id ? { ...j, emailRecipient: data.email } : j));
-        notify(`🎉 Found verified email for ${job.hrName}: ${data.email}!`, 'success');
+          body: JSON.stringify(updatePayload)
+        }).catch(() => { });
+
+        setJobs(prev => prev.map(j => j.id === job.id ? {
+          ...j,
+          ...updatePayload
+        } : j));
+        notify(`🎉 Found verified email: ${data.email}!`, 'success');
       } else {
-        notify(`No verified email found for ${job.hrName}. Try LinkedIn outreach!`, 'warning');
+        const reason = data?.deliverabilityReason || 'No verified recipient mailbox found';
+        const updatePayload = {
+          emailRecipient: '',
+          deliverabilityScore: 0,
+          deliverabilityStatus: 'undeliverable',
+          deliverabilityReason: reason
+        };
+        if (data?.hrName && !job.hrName) updatePayload.hrName = data.hrName;
+        if (data?.hrLinkedIn && !job.hrLinkedIn) updatePayload.hrLinkedIn = data.hrLinkedIn;
+
+        await props.apiFetch(`${API_BASE}/api/jobs/${job.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatePayload)
+        }).catch(() => { });
+
+        setJobs(prev => prev.map(j => j.id === job.id ? {
+          ...j,
+          ...updatePayload
+        } : j));
+        notify(`No verified email for ${targetLabel}. Job list updated!`, 'warning');
       }
     } catch (err) {
       notify('Error scanning for email', 'error');
@@ -607,16 +701,20 @@ export default function MobileApp(props) {
           </div>
           <div style={{ background: '#0c0c0c', padding: '12px', height: '120px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px' }}>
             {batchState.logs.map((log, idx) => {
-               const isError = log.includes('Error') || log.includes('Failed');
-               const isSuccess = log.includes('Successfully');
-               let color = '#00ff00';
-               if (isError) color = '#ff0000';
-               if (isSuccess) color = '#00aaff';
-               return (
-                 <div key={idx} style={{ fontSize: '11px', color, lineHeight: 1.4 }}>
-                   <span style={{ color: '#555' }}>$</span> {log}
-                 </div>
-               );
+              const isError = log.includes('Error') || log.includes('Failed') || log.includes('blocked') || log.includes('🛑') || log.includes('❌');
+              const isSuccess = log.includes('Successfully') || log.includes('Verified') || log.includes('✅') || log.includes('🚀');
+              const isWarning = log.includes('Skipped') || log.includes('Deliverability Guard') || log.includes('🛡️') || log.includes('⚠️') || log.includes('⏩');
+              const isInfo = log.includes('Initializing') || log.includes('Running') || log.includes('Generating') || log.includes('Dispatching');
+              let color = '#00ff00';
+              if (isError) color = '#ff4d4f';
+              else if (isWarning) color = '#fbbf24';
+              else if (isSuccess) color = '#34d399';
+              else if (isInfo) color = '#38bdf8';
+              return (
+                <div key={idx} style={{ fontSize: '11px', color, lineHeight: 1.4, wordBreak: 'break-word', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}>
+                  <span style={{ color: '#666', marginRight: '4px' }}>$</span> {log}
+                </div>
+              );
             })}
           </div>
         </div>
@@ -627,7 +725,7 @@ export default function MobileApp(props) {
 
       {/* Main Content Area (Scrollable) */}
       <div className="mobile-content-area" onScroll={(e) => setIsScrolled(e.target.scrollTop > 20)}>
-        
+
         {/* Top Header */}
         <div className={`mobile-header ${isScrolled ? 'scrolled-up' : ''}`}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
@@ -637,7 +735,7 @@ export default function MobileApp(props) {
               <span className="brand-ai">AI</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <button 
+              <button
                 onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
                 style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer' }}
               >
@@ -649,11 +747,11 @@ export default function MobileApp(props) {
             </div>
           </div>
           <h1 className="mobile-page-title">{NAV.find(n => n.id === tab)?.label || tab}</h1>
-          
+
           {tab === 'applied' && (
             <div style={{ display: 'flex', background: 'var(--surface-3)', borderRadius: '20px', padding: '4px', gap: '4px', border: '1px solid var(--border)', marginTop: '8px' }}>
               {['All', 'Jobs', 'HR'].map(type => (
-                <button 
+                <button
                   key={type}
                   onClick={() => setAppliedViewType(type)}
                   style={{
@@ -726,8 +824,8 @@ export default function MobileApp(props) {
               <div style={{ padding: '14px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   {activeReplyIndex !== null && (
-                    <button 
-                      className="btn btn-ghost" 
+                    <button
+                      className="btn btn-ghost"
                       onClick={() => {
                         setActiveReplyIndex(null);
                         setDraftOptions([]);
@@ -735,7 +833,7 @@ export default function MobileApp(props) {
                       }}
                       style={{ padding: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
                     </button>
                   )}
                   <div>
@@ -751,7 +849,7 @@ export default function MobileApp(props) {
                   disabled={props.inboxLoading}
                   style={{ padding: '6px 10px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px', border: '1px solid var(--border)', background: 'var(--surface-1)' }}
                 >
-                  {props.inboxLoading ? <span className="spinner"></span> : <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>}
+                  {props.inboxLoading ? <span className="spinner"></span> : <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>}
                   <span>{props.inboxLoading ? 'Syncing...' : 'Sync'}</span>
                 </button>
               </div>
@@ -778,7 +876,7 @@ export default function MobileApp(props) {
                           border: '1px solid var(--border)'
                         }}
                       />
-                      <svg style={{ position: 'absolute', left: '10px', top: '9px', color: 'var(--text-3)' }} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                      <svg style={{ position: 'absolute', left: '10px', top: '9px', color: 'var(--text-3)' }} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
                       {inboxSearch && (
                         <button
                           onClick={() => setInboxSearch('')}
@@ -840,7 +938,7 @@ export default function MobileApp(props) {
                     <div style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-1)' }}>Syncing replies...</div>
                   </div>
                 ) : props.inboxReplies && props.inboxReplies.length > 0 ? (
-                  
+
                   activeReplyIndex !== null && currentReply ? (
                     /* --- Mobile Detail View --- */
                     <div style={{ padding: '16px' }}>
@@ -868,6 +966,34 @@ export default function MobileApp(props) {
                               </span>
                             );
                           })()}
+                        </div>
+
+                        {/* Open exact mail in Gmail link */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                          <a
+                            href={currentReply.threadId ? `https://mail.google.com/mail/u/0/#all/${currentReply.threadId}` : (currentReply.messageId ? `https://mail.google.com/mail/u/0/#all/${currentReply.messageId}` : 'https://mail.google.com')}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="btn btn-secondary"
+                            style={{
+                              padding: '4px 10px',
+                              fontSize: '11px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '5px',
+                              textDecoration: 'none',
+                              color: 'var(--text-1)',
+                              borderRadius: '6px'
+                            }}
+                            title="Open exact email in Gmail in new tab"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                              <polyline points="15 3 21 3 21 9"></polyline>
+                              <line x1="10" y1="14" x2="21" y2="3"></line>
+                            </svg>
+                            <span>Open in Gmail</span>
+                          </a>
                         </div>
 
                         {/* Matched Job context card */}
@@ -1040,9 +1166,9 @@ export default function MobileApp(props) {
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '20px' }}>
                         {currentReply.threadMessages && currentReply.threadMessages.length > 0 ? (
                           currentReply.threadMessages.map((tMsg, idx) => (
-                            <div key={idx} style={{ 
-                              padding: '14px', 
-                              borderRadius: '8px', 
+                            <div key={idx} style={{
+                              padding: '14px',
+                              borderRadius: '8px',
                               background: tMsg.isMe ? 'var(--surface-2)' : 'var(--surface-1)',
                               border: tMsg.isMe ? '1px solid rgba(59, 130, 246, 0.3)' : '1px solid var(--border)',
                               marginLeft: tMsg.isMe ? '20px' : '0',
@@ -1058,11 +1184,11 @@ export default function MobileApp(props) {
                             </div>
                           ))
                         ) : (
-                          <div style={{ 
-                            padding: '14px', 
-                            borderRadius: '8px', 
-                            background: 'var(--surface-1)', 
-                            border: '1px solid var(--border)' 
+                          <div style={{
+                            padding: '14px',
+                            borderRadius: '8px',
+                            background: 'var(--surface-1)',
+                            border: '1px solid var(--border)'
                           }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
                               <span style={{ fontWeight: 600, fontSize: '13px' }}>{currentReply.from}</span>
@@ -1102,7 +1228,7 @@ export default function MobileApp(props) {
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <h3 style={{ fontSize: '16px', fontWeight: 600, margin: 0 }}>✨ AI Draft Reply</h3>
                               <button className="btn btn-ghost" onClick={() => { setDraftOptions([]); setSelectedDraft(''); }} style={{ padding: '6px' }}>
-                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
                               </button>
                             </div>
                             <div style={{ display: 'flex', gap: '6px' }}>
@@ -1110,18 +1236,18 @@ export default function MobileApp(props) {
                                 <button
                                   key={idx}
                                   className="btn"
-                                  style={{ 
-                                    flex: 1, 
-                                    padding: '8px 4px', 
-                                    fontSize: '11px', 
-                                    fontWeight: 600, 
+                                  style={{
+                                    flex: 1,
+                                    padding: '8px 4px',
+                                    fontSize: '11px',
+                                    fontWeight: 600,
                                     textAlign: 'center',
                                     background: selectedDraft === draft ? 'var(--accent, #d34a36)' : 'var(--surface-2)',
                                     color: selectedDraft === draft ? '#ffffff' : 'var(--text-2)',
                                     border: selectedDraft === draft ? '1px solid var(--accent, #d34a36)' : '1px solid var(--border)',
                                     borderRadius: '6px'
                                   }}
-                                  onClick={() => setSelectedDraft(draft)}
+                                  onClick={() => setSelectedDraft(cleanDraftText(draft, props.profile))}
                                 >
                                   Option {idx + 1}
                                 </button>
@@ -1137,7 +1263,7 @@ export default function MobileApp(props) {
                                 />
                                 <div style={{ display: 'flex', gap: '8px' }}>
                                   <button className="btn btn-ghost" style={{ flex: 1, padding: '10px', fontSize: '12px' }} onClick={() => { setDraftOptions([]); setSelectedDraft(''); }}>Cancel</button>
-                                  <button 
+                                  <button
                                     className="btn btn-primary"
                                     style={{ flex: 2, padding: '10px', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
                                     disabled={sendingReply || !selectedDraft.trim()}
@@ -1189,12 +1315,12 @@ export default function MobileApp(props) {
                           const fromClean = reply.from.split('<')[0].trim() || reply.from;
 
                           return (
-                            <div 
-                              key={i} 
+                            <div
+                              key={i}
                               onClick={() => setActiveReplyIndex(realIndex)}
-                              style={{ 
-                                padding: '12px 16px', 
-                                borderBottom: '1px solid var(--border)', 
+                              style={{
+                                padding: '12px 16px',
+                                borderBottom: '1px solid var(--border)',
                                 cursor: 'pointer',
                                 background: 'var(--surface-1)'
                               }}
@@ -1203,8 +1329,31 @@ export default function MobileApp(props) {
                                 <div style={{ fontWeight: 600, fontSize: '13px', color: 'var(--text-1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: '8px' }}>
                                   {fromClean}
                                 </div>
-                                <div style={{ fontSize: '11px', color: 'var(--text-3)', flexShrink: 0 }}>
-                                  {new Date(reply.date).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                                  <span style={{ fontSize: '11px', color: 'var(--text-3)' }}>
+                                    {new Date(reply.date).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                                  </span>
+                                  <a
+                                    href={reply.threadId ? `https://mail.google.com/mail/u/0/#all/${reply.threadId}` : (reply.messageId ? `https://mail.google.com/mail/u/0/#all/${reply.messageId}` : 'https://mail.google.com')}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    style={{
+                                      padding: '2px 5px',
+                                      fontSize: '10px',
+                                      borderRadius: '4px',
+                                      background: 'var(--surface-3)',
+                                      color: 'var(--text-2)',
+                                      border: '1px solid var(--border)',
+                                      textDecoration: 'none',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '2px'
+                                    }}
+                                    title="Open exact email in Gmail in new tab"
+                                  >
+                                    <span>Open ↗</span>
+                                  </a>
                                 </div>
                               </div>
 
@@ -1274,198 +1423,198 @@ export default function MobileApp(props) {
                     >
                       {props.inboxLoading ? 'Checking...' : 'Check For Replies'}
                     </button>
-                    </div>
-                  )}
-              {/* Link Recruiter Thread to Application Modal (Mobile) */}
-              {showLinkModal && (
-                <div style={{
-                  position: 'fixed',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  background: 'rgba(0, 0, 0, 0.75)',
-                  backdropFilter: 'blur(6px)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  zIndex: 9999,
-                  padding: '16px'
-                }}>
+                  </div>
+                )}
+                {/* Link Recruiter Thread to Application Modal (Mobile) */}
+                {showLinkModal && (
                   <div style={{
-                    background: 'var(--surface-2)',
-                    border: '1px solid var(--border)',
-                    borderRadius: '14px',
-                    width: '100%',
-                    maxWidth: '480px',
-                    maxHeight: '85vh',
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    background: 'rgba(0, 0, 0, 0.75)',
+                    backdropFilter: 'blur(6px)',
                     display: 'flex',
-                    flexDirection: 'column',
-                    boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
-                    overflow: 'hidden'
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 9999,
+                    padding: '16px'
                   }}>
-                    {/* Header */}
-                    <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ minWidth: 0, paddingRight: '8px' }}>
-                        <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-1)' }}>
-                          🔗 Link to Application
+                    <div style={{
+                      background: 'var(--surface-2)',
+                      border: '1px solid var(--border)',
+                      borderRadius: '14px',
+                      width: '100%',
+                      maxWidth: '480px',
+                      maxHeight: '85vh',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+                      overflow: 'hidden'
+                    }}>
+                      {/* Header */}
+                      <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ minWidth: 0, paddingRight: '8px' }}>
+                          <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-1)' }}>
+                            🔗 Link to Application
+                          </div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            From: {currentReply?.from}
+                          </div>
                         </div>
-                        <div style={{ fontSize: '11px', color: 'var(--text-3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          From: {currentReply?.from}
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => setShowLinkModal(false)}
-                        className="btn btn-ghost"
-                        style={{ padding: '4px 8px', fontSize: '14px' }}
-                      >✕</button>
-                    </div>
-
-                    {/* Body */}
-                    <div style={{ padding: '16px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                      {/* Mode Toggle */}
-                      <div style={{ display: 'flex', gap: '6px', background: 'var(--surface-1)', padding: '3px', borderRadius: '8px', border: '1px solid var(--border)' }}>
                         <button
-                          onClick={() => setIsCreatingNewJob(false)}
-                          style={{
-                            flex: 1,
-                            padding: '6px 8px',
-                            fontSize: '11px',
-                            fontWeight: !isCreatingNewJob ? 600 : 500,
-                            borderRadius: '6px',
-                            border: 'none',
-                            background: !isCreatingNewJob ? 'var(--surface-2)' : 'transparent',
-                            color: !isCreatingNewJob ? 'var(--text-1)' : 'var(--text-3)'
-                          }}
-                        >
-                          Existing Job
-                        </button>
-                        <button
-                          onClick={() => setIsCreatingNewJob(true)}
-                          style={{
-                            flex: 1,
-                            padding: '6px 8px',
-                            fontSize: '11px',
-                            fontWeight: isCreatingNewJob ? 600 : 500,
-                            borderRadius: '6px',
-                            border: 'none',
-                            background: isCreatingNewJob ? 'var(--surface-2)' : 'transparent',
-                            color: isCreatingNewJob ? 'var(--text-1)' : 'var(--text-3)'
-                          }}
-                        >
-                          Create New Job
-                        </button>
+                          onClick={() => setShowLinkModal(false)}
+                          className="btn btn-ghost"
+                          style={{ padding: '4px 8px', fontSize: '14px' }}
+                        >✕</button>
                       </div>
 
-                      {!isCreatingNewJob ? (
-                        <>
-                          {/* Search */}
-                          <div>
-                            <input
-                              type="text"
-                              placeholder="Search application company or role..."
-                              value={linkingSearch}
-                              onChange={(e) => setLinkingSearch(e.target.value)}
-                              className="input"
-                              style={{ width: '100%', height: '34px', fontSize: '12px', borderRadius: '8px', background: 'var(--surface-1)', border: '1px solid var(--border)', marginBottom: '8px' }}
-                            />
-                            {/* List */}
-                            <div style={{ maxHeight: '180px', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: '8px', background: 'var(--surface-1)' }}>
-                              {(props.jobs || [])
-                                .filter(j => {
-                                  if (!linkingSearch.trim()) return true;
-                                  const q = linkingSearch.toLowerCase().trim();
-                                  return (j.company || '').toLowerCase().includes(q) || (j.role || '').toLowerCase().includes(q);
-                                })
-                                .slice(0, 40)
-                                .map(j => {
-                                  const isSelected = linkingJobId === j.id;
-                                  return (
-                                    <div
-                                      key={j.id}
-                                      onClick={() => setLinkingJobId(j.id)}
-                                      style={{
-                                        padding: '8px 12px',
-                                        borderBottom: '1px solid var(--border)',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'space-between',
-                                        background: isSelected ? 'rgba(59, 130, 246, 0.15)' : 'transparent'
-                                      }}
-                                    >
-                                      <div style={{ minWidth: 0 }}>
-                                        <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                          {j.company}
+                      {/* Body */}
+                      <div style={{ padding: '16px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                        {/* Mode Toggle */}
+                        <div style={{ display: 'flex', gap: '6px', background: 'var(--surface-1)', padding: '3px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                          <button
+                            onClick={() => setIsCreatingNewJob(false)}
+                            style={{
+                              flex: 1,
+                              padding: '6px 8px',
+                              fontSize: '11px',
+                              fontWeight: !isCreatingNewJob ? 600 : 500,
+                              borderRadius: '6px',
+                              border: 'none',
+                              background: !isCreatingNewJob ? 'var(--surface-2)' : 'transparent',
+                              color: !isCreatingNewJob ? 'var(--text-1)' : 'var(--text-3)'
+                            }}
+                          >
+                            Existing Job
+                          </button>
+                          <button
+                            onClick={() => setIsCreatingNewJob(true)}
+                            style={{
+                              flex: 1,
+                              padding: '6px 8px',
+                              fontSize: '11px',
+                              fontWeight: isCreatingNewJob ? 600 : 500,
+                              borderRadius: '6px',
+                              border: 'none',
+                              background: isCreatingNewJob ? 'var(--surface-2)' : 'transparent',
+                              color: isCreatingNewJob ? 'var(--text-1)' : 'var(--text-3)'
+                            }}
+                          >
+                            Create New Job
+                          </button>
+                        </div>
+
+                        {!isCreatingNewJob ? (
+                          <>
+                            {/* Search */}
+                            <div>
+                              <input
+                                type="text"
+                                placeholder="Search application company or role..."
+                                value={linkingSearch}
+                                onChange={(e) => setLinkingSearch(e.target.value)}
+                                className="input"
+                                style={{ width: '100%', height: '34px', fontSize: '12px', borderRadius: '8px', background: 'var(--surface-1)', border: '1px solid var(--border)', marginBottom: '8px' }}
+                              />
+                              {/* List */}
+                              <div style={{ maxHeight: '180px', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: '8px', background: 'var(--surface-1)' }}>
+                                {(props.jobs || [])
+                                  .filter(j => {
+                                    if (!linkingSearch.trim()) return true;
+                                    const q = linkingSearch.toLowerCase().trim();
+                                    return (j.company || '').toLowerCase().includes(q) || (j.role || '').toLowerCase().includes(q);
+                                  })
+                                  .slice(0, 40)
+                                  .map(j => {
+                                    const isSelected = linkingJobId === j.id;
+                                    return (
+                                      <div
+                                        key={j.id}
+                                        onClick={() => setLinkingJobId(j.id)}
+                                        style={{
+                                          padding: '8px 12px',
+                                          borderBottom: '1px solid var(--border)',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'space-between',
+                                          background: isSelected ? 'rgba(59, 130, 246, 0.15)' : 'transparent'
+                                        }}
+                                      >
+                                        <div style={{ minWidth: 0 }}>
+                                          <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                            {j.company}
+                                          </div>
+                                          <div style={{ fontSize: '10px', color: 'var(--text-3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                            {j.role}
+                                          </div>
                                         </div>
-                                        <div style={{ fontSize: '10px', color: 'var(--text-3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                          {j.role}
-                                        </div>
+                                        <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+                                          {j.status}
+                                        </span>
                                       </div>
-                                      <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
-                                        {j.status}
-                                      </span>
-                                    </div>
-                                  );
-                                })}
+                                    );
+                                  })}
+                              </div>
+                            </div>
+                          </>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                            <div>
+                              <label style={{ fontSize: '11px', color: 'var(--text-2)', display: 'block', marginBottom: '2px' }}>Company Name *</label>
+                              <input
+                                type="text"
+                                value={newJobCompany}
+                                onChange={(e) => setNewJobCompany(e.target.value)}
+                                placeholder="Company name"
+                                className="input"
+                                style={{ width: '100%', height: '34px', fontSize: '12px', borderRadius: '6px' }}
+                              />
+                            </div>
+                            <div>
+                              <label style={{ fontSize: '11px', color: 'var(--text-2)', display: 'block', marginBottom: '2px' }}>Role Title</label>
+                              <input
+                                type="text"
+                                value={newJobRole}
+                                onChange={(e) => setNewJobRole(e.target.value)}
+                                placeholder="Role title"
+                                className="input"
+                                style={{ width: '100%', height: '34px', fontSize: '12px', borderRadius: '6px' }}
+                              />
                             </div>
                           </div>
-                        </>
-                      ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                          <div>
-                            <label style={{ fontSize: '11px', color: 'var(--text-2)', display: 'block', marginBottom: '2px' }}>Company Name *</label>
-                            <input
-                              type="text"
-                              value={newJobCompany}
-                              onChange={(e) => setNewJobCompany(e.target.value)}
-                              placeholder="Company name"
-                              className="input"
-                              style={{ width: '100%', height: '34px', fontSize: '12px', borderRadius: '6px' }}
-                            />
-                          </div>
-                          <div>
-                            <label style={{ fontSize: '11px', color: 'var(--text-2)', display: 'block', marginBottom: '2px' }}>Role Title</label>
-                            <input
-                              type="text"
-                              value={newJobRole}
-                              onChange={(e) => setNewJobRole(e.target.value)}
-                              placeholder="Role title"
-                              className="input"
-                              style={{ width: '100%', height: '34px', fontSize: '12px', borderRadius: '6px' }}
-                            />
-                          </div>
-                        </div>
-                      )}
-                    </div>
+                        )}
+                      </div>
 
-                    {/* Footer */}
-                    <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: '8px', background: 'var(--surface-1)' }}>
-                      <button className="btn btn-ghost" onClick={() => setShowLinkModal(false)} style={{ fontSize: '11px', padding: '6px 10px' }}>
-                        Cancel
-                      </button>
-                      {!isCreatingNewJob ? (
-                        <button
-                          className="btn btn-primary"
-                          disabled={!linkingJobId || linkingLoading}
-                          onClick={() => handleLinkJob({ jobId: linkingJobId })}
-                          style={{ fontSize: '11px', padding: '6px 12px' }}
-                        >
-                          {linkingLoading ? 'Linking...' : 'Link Job'}
+                      {/* Footer */}
+                      <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: '8px', background: 'var(--surface-1)' }}>
+                        <button className="btn btn-ghost" onClick={() => setShowLinkModal(false)} style={{ fontSize: '11px', padding: '6px 10px' }}>
+                          Cancel
                         </button>
-                      ) : (
-                        <button
-                          className="btn btn-primary"
-                          disabled={!newJobCompany.trim() || linkingLoading}
-                          onClick={() => handleLinkJob({ createNew: true, company: newJobCompany, role: newJobRole })}
-                          style={{ fontSize: '11px', padding: '6px 12px' }}
-                        >
-                          {linkingLoading ? 'Creating...' : 'Create & Link'}
-                        </button>
-                      )}
+                        {!isCreatingNewJob ? (
+                          <button
+                            className="btn btn-primary"
+                            disabled={!linkingJobId || linkingLoading}
+                            onClick={() => handleLinkJob({ jobId: linkingJobId })}
+                            style={{ fontSize: '11px', padding: '6px 12px' }}
+                          >
+                            {linkingLoading ? 'Linking...' : 'Link Job'}
+                          </button>
+                        ) : (
+                          <button
+                            className="btn btn-primary"
+                            disabled={!newJobCompany.trim() || linkingLoading}
+                            onClick={() => handleLinkJob({ createNew: true, company: newJobCompany, role: newJobRole })}
+                            style={{ fontSize: '11px', padding: '6px 12px' }}
+                          >
+                            {linkingLoading ? 'Creating...' : 'Create & Link'}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
+                )}
               </div>
             </>
           );
@@ -1551,9 +1700,9 @@ export default function MobileApp(props) {
                       body: JSON.stringify({ enableAutoFollowUp: nextVal })
                     });
                     if (res.ok) {
-                      notify(nextVal 
-                        ? '⚡ Auto-Send enabled!' 
-                        : '⏸️ Auto-Send paused (drafts saved in memory)', 
+                      notify(nextVal
+                        ? '⚡ Auto-Send enabled!'
+                        : '⏸️ Auto-Send paused (drafts saved in memory)',
                         'success'
                       );
                     } else {
@@ -1567,8 +1716,8 @@ export default function MobileApp(props) {
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
-                  background: profile?.enableAutoFollowUp !== false 
-                    ? 'linear-gradient(135deg, rgba(34, 197, 94, 0.08) 0%, rgba(38, 41, 45, 0.8) 100%)' 
+                  background: profile?.enableAutoFollowUp !== false
+                    ? 'linear-gradient(135deg, rgba(34, 197, 94, 0.08) 0%, rgba(38, 41, 45, 0.8) 100%)'
                     : 'var(--surface-2)',
                   padding: '8px 12px',
                   borderRadius: '10px',
@@ -1803,7 +1952,7 @@ export default function MobileApp(props) {
                 <span style={{ fontWeight: 600, color: 'var(--accent)' }}>{selectedJobs.length} selected</span>
                 <div style={{ flex: 1 }} />
                 {batchProgress !== null ? (
-                   <span className="spinner"></span>
+                  <span className="spinner"></span>
                 ) : (
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <button className="btn btn-primary" style={{ background: 'var(--error)', borderColor: 'var(--error)', padding: '6px 12px', fontSize: '13px' }} onClick={() => handleBatchDelete()}>Delete</button>
@@ -1815,37 +1964,72 @@ export default function MobileApp(props) {
             ) : (
               <div className="mobile-tools-grid">
                 <div style={{ gridColumn: 'span 2' }}>
-                   <div style={{display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px'}}>
-                      {fetchQueries.map((q, idx) => (
-                        <span key={idx} className="mobile-chip">
-                          {q}
-                          <button onClick={() => removeFetchQuery(q)}>&times;</button>
-                        </span>
-                      ))}
-                    </div>
-                    <form onSubmit={addFetchQuery} style={{ display: 'flex', gap: '8px' }}>
-                      <input type="text" className="form-input" style={{ flex: 1 }} placeholder="Role..." value={fetchQuery} onChange={e => setFetchQuery(e.target.value)} />
-                      <button type="submit" className="btn btn-primary">+</button>
-                    </form>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+                    {fetchQueries.map((q, idx) => (
+                      <span key={idx} className="mobile-chip">
+                        {q}
+                        <button onClick={() => removeFetchQuery(q)}>&times;</button>
+                      </span>
+                    ))}
+                  </div>
+                  <form onSubmit={addFetchQuery} style={{ display: 'flex', gap: '8px' }}>
+                    <input type="text" className="form-input" style={{ flex: 1 }} placeholder="Role..." value={fetchQuery} onChange={e => setFetchQuery(e.target.value)} />
+                    <button type="submit" className="btn btn-primary">+</button>
+                  </form>
                 </div>
                 <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                    <label style={{ fontSize: '13px', color: 'var(--text-2)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  {/* Active Location Chips on Mobile */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', alignItems: 'center' }}>
+                    {(selectedLocations || ['All India']).map((loc, idx) => (
+                      <span key={idx} className="mobile-chip" style={{ fontSize: '11px', padding: '3px 8px' }}>
+                        {loc}
+                        {(selectedLocations || []).length > 1 && (
+                          <button type="button" onClick={() => removeLocation(loc)}>&times;</button>
+                        )}
+                      </span>
+                    ))}
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                    <label style={{ fontSize: '12px', color: 'var(--text-2)', display: 'flex', alignItems: 'center', gap: '5px' }}>
                       <input type="checkbox" checked={useApify} onChange={e => setUseApify(e.target.checked)} style={{ accentColor: 'var(--accent)' }} />
                       Deep Scraper
                     </label>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span style={{ fontSize: '12px', color: 'var(--text-2)' }}>Exp:</span>
-                      <select className="form-input" style={{ width: 'auto', fontSize: '12px', padding: '4px 8px' }} value={experienceFilter} onChange={(e) => setExperienceFilter(e.target.value)}>
-                        <option value="All">🎯 All</option>
-                        <option value="Junior">🟢 Junior</option>
-                        <option value="Mid">🟡 Mid</option>
-                        <option value="Senior">🟣 Senior</option>
-                      </select>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <span style={{ fontSize: '11px', color: 'var(--text-2)' }}>Exp:</span>
+                        <select className="form-input" style={{ width: 'auto', fontSize: '11px', padding: '3px 6px' }} value={experienceFilter} onChange={(e) => setExperienceFilter(e.target.value)}>
+                          <option value="All">🎯 All</option>
+                          <option value="Junior">🟢 Jr</option>
+                          <option value="Mid">🟡 Mid</option>
+                          <option value="Senior">🟣 Sr</option>
+                        </select>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <span style={{ fontSize: '11px', color: 'var(--text-2)' }}>Loc:</span>
+                        <select
+                          className="form-input"
+                          style={{ width: 'auto', fontSize: '11px', padding: '3px 6px' }}
+                          value=""
+                          onChange={(e) => {
+                            if (e.target.value) toggleLocation(e.target.value);
+                          }}
+                        >
+                          <option value="">+ Add City</option>
+                          <option value="All India">🌐 All India</option>
+                          <option value="Bangalore">📍 BLR</option>
+                          <option value="Hyderabad">📍 HYD</option>
+                          <option value="Pune">📍 Pune</option>
+                          <option value="Mumbai">📍 MUM</option>
+                          <option value="Delhi NCR">📍 NCR</option>
+                          <option value="Chennai">📍 CHN</option>
+                          <option value="Remote">🏠 Remote</option>
+                        </select>
+                      </div>
                     </div>
                   </div>
                   <button className="btn btn-primary" onClick={handleFetchJobs} disabled={fetching || fetchQueries.length === 0}>
-                    {fetching ? <span className="spinner"></span> : experienceFilter !== 'All' ? `Auto-Scrape ${experienceFilter} Jobs ✨` : 'Auto-Scrape Jobs ✨'}
+                    {fetching ? <span className="spinner"></span> : experienceFilter !== 'All' ? `Auto-Scrape ${experienceFilter} Jobs ✨` : (selectedLocations && selectedLocations.length > 0 && !selectedLocations.includes('All India') ? `Auto-Scrape in ${selectedLocations.join(', ')} ✨` : 'Auto-Scrape Jobs ✨')}
                   </button>
                 </div>
               </div>
@@ -1886,9 +2070,9 @@ export default function MobileApp(props) {
             )}
             {activeJobs.length > 0 && (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '14px', padding: '0 4px' }}>
-                <button 
-                  className="btn btn-ghost" 
-                  style={{ padding: '6px 12px', fontSize: '12px', background: 'var(--surface-3)', borderRadius: '6px', color: 'var(--text-1)' }} 
+                <button
+                  className="btn btn-ghost"
+                  style={{ padding: '6px 12px', fontSize: '12px', background: 'var(--surface-3)', borderRadius: '6px', color: 'var(--text-1)' }}
                   onClick={() => {
                     if (selectedJobs.length === activeJobs.length) {
                       setSelectedJobs([]);
@@ -1933,131 +2117,139 @@ export default function MobileApp(props) {
 
         {(tab === 'applications' || tab === 'applied') && (
           <div className="mobile-job-list">
-             {loading ? (
-                <div className="empty-state"><span className="loading-spinner"></span><h3>Loading...</h3></div>
-              ) : activeJobs.length === 0 ? (
-                <div className="empty-state"><div className="empty-icon">📭</div><h3>No jobs found</h3></div>
-              ) : (
-                paginatedJobs.map(job => (
-                  <div className={`mobile-job-card ${selectedJobs.includes(job.id) ? 'selected' : ''}`} key={job.id} onClick={() => { if(tab === 'applications') toggleSelectJob(job.id); }}>
-                    {tab === 'applications' && (
-                       <div className="mobile-card-checkbox">
-                         <input type="checkbox" checked={selectedJobs.includes(job.id)} onChange={() => {}} />
-                       </div>
-                    )}
-                    <div className="mobile-card-content">
-                      <div className="mobile-card-header">
-                         <div className="company-avatar" style={{ width: '32px', height: '32px', fontSize: '12px' }}>{(job.company || 'XX').substring(0,2).toUpperCase()}</div>
-                         <div className="mobile-card-title">
-                            <h3 style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
-                              {job.company || 'Unknown Company'}
-                              {job.source && job.source !== 'Manual' && (
-                                <span className={`source-pill source-${(job.source || '').toLowerCase()}`}>
-                                  <img src={`https://www.google.com/s2/favicons?domain=${(job.source || '').toLowerCase()}.com&sz=16`} alt={job.source} style={{width: 10, height: 10, borderRadius: '2px'}} />
-                                  {job.source}
-                                </span>
-                              )}
-                            </h3>
-                            <p style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                              <span>{parseRoleDisplay ? parseRoleDisplay(job.role).title : job.role}</span>
-                              {tab === 'applications' && (() => {
-                                const lvl = getJobLevel(job);
-                                const lvlClass = lvl === 'Senior' ? 'level-senior' : lvl === 'Junior' ? 'level-junior' : 'level-mid';
-                                return (
-                                  <span className={`level-pill ${lvlClass}`} style={{ fontSize: '9px', padding: '1px 5px' }}>
-                                    {lvl === 'Junior' ? '🟢 Jr' : lvl === 'Senior' ? '🟣 Sr' : '🟡 Mid'}
-                                  </span>
-                                );
-                              })()}
-                            </p>
-                         </div>
-                      </div>
-                      {tab === 'applications' && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', padding: '0 12px 6px 12px' }}>
-                          <span style={{ fontSize: '11px', color: 'var(--text-2)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                            📍 {job.location || 'India'}
-                          </span>
-                          {(() => {
-                            const wm = extractWorkMode(job.location, job.jd);
-                            return wm ? (
-                              <span style={{ fontSize: '10px', color: 'var(--text-3)', fontWeight: 500 }}>
-                                {wm === 'Remote' ? '🏠 Remote' : wm === 'Hybrid' ? '🏢 Hybrid' : '🏢 On-site'}
-                              </span>
-                            ) : null;
-                          })()}
-                          {(() => {
-                            const pkg = extractPackage(job.salary, job.jd);
-                            return pkg ? (
-                              <span style={{
-                                fontSize: '10px',
-                                fontWeight: 600,
-                                color: '#10b981',
-                                background: 'rgba(16, 185, 129, 0.12)',
-                                border: '1px solid rgba(16, 185, 129, 0.25)',
-                                padding: '1px 6px',
-                                borderRadius: '10px'
-                              }}>
-                                💰 {pkg}
-                              </span>
-                            ) : null;
-                          })()}
-                        </div>
-                      )}
-                      <div className="mobile-card-footer">
-                        <span className="mobile-card-date">
-                          {tab === 'applied'
-                            ? `Sent: ${new Date(job.sentAt || job.updatedAt || job.createdAt || Date.now()).toLocaleString([], {year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute:'2-digit'})}`
-                            : `Found: ${new Date(job.createdAt || Date.now()).toLocaleString([], {year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute:'2-digit'})}`
-                          }
-                        </span>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          {tab === 'applied' && (
-                            <span className={`badge ${(job.status || 'applied').toLowerCase()}`}>
-                              {job.status || 'Applied'}
+            {loading ? (
+              <div className="empty-state"><span className="loading-spinner"></span><h3>Loading...</h3></div>
+            ) : activeJobs.length === 0 ? (
+              <div className="empty-state"><div className="empty-icon">📭</div><h3>No jobs found</h3></div>
+            ) : (
+              paginatedJobs.map(job => (
+                <div className={`mobile-job-card ${selectedJobs.includes(job.id || job._id) ? 'selected' : ''}`} key={job.id || job._id} onClick={() => { if (tab === 'applications') toggleSelectJob(job.id || job._id); }}>
+                  {tab === 'applications' && (
+                    <div className="mobile-card-checkbox">
+                      <input type="checkbox" checked={selectedJobs.includes(job.id || job._id)} onChange={() => { }} />
+                    </div>
+                  )}
+                  <div className="mobile-card-content">
+                    <div className="mobile-card-header">
+                      <div className="company-avatar" style={{ width: '32px', height: '32px', fontSize: '12px' }}>{(job.company || 'XX').substring(0, 2).toUpperCase()}</div>
+                      <div className="mobile-card-title">
+                        <h3 style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                          {job.company || 'Unknown Company'}
+                          {job.source && job.source !== 'Manual' && (
+                            <span className={`source-pill source-${(job.source || '').toLowerCase()}`}>
+                              <img src={`https://www.google.com/s2/favicons?domain=${(job.source || '').toLowerCase()}.com&sz=16`} alt={job.source} style={{ width: 10, height: 10, borderRadius: '2px' }} />
+                              {job.source}
                             </span>
                           )}
-                          {job.tracked && <span style={{ fontSize: '12px' }}>🎯</span>}
-                        </div>
-                      </div>
-                      <div className="mobile-card-actions">
-                         <button className="icon-btn" onClick={(e) => { e.stopPropagation(); job.applyLink ? window.open(job.applyLink, '_blank') : alert('No link'); }}>
-                           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                         </button>
-                         {job.hrLinkedIn && (
-                           <button className="icon-btn text-accent" onClick={(e) => { e.stopPropagation(); window.open(job.hrLinkedIn, '_blank'); }}>
-                             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"></path><rect x="2" y="9" width="4" height="12"></rect><circle cx="4" cy="4" r="2"></circle></svg>
-                           </button>
-                         )}
-                         {(job.emailDraft || job.status === 'Sent' || job.status === 'Opened') && (
-                            <button className="icon-btn text-accent" onClick={(e) => { e.stopPropagation(); setSelectedMail(job); }}>
-                              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
-                            </button>
-                         )}
-                         <button className="icon-btn text-danger" onClick={(e) => { e.stopPropagation(); handleDelete(job.id); }}>
-                           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-                         </button>
+                        </h3>
+                        <p style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                          <span>{parseRoleDisplay ? parseRoleDisplay(job.role).title : job.role}</span>
+                          {tab === 'applications' && (() => {
+                            const lvl = getJobLevel(job);
+                            const lvlClass = lvl === 'Senior' ? 'level-senior' : lvl === 'Junior' ? 'level-junior' : 'level-mid';
+                            return (
+                              <span className={`level-pill ${lvlClass}`} style={{ fontSize: '9px', padding: '1px 5px' }}>
+                                {lvl === 'Junior' ? '🟢 Jr' : lvl === 'Senior' ? '🟣 Sr' : '🟡 Mid'}
+                              </span>
+                            );
+                          })()}
+                        </p>
                       </div>
                     </div>
-                  </div>
-                ))
-              )}
-              {totalPages > 1 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 12px', borderTop: '1px solid var(--border)', marginTop: '8px' }}>
-                  <span style={{ fontSize: '12px', color: 'var(--text-3)' }}>
-                    Page {currentPage} of {totalPages}
-                  </span>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button className="btn btn-secondary" style={{ padding: '6px 10px', fontSize: '12px' }} disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>Prev</button>
-                    <button className="btn btn-secondary" style={{ padding: '6px 10px', fontSize: '12px' }} disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}>Next</button>
+                    {tab === 'applications' && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', padding: '0 12px 6px 12px' }}>
+                        <span style={{ fontSize: '11px', color: 'var(--text-2)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                          📍 {job.location || 'India'}
+                        </span>
+                        {(() => {
+                          const wm = extractWorkMode(job.location, job.jd);
+                          return wm ? (
+                            <span style={{ fontSize: '10px', color: 'var(--text-3)', fontWeight: 500 }}>
+                              {wm === 'Remote' ? '🏠 Remote' : wm === 'Hybrid' ? '🏢 Hybrid' : '🏢 On-site'}
+                            </span>
+                          ) : null;
+                        })()}
+                        {(() => {
+                          const pkg = extractPackage(job.salary, job.jd);
+                          return pkg ? (
+                            <span style={{
+                              fontSize: '10px',
+                              fontWeight: 600,
+                              color: '#10b981',
+                              background: 'rgba(16, 185, 129, 0.12)',
+                              border: '1px solid rgba(16, 185, 129, 0.25)',
+                              padding: '1px 6px',
+                              borderRadius: '10px'
+                            }}>
+                              💰 {pkg}
+                            </span>
+                          ) : null;
+                        })()}
+                      </div>
+                    )}
+                    <div className="mobile-card-footer">
+                      <span className="mobile-card-date">
+                        {tab === 'applied'
+                          ? `Sent: ${new Date(job.sentAt || job.updatedAt || job.createdAt || Date.now()).toLocaleString([], { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
+                          : `Found: ${new Date(job.createdAt || Date.now()).toLocaleString([], { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
+                        }
+                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {tab === 'applied' && (
+                          <span className={`badge ${(job.status || 'applied').toLowerCase()}`}>
+                            {job.status || 'Applied'}
+                          </span>
+                        )}
+                        {job.tracked && <span style={{ fontSize: '12px' }}>🎯</span>}
+                        {job.clickedLinks && job.clickedLinks.length > 0 && (
+                          <span style={{ fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '2px' }} title="Recruiter clicked links">
+                            {job.clickedLinks.some(l => l.includes('linkedin')) && <span title="LinkedIn Viewed">🔗</span>}
+                            {job.clickedLinks.some(l => l.includes('github')) && <span title="GitHub Viewed">💻</span>}
+                            {job.clickedLinks.some(l => (props.profile?.portfolio && l.includes(props.profile.portfolio.replace(/^https?:\/\//, ''))) || l.includes('portfolio') || l.includes('vercel.app')) && <span title="Portfolio Viewed">🌐</span>}
+                            {job.clickedLinks.some(l => l.includes('resume-pdf')) && <span title="Resume Downloaded">📄</span>}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="mobile-card-actions">
+                      <button className="icon-btn" onClick={(e) => { e.stopPropagation(); job.applyLink ? window.open(job.applyLink, '_blank') : alert('No link'); }}>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                      </button>
+                      {job.hrLinkedIn && (
+                        <button className="icon-btn text-accent" onClick={(e) => { e.stopPropagation(); window.open(job.hrLinkedIn, '_blank'); }}>
+                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"></path><rect x="2" y="9" width="4" height="12"></rect><circle cx="4" cy="4" r="2"></circle></svg>
+                        </button>
+                      )}
+                      {(job.emailDraft || job.status === 'Sent' || job.status === 'Opened') && (
+                        <button className="icon-btn text-accent" onClick={(e) => { e.stopPropagation(); setSelectedMail(job); }}>
+                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
+                        </button>
+                      )}
+                      <button className="icon-btn text-danger" onClick={(e) => { e.stopPropagation(); handleDelete(job.id || job._id); }}>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                      </button>
+                    </div>
                   </div>
                 </div>
-              )}
+              ))
+            )}
+            {totalPages > 1 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 12px', borderTop: '1px solid var(--border)', marginTop: '8px' }}>
+                <span style={{ fontSize: '12px', color: 'var(--text-3)' }}>
+                  Page {currentPage} of {totalPages}
+                </span>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button className="btn btn-secondary" style={{ padding: '6px 10px', fontSize: '12px' }} disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>Prev</button>
+                  <button className="btn btn-secondary" style={{ padding: '6px 10px', fontSize: '12px' }} disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}>Next</button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
         {tab === 'resume' && (
           <div className="mobile-form-section">
-            
+
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '20px' }}>
               <button className="btn btn-secondary" onClick={exportToCSV} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', background: 'var(--surface-3)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '13px' }}>
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
@@ -2065,20 +2257,20 @@ export default function MobileApp(props) {
               </button>
             </div>
             {/* 1. Resume Upload (Simple) */}
-            <div style={{marginBottom: '24px'}}>
+            <div style={{ marginBottom: '24px' }}>
               <h2 className="mobile-section-title">Resume Upload</h2>
-              <div style={{display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap'}}>
-                <label className="btn btn-secondary" style={{cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '8px 16px', background: 'var(--surface-3)', border: '1px solid var(--border)', borderRadius: 'var(--radius)'}}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                <label className="btn btn-secondary" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '8px 16px', background: 'var(--surface-3)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
                   Choose File
-                  <input type="file" accept="application/pdf" onChange={handleResumeUpload} style={{display: 'none'}} />
+                  <input type="file" accept="application/pdf" onChange={handleResumeUpload} style={{ display: 'none' }} />
                 </label>
                 {profile.resumeFilename ? (
-                  <span style={{fontSize: '13px', color: 'var(--text-1)'}}>
+                  <span style={{ fontSize: '13px', color: 'var(--text-1)' }}>
                     {profile.resumeFilename}
                   </span>
                 ) : (
-                  <span style={{fontSize: '13px', color: 'var(--text-3)'}}>
+                  <span style={{ fontSize: '13px', color: 'var(--text-3)' }}>
                     No file chosen
                   </span>
                 )}
@@ -2091,50 +2283,71 @@ export default function MobileApp(props) {
             </div>
 
             {/* 2. Personal Information */}
-            <h2 className="mobile-section-title" style={{paddingTop: '20px', borderTop: '1px solid var(--border)'}}>Personal Info</h2>
+            <h2 className="mobile-section-title" style={{ paddingTop: '20px', borderTop: '1px solid var(--border)' }}>Personal Info</h2>
             <form onSubmit={handleProfileSave} className="mobile-form">
               <label className="mobile-label">Full Name</label>
-              <input className="form-input" value={profile.name} onChange={e => setProfile({...profile, name: e.target.value})} />
-              
+              <input className="form-input" value={profile.name} onChange={e => setProfile({ ...profile, name: e.target.value })} />
+
               <label className="mobile-label">Job Title</label>
-              <input className="form-input" value={profile.title} onChange={e => setProfile({...profile, title: e.target.value})} />
-              
+              <input className="form-input" value={profile.title} onChange={e => setProfile({ ...profile, title: e.target.value })} />
+
               <label className="mobile-label">Phone Number</label>
-              <input className="form-input" value={profile.phone} onChange={e => setProfile({...profile, phone: e.target.value})} />
-              
+              <input className="form-input" value={profile.phone} onChange={e => setProfile({ ...profile, phone: e.target.value })} />
+
               <label className="mobile-label">LinkedIn URL</label>
-              <input className="form-input" value={profile.linkedin} onChange={e => setProfile({...profile, linkedin: e.target.value})} />
-              
-              <label className="mobile-label">GitHub URL</label>
-              <input className="form-input" value={profile.github || ''} onChange={e => setProfile({...profile, github: e.target.value})} />
-              
+              <input className="form-input" value={profile.linkedin} onChange={e => setProfile({ ...profile, linkedin: e.target.value })} />
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
+                <label className="mobile-label" style={{ margin: 0 }}>Portfolio Website URL</label>
+              </div>
+              <input className="form-input" value={profile.portfolio || ''} onChange={e => setProfile({ ...profile, portfolio: e.target.value })} placeholder="https://yourportfolio.dev" />
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
+                <label className="mobile-label" style={{ margin: 0 }}>GitHub URL</label>
+                <button
+                  type="button"
+                  onClick={() => syncGithub(profile.github)}
+                  disabled={syncingGithub || !profile.github}
+                  className="btn btn-secondary"
+                  style={{ padding: '3px 8px', fontSize: '11px', borderRadius: '4px' }}
+                >
+                  {syncingGithub ? <span className="spinner" style={{ width: '10px', height: '10px' }}></span> : '⚡ Sync GitHub'}
+                </button>
+              </div>
+              <input className="form-input" value={profile.github || ''} onChange={e => setProfile({ ...profile, github: e.target.value })} placeholder="https://github.com/username" />
+
               <label className="mobile-label">Experience Level</label>
-              <input className="form-input" value={profile.experienceLevel || ''} onChange={e => setProfile({...profile, experienceLevel: e.target.value})} placeholder="e.g. Junior, Mid, Senior" />
-              
+              <input className="form-input" value={profile.experienceLevel || ''} onChange={e => setProfile({ ...profile, experienceLevel: e.target.value })} placeholder="e.g. Junior, Mid, Senior" />
+
               <label className="mobile-label">Custom AI Tone</label>
-              <select className="form-input" value={profile.tone || 'Professional'} onChange={e => setProfile({...profile, tone: e.target.value})}>
+              <select className="form-input" value={profile.tone || 'Professional'} onChange={e => setProfile({ ...profile, tone: e.target.value })}>
                 <option value="Professional">Professional & Formal</option>
                 <option value="Confident & Direct">Confident & Direct</option>
                 <option value="Enthusiastic & Friendly">Enthusiastic & Friendly</option>
                 <option value="Short & Punchy">Short & Punchy</option>
               </select>
-              
-              <button type="submit" className="btn btn-primary" style={{marginTop: '12px'}} disabled={savingProfile}>
+
+              <button type="submit" className="btn btn-primary" style={{ marginTop: '12px' }} disabled={savingProfile}>
                 {savingProfile ? <span className="spinner"></span> : 'Save Changes'}
               </button>
             </form>
 
+            {/* Technical Portfolio & Repositories Card */}
+            <div style={{ marginTop: '20px' }}>
+              <GitHubPortfolioCard profile={profile} syncingGithub={syncingGithub} syncGithub={syncGithub} />
+            </div>
+
             {/* 4. Email Connection */}
-            <h2 className="mobile-section-title" style={{ marginTop: '30px', paddingTop: '20px', borderTop: '1px solid var(--border)' }}>Email Connection</h2>
-            <div className="mobile-card" style={{padding: '16px'}}>
+            <h2 className="mobile-section-title" style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid var(--border)' }}>Email Connection</h2>
+            <div className="mobile-card" style={{ padding: '16px' }}>
               {profile.emailUser ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   <div style={{ display: 'inline-flex', alignItems: 'center', background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80', padding: '8px 12px', borderRadius: '6px', fontSize: '14px', fontWeight: 'bold' }}>✓ {profile.emailUser}</div>
                   <button onClick={logout} type="button" className="btn btn-ghost" style={{ textAlign: 'center', width: '100%' }}>Logout</button>
                 </div>
               ) : (
-                <div style={{display: 'flex', flexDirection: 'column', gap: '12px'}}>
-                  <span style={{color: 'var(--text-2)', fontSize: '13px'}}>No account connected for sending emails.</span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <span style={{ color: 'var(--text-2)', fontSize: '13px' }}>No account connected for sending emails.</span>
                   <a href={`${API_BASE}/api/auth/google`} className="btn btn-primary" style={{ display: 'block', textAlign: 'center', textDecoration: 'none' }}>Sign in with Google</a>
                 </div>
               )}
@@ -2145,14 +2358,14 @@ export default function MobileApp(props) {
         {tab === 'ai_settings' && (
           <div className="mobile-form-section">
             <h2 className="mobile-section-title">AI Prompt Settings</h2>
-            
+
             <form onSubmit={handleProfileSave} className="mobile-form">
               <div className="mobile-card" style={{ padding: '16px', marginBottom: '16px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <input 
-                    type="checkbox" 
+                  <input
+                    type="checkbox"
                     id="enableFlexMobile"
-                    checked={profile.enableFlex !== false} 
+                    checked={profile.enableFlex !== false}
                     onChange={e => setProfile({ ...profile, enableFlex: e.target.checked })}
                     style={{ width: '20px', height: '20px' }}
                   />
@@ -2168,12 +2381,12 @@ export default function MobileApp(props) {
               <div className="mobile-card" style={{ padding: '16px' }}>
                 <label style={{ display: 'block', marginBottom: '8px', fontWeight: '600', color: 'var(--text-1)' }}>Custom AI Instructions</label>
                 <div style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '12px' }}>Add any custom rules, constraints, or formats.</div>
-                <textarea 
-                  className="form-input" 
-                  style={{ width: '100%', height: '150px' }} 
+                <textarea
+                  className="form-input"
+                  style={{ width: '100%', height: '150px' }}
                   placeholder="e.g. Always mention that I am willing to relocate..."
-                  value={profile.aiInstructions || ''} 
-                  onChange={e => setProfile({ ...profile, aiInstructions: e.target.value })} 
+                  value={profile.aiInstructions || ''}
+                  onChange={e => setProfile({ ...profile, aiInstructions: e.target.value })}
                 />
               </div>
 
@@ -2201,23 +2414,23 @@ export default function MobileApp(props) {
             }} className="mobile-form">
               <label className="mobile-label">Company Name</label>
               <input name="company" className="form-input" placeholder="e.g. Google (Optional)" />
-              
+
               <label className="mobile-label">Role</label>
               <input name="role" className="form-input" placeholder="e.g. Engineer (Optional)" />
-              
+
               <label className="mobile-label">Recipient Email</label>
-              <input name="recipientEmail" type="email" required className="form-input" placeholder="e.g. hr@google.com" />
-              
+              <input name="recipientEmail" type="email" className="form-input" placeholder="e.g. hr@company.com (Optional — auto-detected from JD)" />
+
               <label className="mobile-label">Job Description</label>
               <textarea name="jd" required className="form-input" style={{ minHeight: '200px' }} placeholder="Paste JD here..."></textarea>
-              
+
               <button type="submit" className="btn btn-primary" style={{ padding: '14px' }} disabled={fetching}>
                 {fetching ? <span className="spinner"></span> : 'Draft & Send 🚀'}
               </button>
             </form>
           </div>
         )}
-        
+
         {tab === 'applied' && (
           <div className="mobile-actions-panel" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <div className="search-wrapper" style={{ margin: 0 }}>
@@ -2249,138 +2462,138 @@ export default function MobileApp(props) {
 
         {(tab === 'applications' || tab === 'applied') && (
           <div className="mobile-job-list">
-             {loading ? (
-                <div className="empty-state"><span className="loading-spinner"></span><h3>Loading...</h3></div>
-              ) : activeJobs.length === 0 ? (
-                <div className="empty-state"><div className="empty-icon">📭</div><h3>No jobs found</h3></div>
-              ) : (
-                paginatedJobs.map(job => (
-                  <div className={`mobile-job-card ${selectedJobs.includes(job.id) ? 'selected' : ''}`} key={job.id} onClick={() => { if(tab === 'applications') toggleSelectJob(job.id); }}>
-                    {tab === 'applications' && (
-                       <div className="mobile-card-checkbox">
-                         <input type="checkbox" checked={selectedJobs.includes(job.id)} onChange={() => {}} />
-                       </div>
-                    )}
-                    <div className="mobile-card-content">
-                      <div className="mobile-card-header">
-                         <div className="company-avatar" style={{ width: '32px', height: '32px', fontSize: '12px' }}>{(job.company || 'XX').substring(0,2).toUpperCase()}</div>
-                         <div className="mobile-card-title">
-                            <h3 style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
-                              {job.company || 'Unknown Company'}
-                              {job.source && job.source !== 'Manual' && (
-                                <span className={`source-pill source-${(job.source || '').toLowerCase()}`}>
-                                  <img src={`https://www.google.com/s2/favicons?domain=${job.source.toLowerCase()}.com&sz=16`} alt={job.source} style={{width: 10, height: 10, borderRadius: '2px'}} />
-                                  {job.source}
-                                </span>
-                              )}
-                            </h3>
-                            <p style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                              <span>{parseRoleDisplay ? parseRoleDisplay(job.role).title : job.role}</span>
-                              {tab === 'applications' && (() => {
-                                const lvl = getJobLevel(job);
-                                const lvlClass = lvl === 'Senior' ? 'level-senior' : lvl === 'Junior' ? 'level-junior' : 'level-mid';
-                                return (
-                                  <span className={`level-pill ${lvlClass}`} style={{ fontSize: '9px', padding: '1px 5px' }}>
-                                    {lvl === 'Junior' ? '🟢 Jr' : lvl === 'Senior' ? '🟣 Sr' : '🟡 Mid'}
-                                  </span>
-                                );
-                              })()}
-                            </p>
-                         </div>
-                      </div>
-                      {tab === 'applications' && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', padding: '0 12px 6px 12px' }}>
-                          <span style={{ fontSize: '11px', color: 'var(--text-2)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                            📍 {job.location || 'India'}
-                          </span>
-                          {(() => {
-                            const wm = extractWorkMode(job.location, job.jd);
-                            return wm ? (
-                              <span style={{ fontSize: '10px', color: 'var(--text-3)', fontWeight: 500 }}>
-                                {wm === 'Remote' ? '🏠 Remote' : wm === 'Hybrid' ? '🏢 Hybrid' : '🏢 On-site'}
-                              </span>
-                            ) : null;
-                          })()}
-                          {(() => {
-                            const pkg = extractPackage(job.salary, job.jd);
-                            return pkg ? (
-                              <span style={{
-                                fontSize: '10px',
-                                fontWeight: 600,
-                                color: '#10b981',
-                                background: 'rgba(16, 185, 129, 0.12)',
-                                border: '1px solid rgba(16, 185, 129, 0.25)',
-                                padding: '1px 6px',
-                                borderRadius: '10px'
-                              }}>
-                                💰 {pkg}
-                              </span>
-                            ) : null;
-                          })()}
-                        </div>
-                      )}
-                      <div className="mobile-card-footer">
-                        <span className="mobile-card-date">
-                          {tab === 'applied'
-                            ? `Sent: ${new Date(job.sentAt || job.updatedAt || job.createdAt || Date.now()).toLocaleString([], {year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute:'2-digit'})}`
-                            : `Found: ${new Date(job.createdAt || Date.now()).toLocaleString([], {year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute:'2-digit'})}`
-                          }
-                        </span>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          {tab === 'applied' && (
-                            (job.status || '').startsWith('LinkedIn') ? (
-                              <select
-                                value={job.status}
-                                onClick={e => e.stopPropagation()}
-                                onChange={(e) => updateStatus(job.id, e.target.value)}
-                                style={{
-                                  fontSize: '11px',
-                                  fontWeight: 600,
-                                  padding: '2px 6px',
-                                  borderRadius: '6px',
-                                  background: 'rgba(10, 102, 194, 0.15)',
-                                  color: '#38bdf8',
-                                  border: '1px solid rgba(10, 102, 194, 0.4)',
-                                  cursor: 'pointer'
-                                }}
-                              >
-                                <option value="LinkedIn_Sent" style={{ background: 'var(--surface-2)', color: 'var(--text-1)' }}>💼 Invite Sent</option>
-                                <option value="LinkedIn_Connected" style={{ background: 'var(--surface-2)', color: 'var(--text-1)' }}>🤝 Connected</option>
-                                <option value="LinkedIn_Replied" style={{ background: 'var(--surface-2)', color: 'var(--text-1)' }}>💬 Replied</option>
-                              </select>
-                            ) : (
-                              <span className={`badge ${job.status.toLowerCase()}`}>
-                                {job.status}
-                              </span>
-                            )
+            {loading ? (
+              <div className="empty-state"><span className="loading-spinner"></span><h3>Loading...</h3></div>
+            ) : activeJobs.length === 0 ? (
+              <div className="empty-state"><div className="empty-icon">📭</div><h3>No jobs found</h3></div>
+            ) : (
+              paginatedJobs.map(job => (
+                <div className={`mobile-job-card ${selectedJobs.includes(job.id) ? 'selected' : ''}`} key={job.id} onClick={() => { if (tab === 'applications') toggleSelectJob(job.id); }}>
+                  {tab === 'applications' && (
+                    <div className="mobile-card-checkbox">
+                      <input type="checkbox" checked={selectedJobs.includes(job.id)} onChange={() => { }} />
+                    </div>
+                  )}
+                  <div className="mobile-card-content">
+                    <div className="mobile-card-header">
+                      <div className="company-avatar" style={{ width: '32px', height: '32px', fontSize: '12px' }}>{(job.company || 'XX').substring(0, 2).toUpperCase()}</div>
+                      <div className="mobile-card-title">
+                        <h3 style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                          {job.company || 'Unknown Company'}
+                          {job.source && job.source !== 'Manual' && (
+                            <span className={`source-pill source-${(job.source || '').toLowerCase()}`}>
+                              <img src={`https://www.google.com/s2/favicons?domain=${job.source.toLowerCase()}.com&sz=16`} alt={job.source} style={{ width: 10, height: 10, borderRadius: '2px' }} />
+                              {job.source}
+                            </span>
                           )}
-                          {job.tracked && <span style={{ fontSize: '12px' }}>🎯</span>}
-                        </div>
-                      </div>
-                      <div className="mobile-card-actions">
-                         <button className="icon-btn" onClick={(e) => { e.stopPropagation(); job.applyLink ? window.open(job.applyLink, '_blank') : alert('No link'); }}>
-                           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                         </button>
-                         {job.hrLinkedIn && (
-                           <button className="icon-btn text-accent" onClick={(e) => { e.stopPropagation(); window.open(job.hrLinkedIn, '_blank'); }}>
-                             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"></path><rect x="2" y="9" width="4" height="12"></rect><circle cx="4" cy="4" r="2"></circle></svg>
-                           </button>
-                         )}
-                         <button className="icon-btn text-danger" onClick={async (e) => { 
-                           e.stopPropagation(); 
-                           try {
-                             await fetch(`${API_BASE}/api/jobs/${job.id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` } });
-                             setJobs(p => p.filter(j => j.id !== job.id));
-                             notify('Job deleted');
-                           } catch(e) { notify('Delete failed', 'error'); }
-                         }}>
-                           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-                         </button>
+                        </h3>
+                        <p style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                          <span>{parseRoleDisplay ? parseRoleDisplay(job.role).title : job.role}</span>
+                          {tab === 'applications' && (() => {
+                            const lvl = getJobLevel(job);
+                            const lvlClass = lvl === 'Senior' ? 'level-senior' : lvl === 'Junior' ? 'level-junior' : 'level-mid';
+                            return (
+                              <span className={`level-pill ${lvlClass}`} style={{ fontSize: '9px', padding: '1px 5px' }}>
+                                {lvl === 'Junior' ? '🟢 Jr' : lvl === 'Senior' ? '🟣 Sr' : '🟡 Mid'}
+                              </span>
+                            );
+                          })()}
+                        </p>
                       </div>
                     </div>
+                    {tab === 'applications' && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', padding: '0 12px 6px 12px' }}>
+                        <span style={{ fontSize: '11px', color: 'var(--text-2)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                          📍 {job.location || 'India'}
+                        </span>
+                        {(() => {
+                          const wm = extractWorkMode(job.location, job.jd);
+                          return wm ? (
+                            <span style={{ fontSize: '10px', color: 'var(--text-3)', fontWeight: 500 }}>
+                              {wm === 'Remote' ? '🏠 Remote' : wm === 'Hybrid' ? '🏢 Hybrid' : '🏢 On-site'}
+                            </span>
+                          ) : null;
+                        })()}
+                        {(() => {
+                          const pkg = extractPackage(job.salary, job.jd);
+                          return pkg ? (
+                            <span style={{
+                              fontSize: '10px',
+                              fontWeight: 600,
+                              color: '#10b981',
+                              background: 'rgba(16, 185, 129, 0.12)',
+                              border: '1px solid rgba(16, 185, 129, 0.25)',
+                              padding: '1px 6px',
+                              borderRadius: '10px'
+                            }}>
+                              💰 {pkg}
+                            </span>
+                          ) : null;
+                        })()}
+                      </div>
+                    )}
+                    <div className="mobile-card-footer">
+                      <span className="mobile-card-date">
+                        {tab === 'applied'
+                          ? `Sent: ${new Date(job.sentAt || job.updatedAt || job.createdAt || Date.now()).toLocaleString([], { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
+                          : `Found: ${new Date(job.createdAt || Date.now()).toLocaleString([], { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
+                        }
+                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {tab === 'applied' && (
+                          (job.status || '').startsWith('LinkedIn') ? (
+                            <select
+                              value={job.status}
+                              onClick={e => e.stopPropagation()}
+                              onChange={(e) => updateStatus(job.id, e.target.value)}
+                              style={{
+                                fontSize: '11px',
+                                fontWeight: 600,
+                                padding: '2px 6px',
+                                borderRadius: '6px',
+                                background: 'rgba(10, 102, 194, 0.15)',
+                                color: '#38bdf8',
+                                border: '1px solid rgba(10, 102, 194, 0.4)',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              <option value="LinkedIn_Sent" style={{ background: 'var(--surface-2)', color: 'var(--text-1)' }}>💼 Invite Sent</option>
+                              <option value="LinkedIn_Connected" style={{ background: 'var(--surface-2)', color: 'var(--text-1)' }}>🤝 Connected</option>
+                              <option value="LinkedIn_Replied" style={{ background: 'var(--surface-2)', color: 'var(--text-1)' }}>💬 Replied</option>
+                            </select>
+                          ) : (
+                            <span className={`badge ${job.status.toLowerCase()}`}>
+                              {job.status}
+                            </span>
+                          )
+                        )}
+                        {job.tracked && <span style={{ fontSize: '12px' }}>🎯</span>}
+                      </div>
+                    </div>
+                    <div className="mobile-card-actions">
+                      <button className="icon-btn" onClick={(e) => { e.stopPropagation(); job.applyLink ? window.open(job.applyLink, '_blank') : alert('No link'); }}>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                      </button>
+                      {job.hrLinkedIn && (
+                        <button className="icon-btn text-accent" onClick={(e) => { e.stopPropagation(); window.open(job.hrLinkedIn, '_blank'); }}>
+                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"></path><rect x="2" y="9" width="4" height="12"></rect><circle cx="4" cy="4" r="2"></circle></svg>
+                        </button>
+                      )}
+                      <button className="icon-btn text-danger" onClick={async (e) => {
+                        e.stopPropagation();
+                        try {
+                          await fetch(`${API_BASE}/api/jobs/${job.id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` } });
+                          setJobs(p => p.filter(j => j.id !== job.id));
+                          notify('Job deleted');
+                        } catch (e) { notify('Delete failed', 'error'); }
+                      }}>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                      </button>
+                    </div>
                   </div>
-                ))
-              )}
+                </div>
+              ))
+            )}
           </div>
         )}
 
@@ -2393,17 +2606,22 @@ export default function MobileApp(props) {
                 setFetching(true);
                 try {
                   const effectiveQuery = (fetchQuery || fetchQueries[0] || 'software engineer').trim();
+                  const effectiveLocations = hrLocations.length > 0 ? hrLocations : ['All India'];
                   const res = await props.apiFetch(`${API_BASE}/api/jobs/scrape-hr`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` },
                     body: JSON.stringify({
                       query: effectiveQuery,
-                      experience: experienceFilter !== 'All' ? experienceFilter : ''
+                      experience: experienceFilter !== 'All' ? experienceFilter : '',
+                      locations: effectiveLocations,
+                      location: effectiveLocations.join(', ')
                     })
                   });
                   const result = await res.json();
                   if (result.success) {
-                    notify(`Discovered ${result.count} new HR leads for "${effectiveQuery}"!`);
+                    const nonAll = effectiveLocations.filter(l => !['all', 'all india'].includes(l.toLowerCase()));
+                    const locText = nonAll.length > 0 ? ` in ${nonAll.join(', ')}` : '';
+                    notify(`Discovered ${result.count} new HR leads for "${effectiveQuery}"${locText}!`);
                     loadJobs();
                   } else {
                     notify(result.error || 'Failed to find HRs', 'error');
@@ -2415,19 +2633,51 @@ export default function MobileApp(props) {
                 }
               }}
               className="mobile-actions-panel"
-              style={{ display: 'flex', gap: '8px' }}
+              style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}
             >
-              <input
-                type="text"
-                className="form-input"
-                style={{ flex: 1 }}
-                placeholder="Role, Skill, or Company..."
-                value={fetchQuery}
-                onChange={e => setFetchQuery(e.target.value)}
-              />
-              <button type="submit" className="btn btn-primary" style={{ padding: '8px 14px' }} disabled={fetching}>
-                {fetching ? <span className="spinner"></span> : 'Discover 🚀'}
-              </button>
+              {/* Active HR Location Chips */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', alignItems: 'center' }}>
+                {hrLocations.map((loc, idx) => (
+                  <span key={idx} className="mobile-chip" style={{ fontSize: '11px', padding: '2px 7px' }}>
+                    {loc}
+                    {hrLocations.length > 1 && (
+                      <button type="button" onClick={() => removeHrLocation(loc)}>&times;</button>
+                    )}
+                  </span>
+                ))}
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <input
+                  type="text"
+                  className="form-input"
+                  style={{ flex: 1 }}
+                  placeholder="Role, Skill, or Company..."
+                  value={fetchQuery}
+                  onChange={e => setFetchQuery(e.target.value)}
+                />
+                <select
+                  className="form-input"
+                  style={{ width: 'auto', fontSize: '11px', padding: '6px 8px' }}
+                  value=""
+                  onChange={e => {
+                    if (e.target.value) toggleHrLocation(e.target.value);
+                  }}
+                >
+                  <option value="">+ Add City</option>
+                  <option value="All India">🌐 All</option>
+                  <option value="Bangalore">📍 BLR</option>
+                  <option value="Hyderabad">📍 HYD</option>
+                  <option value="Pune">📍 Pune</option>
+                  <option value="Mumbai">📍 MUM</option>
+                  <option value="Delhi NCR">📍 NCR</option>
+                  <option value="Chennai">📍 CHN</option>
+                  <option value="Remote">🏠 Remote</option>
+                </select>
+                <button type="submit" className="btn btn-primary" disabled={fetching} style={{ padding: '6px 12px' }}>
+                  {fetching ? <span className="spinner"></span> : '🚀'}
+                </button>
+              </div>
             </form>
 
             {/* Sub-Filters for HR Leads on Mobile */}
@@ -2471,7 +2721,7 @@ export default function MobileApp(props) {
                   <span style={{ fontWeight: 600, color: 'var(--accent)' }}>{selectedJobs.length} selected</span>
                   <div style={{ flex: 1 }} />
                   {batchProgress !== null ? (
-                     <span className="spinner"></span>
+                    <span className="spinner"></span>
                   ) : (
                     <div style={{ display: 'flex', gap: '8px' }}>
                       <button className="btn btn-primary" style={{ background: 'var(--error)', borderColor: 'var(--error)', padding: '6px 12px', fontSize: '13px' }} onClick={() => handleBatchDelete()}>Delete</button>
@@ -2482,9 +2732,9 @@ export default function MobileApp(props) {
                 </div>
               ) : (
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 4px' }}>
-                  <button 
-                    className="btn btn-ghost" 
-                    style={{ padding: '6px 12px', fontSize: '13px', background: 'var(--surface-3)', borderRadius: '6px', color: 'var(--text-1)' }} 
+                  <button
+                    className="btn btn-ghost"
+                    style={{ padding: '6px 12px', fontSize: '13px', background: 'var(--surface-3)', borderRadius: '6px', color: 'var(--text-1)' }}
                     onClick={() => {
                       const hrJobs = jobs.filter(j => j.status === 'HR_Found');
                       if (selectedJobs.length === hrJobs.length && hrJobs.length > 0) setSelectedJobs([]);
@@ -2505,22 +2755,22 @@ export default function MobileApp(props) {
                 if (hrFilter === 'no_email') return !j.emailRecipient;
                 return true;
               }).length === 0 ? (
-                 <div className="empty-state"><div className="empty-icon">📭</div><h3>No HRs found</h3></div>
+                <div className="empty-state"><div className="empty-icon">📭</div><h3>No HRs found</h3></div>
               ) : (
-                 jobs.filter(j => {
-                   if (j.status !== 'HR_Found') return false;
-                   if (hrFilter === 'with_email') return !!j.emailRecipient;
-                   if (hrFilter === 'no_email') return !j.emailRecipient;
-                   return true;
-                 }).map(job => {
-                   const linkedInTargetUrl = job.hrLinkedIn || `https://www.linkedin.com/search/results/all/?keywords=${encodeURIComponent((job.hrName || '') + ' ' + (job.company || ''))}`;
-                   const hasEmail = !!job.emailRecipient;
+                jobs.filter(j => {
+                  if (j.status !== 'HR_Found') return false;
+                  if (hrFilter === 'with_email') return !!j.emailRecipient;
+                  if (hrFilter === 'no_email') return !j.emailRecipient;
+                  return true;
+                }).map(job => {
+                  const linkedInTargetUrl = job.hrLinkedIn || `https://www.linkedin.com/search/results/all/?keywords=${encodeURIComponent((job.hrName || '') + ' ' + (job.company || ''))}`;
+                  const hasEmail = !!job.emailRecipient;
 
-                   return (
+                  return (
                     <div className={`mobile-job-card ${selectedJobs.includes(job.id) ? 'selected' : ''}`} key={job.id} onClick={() => toggleSelectJob(job.id)} style={{ flexDirection: 'column', gap: '10px' }}>
                       <div style={{ display: 'flex', width: '100%', alignItems: 'flex-start', gap: '10px' }}>
                         <div className="mobile-card-checkbox" style={{ marginTop: '2px' }}>
-                          <input type="checkbox" checked={selectedJobs.includes(job.id)} onChange={() => {}} />
+                          <input type="checkbox" checked={selectedJobs.includes(job.id)} onChange={() => { }} />
                         </div>
                         <div style={{ flex: 1 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -2535,13 +2785,13 @@ export default function MobileApp(props) {
                             <button
                               className="icon-btn text-danger"
                               style={{ padding: '2px' }}
-                              onClick={async (e) => { 
-                                e.stopPropagation(); 
+                              onClick={async (e) => {
+                                e.stopPropagation();
                                 try {
                                   await fetch(`${API_BASE}/api/jobs/${job.id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` } });
                                   setJobs(p => p.filter(j => j.id !== job.id));
                                   notify('Lead deleted');
-                                } catch(e) { notify('Delete failed', 'error'); }
+                                } catch (e) { notify('Delete failed', 'error'); }
                               }}
                             >
                               ✕
@@ -2582,8 +2832,26 @@ export default function MobileApp(props) {
                           </div>
                         ) : (
                           <>
-                            <span style={{ color: hasEmail ? 'var(--text-1)' : 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              ✉️ {hasEmail ? job.emailRecipient : 'Email: Not Found'}
+                            <span style={{ color: hasEmail ? 'var(--text-1)' : 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                              ✉️ {hasEmail ? (
+                                <>
+                                  <span>{job.emailRecipient}</span>
+                                  {job.status === 'Bounced' || job.deliverabilityStatus === 'bounced' ? (
+                                    <span style={{ fontSize: '9px', padding: '1px 4px', borderRadius: 3, background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', fontWeight: 600 }}>🚨 Bounced</span>
+                                  ) : job.deliverabilityScore >= 70 ? (
+                                    <span style={{ fontSize: '9px', padding: '1px 4px', borderRadius: 3, background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', fontWeight: 600 }}>✓ {job.deliverabilityScore}%</span>
+                                  ) : job.deliverabilityScore > 0 ? (
+                                    <span style={{ fontSize: '9px', padding: '1px 4px', borderRadius: 3, background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', fontWeight: 600 }}>⚠ {job.deliverabilityScore}%</span>
+                                  ) : null}
+                                </>
+                              ) : (
+                                <>
+                                  <span>Email: Not Found</span>
+                                  {job.deliverabilityStatus === 'undeliverable' && (
+                                    <span style={{ fontSize: '8px', padding: '1px 4px', borderRadius: 3, background: 'rgba(239, 68, 68, 0.12)', color: '#f87171', fontWeight: 500 }} title={job.deliverabilityReason || 'Zero verified inboxes'}>🛡️ Protected</span>
+                                  )}
+                                </>
+                              )}
                             </span>
                             <button
                               onClick={() => {
@@ -2608,7 +2876,7 @@ export default function MobileApp(props) {
                           disabled={copyingNoteId === job.id}
                         >
                           <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z"/>
+                            <path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z" />
                           </svg>
                           {copyingNoteId === job.id ? (
                             <>
@@ -2663,8 +2931,8 @@ export default function MobileApp(props) {
                         )}
                       </div>
                     </div>
-                   );
-                 })
+                  );
+                })
               )}
             </div>
           </div>
@@ -2695,12 +2963,12 @@ export default function MobileApp(props) {
         ))}
         <div className={`bottom-nav-item ${showMoreMenu || NAV.slice(4).some(n => n.id === tab) ? 'active' : ''}`} onClick={() => setShowMoreMenu(!showMoreMenu)}>
           <span className="bottom-nav-icon">
-             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /><circle cx="5" cy="12" r="1" /></svg>
           </span>
           <span className="bottom-nav-label">More</span>
         </div>
       </div>
-      
+
       {/* Modals for Mail */}
       {selectedMail && (
         <div className="mobile-modal-overlay">
@@ -2710,13 +2978,13 @@ export default function MobileApp(props) {
               <button onClick={() => setSelectedMail(null)}>&times;</button>
             </div>
             <div className="mobile-modal-content">
-               <div style={{ background: 'var(--surface-3)', padding: '12px', borderRadius: '6px', marginBottom: '16px', fontSize: '13px' }}>
-                  <div><strong>To:</strong> {selectedMail.emailRecipient || 'Unknown'}</div>
-                  <div><strong>Tracked:</strong> {selectedMail.tracked ? 'Yes' : 'No'}</div>
-               </div>
-               <div style={{ whiteSpace: 'pre-wrap', lineHeight: '1.5' }}>
-                  {selectedMail.emailDraft || 'No draft found.'}
-               </div>
+              <div style={{ background: 'var(--surface-3)', padding: '12px', borderRadius: '6px', marginBottom: '16px', fontSize: '13px' }}>
+                <div><strong>To:</strong> {selectedMail.emailRecipient || 'Unknown'}</div>
+                <div><strong>Tracked:</strong> {selectedMail.tracked ? 'Yes' : 'No'}</div>
+              </div>
+              <div style={{ whiteSpace: 'pre-wrap', lineHeight: '1.5' }}>
+                {selectedMail.emailDraft || 'No draft found.'}
+              </div>
             </div>
           </div>
         </div>

@@ -1,7 +1,9 @@
 require('dotenv').config();
 const dns = require('dns');
-// Set public DNS servers to prevent SRV lookup failures (ESERVFAIL) on local network resolvers
-dns.setServers(['8.8.8.8', '1.1.1.1']);
+// Set reliable public DNS servers to prevent SRV lookup failures (ESERVFAIL) on local network resolvers
+try {
+  dns.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4', '1.0.0.1']);
+} catch (e) {}
 
 const express = require('express');
 const cors = require('cors');
@@ -33,14 +35,32 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-// Connect to MongoDB
-if (process.env.MONGO_URI) {
-  mongoose.connect(process.env.MONGO_URI)
-    .then(() => console.log('✅ Connected to MongoDB Atlas'))
-    .catch(err => console.error('❌ MongoDB Connection Error:', err));
-} else {
-  console.error('❌ MONGO_URI is missing from .env! App will not work without it.');
+// Connect to MongoDB with Auto-Retry
+async function connectToMongo(retries = 5, delay = 2000) {
+  if (!process.env.MONGO_URI) {
+    console.error('❌ MONGO_URI is missing from .env! App will not work without it.');
+    return;
+  }
+
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      await mongoose.connect(process.env.MONGO_URI, {
+        serverSelectionTimeoutMS: 5000
+      });
+      console.log('✅ Connected to MongoDB Atlas');
+      return;
+    } catch (err) {
+      console.warn(`[MongoDB] Connection attempt ${attempt}/${retries} failed (${err.code || err.message}). Retrying in ${delay / 1000}s...`);
+      if (attempt < retries) {
+        await new Promise(r => setTimeout(r, delay));
+      } else {
+        console.error('❌ MongoDB Connection Error after multiple retries:', err.message);
+      }
+    }
+  }
 }
+
+connectToMongo();
 
 // Mount Routes
 app.use('/api/auth', authRoutes);
@@ -67,6 +87,7 @@ cron.schedule('0 9 * * *', async () => {
 
       const jobs = await Job.find({
         userId: user._id,
+        isDeleted: { $ne: true },
         status: { $in: ['Sent', 'Opened'] }
       });
 

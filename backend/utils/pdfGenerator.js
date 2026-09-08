@@ -14,6 +14,7 @@ Title: ${profile.title}
 Phone: ${profile.phone}
 LinkedIn: ${profile.linkedin}
 GitHub: ${profile.github}
+Portfolio: ${profile.portfolio || ''}
 
 Base Resume/Skills:
 ${profile.resumeText || profile.skills?.join(', ')}
@@ -100,7 +101,7 @@ OUTPUT FORMAT (Valid JSON ONLY):
       doc.fontSize(12).font('Helvetica').text(profile.title || jobRole, { align: 'center' });
       doc.moveDown(0.5);
       
-      const contactInfo = [profile.phone, profile.emailUser, profile.linkedin, profile.github].filter(Boolean).join(' | ');
+      const contactInfo = [profile.phone, profile.emailUser, profile.linkedin, profile.github, profile.portfolio].filter(Boolean).join(' | ');
       doc.fontSize(10).font('Helvetica').text(contactInfo, { align: 'center', color: '#555555' });
       doc.moveDown(1.5);
 

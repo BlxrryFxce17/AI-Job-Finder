@@ -28,7 +28,20 @@ const jobSchema = new mongoose.Schema({
   salary: { type: String, default: '' },
   recruiterEmail: { type: String, default: '' },
   matchedThreadId: { type: String, default: '' },
-  lastRepliedAt: { type: Date }
+  lastRepliedAt: { type: Date },
+  deliverabilityScore: { type: Number, default: 0 },
+  deliverabilityStatus: { type: String, default: 'unverified' }, // 'deliverable', 'risky', 'undeliverable', 'unverified'
+  deliverabilityReason: { type: String, default: '' },
+  isDeleted: { type: Boolean, default: false },
+  deletedAt: { type: Date }
 }, { timestamps: true });
+
+// Compound indexes for lightning-fast querying and sorting
+jobSchema.index({ userId: 1, isDeleted: 1 });
+jobSchema.index({ userId: 1, createdAt: -1 });
+jobSchema.index({ userId: 1, status: 1 });
+jobSchema.index({ userId: 1, emailRecipient: 1 });
+jobSchema.index({ userId: 1, company: 1, role: 1, isDeleted: 1 });
+jobSchema.index({ id: 1 });
 
 module.exports = mongoose.model('Job', jobSchema);

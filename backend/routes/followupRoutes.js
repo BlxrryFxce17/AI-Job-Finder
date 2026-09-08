@@ -5,7 +5,7 @@ const User = require('../models/User');
 const Profile = require('../models/Profile');
 const requireAuth = require('../middleware/requireAuth');
 const { callAIWithRetry } = require('../utils/ai');
-const { sendEmailViaAPI, checkGmailForReply } = require('../utils/email');
+const { sendEmailViaAPI, checkGmailForReply, formatEmailTextToHtml, cleanDraftEmailText } = require('../utils/email');
 
 async function getProfile(userId) {
   let profile = await Profile.findOne({ userId });
@@ -28,19 +28,21 @@ router.post('/send-followup', requireAuth, async (req, res) => {
     const user = await User.findById(req.user.id);
     const profile = await getProfile(req.user.id);
 
-    let formattedDraft = followUp.draft.replace(/\n/g, '<br/>');
     const baseUrl = process.env.PUBLIC_URL;
     const trackClick = (url) => (baseUrl && url) ? `${baseUrl}/api/track-click/${job.id}?url=${encodeURIComponent(url)}` : (url || '');
     const linkedInUrl = trackClick(profile.linkedin);
     const githubUrl = trackClick(profile.github);
+    const portfolioUrl = trackClick(profile.portfolio);
     const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${job.id}" width="1" height="1" style="display:none;" />` : '';
 
-    if (baseUrl) {
-      const resumeLinkUrl = trackClick(`${baseUrl}/api/profile/resume-pdf?userId=${user._id}`);
-      formattedDraft = formattedDraft.replace('You can view my CV here.', `<a href="${resumeLinkUrl}">You can view my CV here.</a>`);
-    } else {
-      formattedDraft = formattedDraft.replace('You can view my CV here.', 'I have attached my CV to this email for your reference.');
-    }
+    const resumeLinkUrl = baseUrl ? trackClick(`${baseUrl}/api/profile/resume-pdf?userId=${user._id}`) : null;
+    const formattedDraft = formatEmailTextToHtml(followUp.draft, resumeLinkUrl);
+
+    const linkItems = [];
+    if (profile.linkedin) linkItems.push(`🔗 <a href="${linkedInUrl}">LinkedIn</a>`);
+    if (profile.github) linkItems.push(`💻 <a href="${githubUrl}">GitHub</a>`);
+    if (profile.portfolio) linkItems.push(`🌐 <a href="${portfolioUrl}">Portfolio</a>`);
+    const linksHtml = linkItems.length > 0 ? linkItems.join(' | ') : `🔗 <a href="${linkedInUrl}">LinkedIn</a> | 💻 <a href="${githubUrl}">GitHub</a>`;
 
     const htmlBody = `
       <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
@@ -50,7 +52,7 @@ router.post('/send-followup', requireAuth, async (req, res) => {
         <b>${profile.name}</b><br/>
         ${profile.title}<br/>
         📞 ${profile.phone}<br/>
-        🔗 <a href="${linkedInUrl}">LinkedIn</a> | 💻 <a href="${githubUrl}">GitHub</a>
+        ${linksHtml}
         <br/>
         ${trackingPixel}
       </div>
@@ -92,6 +94,7 @@ router.post('/check-followups', requireAuth, async (req, res) => {
 
     const jobs = await Job.find({
       userId: user._id,
+      isDeleted: { $ne: true },
       status: { $in: ['Sent', 'Opened'] }
     });
 
@@ -131,6 +134,7 @@ Guidelines:
       try {
         const resAI = await callAIWithRetry(prompt, 3, 2000);
         let draft = resAI.text.replace(/\`\`\`(?:html|json|markdown)?\s*([\s\S]*?)\`\`\`/g, '$1').trim();
+        draft = cleanDraftEmailText(draft, profile);
 
         if (!job.followUps) job.followUps = [];
         job.followUps.push({

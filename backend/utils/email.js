@@ -7,18 +7,49 @@ const {
   getLearnedMemory, 
   learnFromVerifiedEmail, 
   learnDeadDomain, 
+  learnFromOpen,
+  learnFromBounce,
   generateEmailWithPattern 
 } = require('./learningEngine');
 
-async function resolveCompanyDomain(company, applyLink = null) {
-  if (!company) return 'unknown.com';
+// In-Memory Domain Resolution Cache (1-hour TTL)
+const domainResolutionCache = new Map(); // companyKey -> { timestamp, domain }
 
-  // 1. Scrambled URL in company name (e.g. httpswwwicloudemscomvlog)
-  const urlMatch = company.match(/(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+)/i);
-  if (urlMatch) return urlMatch[1].toLowerCase();
-  const concatenatedMatch = company.match(/^https?www?([a-zA-Z0-9-]+?)(?:com|in|org|net|io)(.*)/i);
-  if (concatenatedMatch) {
-    return concatenatedMatch[1].toLowerCase() + '.com';
+async function resolveCompanyDomain(company, applyLink = null) {
+  if (!company || typeof company !== 'string') return null;
+
+  const rawComp = company.trim();
+  const lowerComp = rawComp.toLowerCase();
+
+  // Check cache first
+  const cacheKey = `${lowerComp}|${applyLink || ''}`;
+  const cached = domainResolutionCache.get(cacheKey);
+  if (cached && (Date.now() - cached.timestamp < 60 * 60 * 1000)) {
+    return cached.domain;
+  }
+
+  const finalizeDomain = (dom) => {
+    if (domainResolutionCache.size > 2000) domainResolutionCache.clear();
+    domainResolutionCache.set(cacheKey, { timestamp: Date.now(), domain: dom });
+    return dom;
+  };
+
+  // Filter out generic placeholder phrases
+  const genericPlaceholders = [
+    'direct recruiter', 'recruiter / agency', 'agency', 'confidential', 
+    'hiring company', 'leading mnc', 'stealth startup', 'unknown company',
+    'sourcing strategist', 'technical recruiter', 'talent acquisition'
+  ];
+  if (genericPlaceholders.some(p => lowerComp.includes(p))) {
+    return finalizeDomain(null);
+  }
+
+  // 1. Scrambled URL in company name (e.g. httpswwwicloudemscomvlog or company.com)
+  const urlMatch = rawComp.match(/(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+)/i);
+  if (urlMatch) {
+    const host = urlMatch[1].toLowerCase();
+    const mx = await checkMxRecords(host);
+    if (mx.valid) return finalizeDomain(host);
   }
 
   // 2. Direct ATS / careers website from applyLink
@@ -26,83 +57,117 @@ async function resolveCompanyDomain(company, applyLink = null) {
     try {
       const parsed = new URL(applyLink);
       const host = parsed.hostname.replace(/^www\./, '').toLowerCase();
-      const genericBoards = ['linkedin.com', 'indeed.com', 'naukri.com', 'adzuna.com', 'glassdoor.com', 'internshala.com', 'google.com', 'apify.com'];
+      const genericBoards = ['linkedin.com', 'indeed.com', 'naukri.com', 'adzuna.com', 'glassdoor.com', 'internshala.com', 'google.com', 'apify.com', 'greenhouse.io', 'lever.co', 'workday.com', 'myworkdayjobs.com', 'smartrecruiters.com'];
       if (!genericBoards.some(gb => host.includes(gb))) {
         const mx = await checkMxRecords(host);
-        if (mx.valid) return host;
+        if (mx.valid) return finalizeDomain(host);
       }
     } catch(e) {}
   }
 
+  // Clean company name: strip prefix fluff like "Jobs at", "Hiring for", legal suffixes
+  let cleanName = rawComp
+    .replace(/^(?:jobs|careers?|hiring|openings?|opportunity)\s+(?:at|for|in|with)\s+/i, '')
+    .replace(/\b(enterprises|technologies|solutions|software|systems|services|pvt|ltd|limited|private|llc|inc|corp|corporation|group|india)\b/gi, '')
+    .replace(/[^a-zA-Z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!cleanName || cleanName.length < 2) {
+    cleanName = rawComp.replace(/[^a-zA-Z0-9]/g, '');
+  }
+
   // 3. Clearbit Autocomplete
   try {
-    const clearbitRes = await axios.get(`https://autocomplete.clearbit.com/v1/companies/suggest?query=${encodeURIComponent(company)}`, { timeout: 3000 });
+    const clearbitRes = await axios.get(`https://autocomplete.clearbit.com/v1/companies/suggest?query=${encodeURIComponent(cleanName || rawComp)}`, { timeout: 3000 });
     if (clearbitRes.data && clearbitRes.data.length > 0 && clearbitRes.data[0].domain) {
       const cbDomain = clearbitRes.data[0].domain.toLowerCase();
       const mx = await checkMxRecords(cbDomain);
-      if (mx.valid) return cbDomain;
+      if (mx.valid) return finalizeDomain(cbDomain);
     }
   } catch (err) { }
 
-  // 3.5. Serper Google Search for Company Official Website (Ultra-high accuracy for regional & mid-sized firms)
+  // 4. Serper Google Search for Company Official Website (High precision)
   if (process.env.SERPER_API_KEY) {
     try {
       const serperRes = await axios.post('https://google.serper.dev/search', {
-        q: `${company} official website`,
+        q: `"${cleanName}" official website`,
         num: 4
       }, {
         headers: { 'X-API-KEY': process.env.SERPER_API_KEY, 'Content-Type': 'application/json' },
         timeout: 4000
       });
       const organic = serperRes.data?.organic || [];
-      const nonCompany = ['linkedin.', 'facebook.', 'glassdoor.', 'indeed.', 'zaubacorp.', 'tofler.', 'ambitionbox.', 'instahyre.', 'wikipedia.', 'naukri.', 'youtube.', 'twitter.', 'instagram.', 'zoominfo.'];
+      const nonCompany = ['linkedin.', 'facebook.', 'glassdoor.', 'indeed.', 'zaubacorp.', 'tofler.', 'ambitionbox.', 'instahyre.', 'wikipedia.', 'naukri.', 'youtube.', 'twitter.', 'instagram.', 'zoominfo.', 'github.com', 'medium.com'];
       for (const o of organic) {
         try {
           const u = new URL(o.link);
           const host = u.hostname.replace(/^www\./, '').toLowerCase();
           if (!nonCompany.some(nc => host.includes(nc))) {
             const mx = await checkMxRecords(host);
-            if (mx.valid) return host;
+            if (mx.valid) return finalizeDomain(host);
           }
         } catch(e) {}
       }
     } catch(err) { }
   }
 
-  // 4. Candidate domain generation with legal suffix stripping
-  const cleanName = company.toLowerCase()
-    .replace(/^https?:\/\/(?:www\.)?/i, '')
-    .replace(/^httpswww/i, '')
-    .replace(/\b(enterprises|technologies|solutions|software|systems|services|pvt|ltd|limited|private|llc|inc|corp|corporation|group|india)\b/gi, '')
-    .replace(/[^a-z0-9]/g, '');
-
-  const fullClean = company.toLowerCase().replace(/[^a-z0-9]/g, '');
+  // 5. Candidate domain generation with legal suffix stripping - strictly require MX validation
+  const compactName = cleanName.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const fullCompact = rawComp.toLowerCase().replace(/[^a-z0-9]/g, '');
 
   const candidates = [
-    cleanName ? `${cleanName}.com` : null,
-    fullClean ? `${fullClean}.com` : null,
-    cleanName ? `${cleanName}.in` : null,
-    cleanName ? `${cleanName}.co.in` : null,
-    cleanName ? `${cleanName}.io` : null,
-    fullClean ? `${fullClean}.in` : null
+    compactName ? `${compactName}.com` : null,
+    compactName ? `${compactName}.in` : null,
+    compactName ? `${compactName}.co.in` : null,
+    compactName ? `${compactName}.io` : null,
+    (fullCompact && fullCompact !== compactName) ? `${fullCompact}.com` : null,
+    (fullCompact && fullCompact !== compactName) ? `${fullCompact}.in` : null
   ].filter(Boolean);
 
   for (const dom of candidates) {
     const mx = await checkMxRecords(dom);
-    if (mx.valid) return dom;
+    if (mx.valid) return finalizeDomain(dom);
   }
 
-  return candidates[0] || `${fullClean}.com`;
+  // NEVER return an unverified synthetic domain to prevent bounces
+  return finalizeDomain(null);
 }
 
 async function sendEmailViaAPI(user, mailOptions) {
   const recipient = (mailOptions.to || '').trim();
-  
-  // Pre-send safety check to protect sender domain reputation
-  const verification = await verifyEmail(recipient);
-  if (!verification.isValid) {
-    throw new Error(`Email send aborted: ${recipient} failed verification (${verification.reason || 'Invalid or non-deliverable mailbox'})`);
+  if (!recipient) {
+    console.warn('❌ [Send Guard] Aborted: Recipient address is empty');
+    throw new Error('Email send aborted: Recipient email address is empty.');
   }
+
+  console.log(`\n======================================================`);
+  console.log(`📤 [Outbound Outreach] Preparing email to: ${recipient}`);
+  console.log(`🛡️ [Deliverability Guard] Pre-send reputation check initiated...`);
+
+  // Strict Deliverability Guard: Protect sender domain reputation from bounces (>5% bounce rate causes blacklisting)
+  const verification = await verifyEmail(recipient);
+  if (!verification.isValid || (verification.deliverabilityScore != null && verification.deliverabilityScore < 60) || verification.status === 'undeliverable') {
+    console.error(`🛑 [Deliverability Guard] BLOCKED: "${recipient}"`);
+    console.error(`   Status: ${verification.status} | Score: ${verification.deliverabilityScore}%`);
+    console.error(`   Reason: ${verification.reason || 'High bounce risk'}`);
+    console.error(`   Protection: Send aborted to shield domain from ESP blacklisting.`);
+    console.log(`======================================================\n`);
+    throw new Error(`Email send blocked by Deliverability Guard: "${recipient}" failed verification (Status: ${verification.status}, Score: ${verification.deliverabilityScore}%, Reason: ${verification.reason || 'High bounce risk'}). Sending aborted to protect domain reputation.`);
+  }
+
+  const domain = recipient.split('@')[1];
+  if (domain) {
+    const mxCheck = await checkMxRecords(domain);
+    if (!mxCheck.valid) {
+      console.error(`🛑 [Deliverability Guard] Domain @${domain} has no active MX servers.`);
+      console.log(`======================================================\n`);
+      throw new Error(`Email send aborted: Domain @${domain} has no active mail servers (MX records).`);
+    }
+  }
+
+  console.log(`✅ [Deliverability Guard] APPROVED for dispatch! (Score: ${verification.deliverabilityScore}%, Status: ${verification.status})`);
+  console.log(`======================================================\n`);
 
   const userEmail = user.email || process.env.EMAIL_USER;
 
@@ -450,8 +515,38 @@ async function getInboxReplies(user, options = {}) {
 
             const rawFromEmail = (displayFrom.match(/<([^>]+)>/)?.[1] || displayFrom).toLowerCase().trim();
 
-            // Filter out system delivery daemon bounces
-            if (/mailer-daemon|postmaster|daemon@|bounce@/i.test(rawFromEmail)) {
+            // Intercept delivery failure notices and mark bounced jobs
+            const isDeliveryFailure = /mailer-daemon|postmaster|daemon@|bounce@/i.test(rawFromEmail) ||
+              /Delivery Status Notification \(Failure\)|Undelivered Mail Returned to Sender|Mail delivery failed/i.test(subject);
+
+            if (isDeliveryFailure) {
+              const bounceContent = `${subject} ${recruiterSnippet} ${recruiterBody || ''} ${latestMsg.quotedText || ''}`;
+              const emailRegex = /\b([a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})\b/g;
+              const matches = bounceContent.match(emailRegex) || [];
+              const bouncedEmails = [...new Set(matches.map(m => m.toLowerCase().trim()))]
+                .filter(m => !m.includes('googlemail') && !m.includes('google.com') && !m.includes('postmaster') && !m.includes('mailer-daemon') && m !== myEmail);
+
+              if (bouncedEmails.length > 0) {
+                try {
+                  const Job = require('../models/Job');
+                  for (const bEmail of bouncedEmails) {
+                    const matchedJob = await Job.findOne({
+                      userId: user._id || user.id,
+                      $or: [{ emailRecipient: bEmail }, { recruiterEmail: bEmail }]
+                    });
+                    if (matchedJob) {
+                      matchedJob.status = 'Bounced';
+                      matchedJob.deliverabilityStatus = 'bounced';
+                      matchedJob.deliverabilityReason = '550 Mailbox Not Found / Recipient does not exist';
+                      await matchedJob.save();
+                      console.log(`🚨 [Bounce Interceptor] Job for "${matchedJob.company}" marked as Bounced (${bEmail})`);
+                      await learnFromBounce(matchedJob.company, bEmail);
+                    }
+                  }
+                } catch (bErr) {
+                  console.warn('[Bounce Interceptor Warning]', bErr.message);
+                }
+              }
               return null;
             }
 
@@ -502,8 +597,13 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
   let verificationInfo = null;
 
   let cleanDomain = (domain || '').toLowerCase().trim();
-  if (!cleanDomain || cleanDomain.includes('unknown') || cleanDomain.startsWith('http')) {
+  if (!cleanDomain || cleanDomain.includes('unknown') || cleanDomain.startsWith('http') || cleanDomain.includes('recruiter') || cleanDomain.includes('agency')) {
     cleanDomain = await resolveCompanyDomain(company, applyLink);
+  }
+
+  if (!cleanDomain) {
+    console.log(`[Email Discovery] ${company} -> NONE (No verified domain resolved)`);
+    return { email: null, source: 'No verified domain resolved', verification: null };
   }
 
   // Dynamic Learning Engine: Check learned company memory first
@@ -515,7 +615,7 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
     // If domain is already known dead, abort early
     if (learnedMemory.deadDomains && learnedMemory.deadDomains.includes(cleanDomain)) {
       console.log(`[Email Discovery] ${company} (${cleanDomain}) -> NONE (Known Dead Domain from Memory)`);
-      return { email: null, source: 'Blacklisted Dead Domain (Memory)' };
+      return { email: null, source: 'Blacklisted Dead Domain (Memory)', verification: null };
     }
   }
 
@@ -529,15 +629,17 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
         domainMx = altMx;
       } else {
         await learnDeadDomain(company, cleanDomain);
+        return { email: null, source: 'Invalid MX domain', verification: null };
       }
     } else {
       await learnDeadDomain(company, cleanDomain);
+      return { email: null, source: 'Invalid MX domain', verification: null };
     }
   }
 
   // Helper to test and accept candidate email
-  async function testCandidate(candidate, sourceName, allowDomainMismatch = false) {
-    if (!candidate || failedEmails.includes(candidate)) return false;
+  async function testCandidate(candidate, sourceName, isExplicitJd = false, allowDomainMismatch = false) {
+    if (!candidate || failedEmails.includes(candidate.toLowerCase().trim())) return false;
     
     // Strict Filter: Block system non-recipient inboxes (noreply@, mailer-daemon@, support@, etc.)
     if (isNonRecipientEmail(candidate)) {
@@ -545,7 +647,7 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
       return false;
     }
 
-    // Strict Domain Match: Prevent cross-company contamination (e.g. premiergp.com for MAK)
+    // Strict Domain Match: Prevent cross-company contamination
     const candidateDomain = (candidate.split('@')[1] || '').toLowerCase().trim();
     if (!allowDomainMismatch && cleanDomain && candidateDomain) {
       const cleanRoot = cleanDomain.split('.')[0];
@@ -569,14 +671,18 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
       }
     }
 
-    const result = await verifyEmail(candidate);
-    if (result.isValid) {
-      discoveredEmail = candidate;
-      source = `${sourceName} [Verified]`;
+    const result = await verifyEmail(candidate, { isFromJd: isExplicitJd, hrName });
+    // Require strict deliverability confirmation to prevent bounces:
+    // Explicit JD emails allowed if isValid === true and deliverabilityScore >= 60.
+    // Inferred/scraped emails require deliverabilityScore >= 70 and isValid === true.
+    const threshold = isExplicitJd ? 60 : 70;
+    if (result.isValid && result.deliverabilityScore >= threshold && result.status !== 'undeliverable') {
+      discoveredEmail = candidate.trim();
+      source = `${sourceName} [Verified ${result.deliverabilityScore}%]`;
       verificationInfo = result;
       return true;
     }
-    console.log(`[Email Rejected] Candidate ${candidate} failed verification: ${result.reason || result.status}`);
+    console.log(`[Email Rejected] Candidate ${candidate} failed deliverability check (Status: ${result.status}, Score: ${result.deliverabilityScore}%, Reason: ${result.reason})`);
     return false;
   }
 
@@ -584,7 +690,7 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
   if (!discoveredEmail && hrName && domainMx.valid && learnedMemory?.learnedPattern && learnedMemory?.patternConfidence >= 50) {
     const memoryEmail = generateEmailWithPattern(hrName, cleanDomain, learnedMemory.learnedPattern);
     if (memoryEmail) {
-      await testCandidate(memoryEmail, `Tier 0 (Learned Memory: ${learnedMemory.learnedPattern})`);
+      await testCandidate(memoryEmail, `Tier 0 (Learned Memory: ${learnedMemory.learnedPattern})`, false, false);
     }
   }
 
@@ -593,19 +699,19 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
     const emailRegex = /[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}/g;
     const foundEmails = jd.match(emailRegex);
     if (foundEmails && foundEmails.length > 0) {
-      const validFound = foundEmails.filter(e => !isNonRecipientEmail(e) && !failedEmails.includes(e));
+      const validFound = foundEmails.filter(e => !isNonRecipientEmail(e) && !failedEmails.includes(e.toLowerCase().trim()));
       if (validFound.length > 0) {
         // 1. First priority: Real named personal recruiter contact in JD
         const personalEmails = validFound.filter(e => !isGenericEmail(e));
         for (const pEmail of personalEmails) {
-          if (await testCandidate(pEmail, 'Tier 1 (JD Named Contact)', true)) {
+          if (await testCandidate(pEmail, 'Tier 1 (JD Named Contact)', true, true)) {
             break;
           }
         }
         // 2. Second priority: Official hiring inboxes explicitly published in the JD
         if (!discoveredEmail) {
           for (const cEmail of validFound) {
-            if (await testCandidate(cEmail, 'Tier 1 (JD Official Hiring Inbox)', true)) {
+            if (await testCandidate(cEmail, 'Tier 1 (JD Official Hiring Inbox)', true, true)) {
               break;
             }
           }
@@ -615,7 +721,7 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
   }
 
   // Tier 1.2: Advanced Deep Web Search (OSINT & LinkedIn Contact Info with STRICT Domain Matching)
-  if (!discoveredEmail && hrName && process.env.SERPER_API_KEY) {
+  if (!discoveredEmail && hrName && process.env.SERPER_API_KEY && domainMx.valid) {
     try {
       const linkedInSlug = hrLinkedInUrl ? hrLinkedInUrl.split('/in/')[1]?.split('/')[0]?.split('?')[0] : '';
       const queries = [
@@ -643,10 +749,10 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
       const emailRegex = /[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}/g;
       const foundEmails = allSnippets.match(emailRegex);
       if (foundEmails && foundEmails.length > 0) {
-        const validEmails = foundEmails.filter(e => !isNonRecipientEmail(e) && !failedEmails.includes(e));
+        const validEmails = foundEmails.filter(e => !isNonRecipientEmail(e) && !failedEmails.includes(e.toLowerCase().trim()));
         if (validEmails.length > 0) {
           for (const em of validEmails) {
-            if (await testCandidate(em, 'Tier 1.2 (LinkedIn Recruiter OSINT)', false)) {
+            if (await testCandidate(em, 'Tier 1.2 (LinkedIn Recruiter OSINT)', false, false)) {
               break;
             }
           }
@@ -663,7 +769,7 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
       if (emails && emails.length > 0) {
         for (const em of emails) {
           if (!isNonRecipientEmail(em.value) && (em.confidence || 0) >= 50) {
-            if (await testCandidate(em.value, 'Tier 2 (Hunter.io Verified)')) {
+            if (await testCandidate(em.value, 'Tier 2 (Hunter.io Verified)', false, false)) {
               break;
             }
           }
@@ -672,8 +778,8 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
     } catch (err) { }
   }
 
-  // Tier 1.5: HR Name Permutations (Corporate Email Patterns - Hunter Verified Only)
-  if (!discoveredEmail && hrName && domainMx.valid && process.env.HUNTER_API_KEY) {
+  // Tier 1.5: HR Name Permutations (Corporate Email Patterns - Hunter/Disify Verified Only)
+  if (!discoveredEmail && hrName && domainMx.valid) {
     const parts = hrName.toLowerCase().replace(/[^a-z0-9 ]/g, '').split(' ').filter(Boolean);
     if (parts.length >= 2) {
       const first = parts[0];
@@ -687,11 +793,8 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
         `${first}@${cleanDomain}`
       ];
       for (const guess of guesses) {
-        if (!failedEmails.includes(guess) && !isNonRecipientEmail(guess)) {
-          const hCheck = await verifyWithHunter(guess);
-          if (hCheck.verified && hCheck.isDeliverable) {
-            discoveredEmail = guess;
-            source = 'Tier 1.5 (HR Name Permutation [Hunter Verified])';
+        if (!failedEmails.includes(guess.toLowerCase().trim()) && !isNonRecipientEmail(guess)) {
+          if (await testCandidate(guess, 'Tier 1.5 (HR Name Permutation)', false, false)) {
             break;
           }
         }
@@ -711,9 +814,9 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
       const emailRegex = /[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}/g;
       const foundEmails = snippets.match(emailRegex);
       if (foundEmails && foundEmails.length > 0) {
-        const validEmails = foundEmails.filter(e => !isNonRecipientEmail(e) && !failedEmails.includes(e));
+        const validEmails = foundEmails.filter(e => !isNonRecipientEmail(e) && !failedEmails.includes(e.toLowerCase().trim()));
         for (const em of validEmails) {
-          if (await testCandidate(em, 'Tier 3 (Company Recruiter Dorking)', false)) {
+          if (await testCandidate(em, 'Tier 3 (Company Recruiter Dorking)', false, false)) {
             break;
           }
         }
@@ -721,22 +824,17 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
     } catch (err) { }
   }
 
-  // Tier 4: Verified Company Recruiting Inboxes Fallback (Resilient Safety Net)
-  // When no individual personal email is indexed on the web, use the company's designated recruiting inbox.
-  const isInvalidDomain = /\b(sourcingstrategist|technicalrecruiter|juniordeveloper|softwaredeveloper|softwareengineer|talentacquisition)\b/i.test(cleanDomain || '');
+  // Tier 4: Company Recruitment Inboxes (ONLY accepted if individual mailbox existence is strictly verified)
+  // NEVER blindly assume careers@ or hr@ exists solely based on domain MX presence!
+  const isInvalidDomain = /\b(sourcingstrategist|technicalrecruiter|juniordeveloper|softwaredeveloper|softwareengineer|talentacquisition|directrecruiter|recruiteragency)\b/i.test(cleanDomain || '');
   if (!discoveredEmail && domainMx.valid && cleanDomain && !isInvalidDomain) {
-    const fallbackInboxes = [
+    const candidateInboxes = [
       `careers@${cleanDomain}`,
-      `hr@${cleanDomain}`,
-      `talent@${cleanDomain}`,
       `jobs@${cleanDomain}`,
-      `hiring@${cleanDomain}`
+      `hr@${cleanDomain}`
     ];
-    for (const candidate of fallbackInboxes) {
-      if (!failedEmails.includes(candidate)) {
-        discoveredEmail = candidate;
-        source = 'Tier 4 (Company Hiring Inbox [MX Verified])';
-        verificationInfo = { isValid: true, status: 'mx_valid', reason: 'Official company hiring inbox on active MX server' };
+    for (const candidate of candidateInboxes) {
+      if (await testCandidate(candidate, 'Tier 4 (Company Careers Inbox)', false, false)) {
         break;
       }
     }
@@ -745,10 +843,117 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
   // Dynamic Learning: If an email is verified and accepted, learn it
   if (discoveredEmail) {
     await learnFromVerifiedEmail(company, cleanDomain, discoveredEmail, hrName);
+    console.log(`[Email Discovery] ${company} (${cleanDomain}) -> ${discoveredEmail} (${source})`);
+    return { 
+      email: discoveredEmail, 
+      source, 
+      deliverabilityScore: verificationInfo?.deliverabilityScore || 85,
+      deliverabilityStatus: verificationInfo?.status || 'deliverable',
+      deliverabilityReason: verificationInfo?.reason || 'Verified deliverable mailbox',
+      verification: verificationInfo 
+    };
   }
 
-  console.log(`[Email Discovery] ${company} (${cleanDomain}) -> ${discoveredEmail || 'NONE'} (${source || 'No valid MX/Email'})`);
-  return { email: discoveredEmail, source, verification: verificationInfo };
+  console.log(`[Email Discovery] ${company} (${cleanDomain}) -> NONE (Zero deliverable inboxes confirmed. Blocked guessing to prevent bounce)`);
+  return { 
+    email: null, 
+    source: 'No deliverable mailbox discovered', 
+    deliverabilityScore: 0,
+    deliverabilityStatus: 'undeliverable',
+    deliverabilityReason: 'No verified recipient mailbox found. Recommend using company application link or LinkedIn outreach to prevent email bouncing.',
+    verification: null 
+  };
+}
+
+function formatEmailTextToHtml(rawText, resumeLinkUrl = null) {
+  if (!rawText) return '';
+  
+  let text = String(rawText).trim();
+
+  // 1. Separate P.S. into its own paragraph if squished (using word boundary so https:// is not matched)
+  text = text.replace(/(^|[^\n])\s*(\b[Pp]\.?[Ss]\.?(?:\s*:|(?=\s)))/g, '$1\n\n$2');
+
+  // 2. Format bullet points starting with - or * or •
+  const lines = text.split(/\r?\n/);
+  const formattedLines = lines.map(line => {
+    const trimmed = line.trim();
+    if (/^[-*•]\s+/.test(trimmed)) {
+      return `&bull; ${trimmed.replace(/^[-*•]\s+/, '')}`;
+    }
+    return trimmed;
+  });
+  text = formattedLines.join('\n');
+
+  // 3. Convert markdown bold **text** or __text__ to <b>text</b>
+  text = text.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+  text = text.replace(/__(.*?)__/g, '<b>$1</b>');
+
+  // 4. Convert markdown italic *text* or _text_ to <i>text</i>
+  text = text.replace(/(?<![\w*])\*([^*\n]+)\*(?![\w*])/g, '<i>$1</i>');
+  text = text.replace(/(?<![\w_])_([^_\n]+)_(?![\w_])/g, '<i>$1</i>');
+
+  // 5. Clean up any remaining unmatched double asterisks
+  text = text.replace(/\*\*/g, '');
+
+  // 6. Convert markdown links [text](url) to styled HTML links
+  text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" style="color: #0284c7; text-decoration: underline; font-weight: 500;">$1</a>');
+
+  // 7. Handle CV / Resume link text
+  if (resumeLinkUrl) {
+    text = text.replace('You can view my CV here.', `<a href="${resumeLinkUrl}">You can view my CV here.</a>`);
+  } else {
+    text = text.replace('You can view my CV here.', 'I have attached my CV to this email for your reference.');
+  }
+
+  // 7. Convert newlines to HTML <br/>
+  let html = text.replace(/\n/g, '<br/>');
+
+  // Clean up excess consecutive <br/> tags
+  html = html.replace(/(<br\s*[\/]?>\s*){3,}/gi, '<br/><br/>');
+
+  return html;
+}
+
+function cleanDraftEmailText(text, profile = {}) {
+  if (!text) return '';
+  let cleaned = String(text);
+
+  // 1. Remove markdown bold **text** or __text__
+  cleaned = cleaned.replace(/\*\*(.*?)\*\*/g, '$1');
+  cleaned = cleaned.replace(/__(.*?)__/g, '$1');
+
+  // 2. Convert bullet points like '* ', '- ', '+ ' at start of line to standard bullet '• '
+  cleaned = cleaned.replace(/^([ \t]*)[*+-][ \t]+/gm, '$1• ');
+
+  // 3. Remove single italic asterisks or underscores around words
+  cleaned = cleaned.replace(/(?<!\w)\*([^*\n]+)\*(?!\w)/g, '$1');
+  cleaned = cleaned.replace(/(?<!\w)_([^_\n]+)_(?!\w)/g, '$1');
+
+  // 4. Strip any rogue double asterisks or stray asterisks
+  cleaned = cleaned.replace(/\*\*/g, '');
+  cleaned = cleaned.replace(/(^|[^\w])\*(?=[^\w]|$)/g, '$1');
+
+  // 5. Replace common placeholder brackets if profile data is available
+  const loc = (profile && profile.location) || 'India';
+  const github = (profile && profile.github) || '';
+  const linkedin = (profile && profile.linkedin) || '';
+  const portfolio = (profile && (profile.portfolio || profile.github || profile.linkedin)) || '';
+
+  cleaned = cleaned.replace(/\[(?:Your\s+)?(?:City|Location)(?:,\s*Country)?\]/gi, loc);
+  if (portfolio) {
+    cleaned = cleaned.replace(/\[(?:Link\s+to\s+)?Portfolio\]/gi, portfolio);
+  } else {
+    cleaned = cleaned.replace(/\[(?:Link\s+to\s+)?Portfolio\]/gi, 'available upon request');
+  }
+  if (github) {
+    cleaned = cleaned.replace(/\[(?:Link\s+to\s+)?GitHub\]/gi, github);
+  } else {
+    cleaned = cleaned.replace(/\[(?:Link\s+to\s+)?GitHub\]/gi, 'available upon request');
+  }
+  cleaned = cleaned.replace(/\[(?:Your\s+)?Name\]/gi, (profile && profile.name) || 'Akash V');
+  cleaned = cleaned.replace(/\[(?:Your\s+)?Phone(?:\s+Number)?\]/gi, (profile && profile.phone) || '');
+
+  return cleaned.trim();
 }
 
 module.exports = {
@@ -759,6 +964,9 @@ module.exports = {
   resolveCompanyDomain,
   verifyEmail,
   checkMxRecords,
-  validateEmailSyntax
+  validateEmailSyntax,
+  formatEmailTextToHtml,
+  cleanDraftEmailText
 };
+
 

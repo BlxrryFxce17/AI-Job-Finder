@@ -7,10 +7,12 @@ const gemini = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const callAIWithRetry = async (prompt, retries = 5, delayMs = 3000) => {
   for (let i = 0; i < retries; i++) {
     try {
-      console.log(`[AI] Attempt ${i + 1}/${retries}: Trying Groq (Llama-3)...`);
+      console.log(`[AI] Attempt ${i + 1}/${retries}: Trying Groq (Qwen 3.8 27B)...`);
       const completion = await groq.chat.completions.create({
         messages: [{ role: 'user', content: prompt }],
-        model: 'openai/gpt-oss-20b',
+        model: 'qwen/qwen3.8-27b',
+        max_tokens: 2000,
+        temperature: 0.7
       });
       return { text: completion.choices[0]?.message?.content || '' };
     } catch (groqErr) {

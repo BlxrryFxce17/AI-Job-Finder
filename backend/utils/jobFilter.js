@@ -1,13 +1,13 @@
 // backend/utils/jobFilter.js
 
-// Senior / Lead role keywords (title-level match)
-const SENIOR_TITLE_REGEX = /\b(sr\.?|senior|lead|principal|staff|architect|director|vp|vice president|manager|head of|sde[- ]?(3|iii)|engineer[- ]?(3|iii)|level[- ]?3)\b/i;
+// Senior / Lead / Executive role keywords (title-level match)
+const SENIOR_TITLE_REGEX = /\b(sr\.?|senior|lead|principal|staff|architect|director|vp|vice president|manager|head\b|chief|cto|cio|cpo|ceo|cfo|smts|pmts|sde[- ]?(2|ii|3|iii)|engineer[- ]?(2|ii|3|iii)|developer[- ]?(2|ii|3|iii)|level[- ]?(2|3)|sme|expert|officer)\b/i;
 
 // Experience requirement regex for 5+ years (JD / description level match)
 const SENIOR_EXP_REGEX = /(?:5\+|[5-9]|\d{2})\+?\s*(?:-\s*\d+\s*)?(?:years?|yrs?)(?:\s+of)?\s+experience|minimum\s+(?:of\s+)?(?:5|[6-9]|\d{2})\+?\s*(?:years?|yrs?)/i;
 
 // Junior / Entry role keywords (title-level match)
-const JUNIOR_TITLE_REGEX = /\b(jr\.?|junior|entry|entry[- ]level|fresher|freshers|intern|internship|associate|trainee|graduate|grad|sde[- ]?(1|i)\b|engineer[- ]?(1|i)\b|level[- ]?1)\b/i;
+const JUNIOR_TITLE_REGEX = /\b(jr\.?|junior|entry|entry[- ]level|fresher|freshers|intern|internship|associate|trainee|graduate|grad|sde[- ]?(1|i)\b|engineer[- ]?(1|i)\b|developer[- ]?(1|i)\b|level[- ]?1)\b/i;
 
 // Junior experience regex (0-2 years, freshers, no experience)
 const JUNIOR_EXP_REGEX = /(?:0[- ](?:to[- ])?[1-2]|0\+?|[1-2])\s*(?:years?|yrs?)(?:\s+of)?\s+experience|\b(freshers?|no experience|entry[- ]level|recent graduates?)\b/i;

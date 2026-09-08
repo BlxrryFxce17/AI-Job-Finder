@@ -6,17 +6,127 @@ const User = require('../models/User');
 const Profile = require('../models/Profile');
 const requireAuth = require('../middleware/requireAuth');
 const { callAIWithRetry } = require('../utils/ai');
-const { sendEmailViaAPI, discoverEmailForJob, resolveCompanyDomain, getInboxReplies, verifyEmail } = require('../utils/email');
+const { sendEmailViaAPI, discoverEmailForJob, resolveCompanyDomain, getInboxReplies, verifyEmail, formatEmailTextToHtml, cleanDraftEmailText } = require('../utils/email');
+const { findHROnLinkedIn } = require('../utils/scraper');
 const { generateTailoredResumePDF } = require('../utils/pdfGenerator');
 
-async function getProfile(userId) {
-  let profile = await Profile.findOne({ userId });
+async function getProfile(userId, includePdf = false) {
+  let query = Profile.findOne({ userId });
+  if (!includePdf) {
+    query = query.select('-resumePdf');
+  }
+  let profile = await query;
   if (!profile) {
     profile = new Profile({ userId });
     await profile.save();
   }
   return profile;
 }
+
+// ── Intelligent JD-to-Repo Matching Engine ────────────────────────
+// Extracts tech keywords from the JD, scores each repo for relevance,
+// and returns a formatted string with the best-matched repos + deeper README context.
+const TECH_KEYWORDS = [
+  // Languages
+  'javascript','typescript','python','java','go','golang','rust','ruby','php','swift',
+  'kotlin','c++','c#','csharp','dart','scala','elixir','lua','r','zig','haskell','sql',
+  // Frontend
+  'react','vue','angular','svelte','next','nextjs','next.js','nuxt','gatsby','remix',
+  'tailwind','css','html','sass','scss','webpack','vite','expo','react native',
+  // Backend
+  'node','nodejs','node.js','express','fastapi','flask','django','spring','rails',
+  'laravel','gin','fiber','actix','nest','nestjs','graphql','rest','api','grpc',
+  // Data / DB
+  'postgres','postgresql','mysql','mongodb','mongo','redis','elasticsearch','opensearch',
+  'dynamodb','supabase','firebase','prisma','sequelize','mongoose','sqlite','cassandra',
+  // DevOps / Infra
+  'docker','kubernetes','k8s','aws','gcp','azure','terraform','ci/cd','cicd',
+  'github actions','jenkins','nginx','linux','serverless','lambda','vercel','netlify',
+  // AI / ML
+  'ai','ml','machine learning','deep learning','llm','gpt','openai','langchain',
+  'transformer','pytorch','tensorflow','nlp','computer vision','gemini','groq',
+  // Mobile
+  'mobile','ios','android','react native','flutter','expo','swiftui',
+  // General
+  'microservices','monorepo','full-stack','fullstack','backend','frontend','devops',
+  'scraper','scraping','automation','bot','cli','saas','erp','crm','e-commerce',
+  'real-time','realtime','websocket','socket','streaming','queue','kafka','rabbitmq'
+];
+
+function buildGitInsightText(profile, jd, role, company) {
+  if (!profile.githubInsights || !Array.isArray(profile.githubInsights.repos) || profile.githubInsights.repos.length === 0) {
+    return '';
+  }
+
+  const allRepos = (profile.githubInsights.repos || []).map(r => (r && r.toObject ? r.toObject() : r));
+  const jdText = `${jd || ''} ${role || ''} ${company || ''}`.toLowerCase();
+
+  // 1. Find which tech keywords appear in this JD
+  const jdKeywords = TECH_KEYWORDS.filter(kw => {
+    const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(?:^|[\\s,;/()\\-])${escaped}(?:[\\s,;/()\\-.]|$)`, 'i').test(jdText);
+  });
+
+  // 2. Score each repo against JD keywords
+  const scoredRepos = allRepos.map(r => {
+    const name = r.name || '';
+    const repoUrl = r.url || (profile.github ? `${profile.github.replace(/\/$/, '')}/${name}` : `https://github.com/${profile.githubInsights.username}/${name}`);
+    const searchable = `${name} ${r.language || ''} ${r.description || ''} ${(r.topics || []).join(' ')} ${r.readmeSnippet || ''}`.toLowerCase();
+    let relevance = 0;
+    const matchedKeywords = [];
+
+    for (const kw of jdKeywords) {
+      if (searchable.includes(kw)) {
+        relevance += 10;
+        matchedKeywords.push(kw);
+      }
+    }
+
+    // Bonus signals
+    if (r.readmeSnippet) relevance += 3;
+    if (r.stars > 0) relevance += Math.min(r.stars * 2, 10);
+    if (!r.fork) relevance += 2;
+    if (r.description && r.description.length > 20) relevance += 2;
+
+    return { ...r, name, url: repoUrl, relevance, matchedKeywords };
+  });
+
+  // 3. Sort by relevance, pick top matches
+  scoredRepos.sort((a, b) => b.relevance - a.relevance);
+
+  const highlyRelevant = scoredRepos.filter(r => r.relevance >= 10).slice(0, 5);
+  const fallback = scoredRepos.filter(r => r.relevance < 10 && r.readmeSnippet).slice(0, 2);
+  const selectedRepos = [...highlyRelevant, ...fallback].slice(0, 6);
+  const finalRepos = selectedRepos.length > 0 ? selectedRepos : scoredRepos.slice(0, 5);
+
+  // 4. Build rich context — deeper README for highly relevant repos
+  const repoLines = finalRepos.map(r => {
+    const matchInfo = r.matchedKeywords && r.matchedKeywords.length > 0
+      ? ` [MATCHES JD STACK: ${r.matchedKeywords.slice(0, 5).join(', ')}]`
+      : '';
+    const readmeDepth = r.relevance >= 10 ? 400 : 180;
+    const archSnippet = r.readmeSnippet
+      ? `\n    Architecture Notes: ${r.readmeSnippet.slice(0, readmeDepth).replace(/\n/g, ' ').trim()}${r.readmeSnippet.length > readmeDepth ? '...' : ''}`
+      : '';
+    return `- Project "${r.name}" (Repo URL: ${r.url}, Language: ${r.language || 'Multi-stack'}${r.stars > 0 ? `, ★${r.stars}` : ''}): ${r.description || 'Production software system'}${matchInfo}${archSnippet}`;
+  }).join('\n');
+
+  const matchSummary = jdKeywords.length > 0
+    ? `\nJD Tech Stack Detected: [${jdKeywords.slice(0, 12).join(', ')}] — repos below were auto-matched to this stack.`
+    : '';
+
+  console.log(`[GitHub Match] JD keywords: [${jdKeywords.join(', ')}] → matched ${highlyRelevant.length} repos (${finalRepos.map(r => r.name).join(', ')})`);
+
+  const sampleRepo = finalRepos[0];
+  const sampleCitation = sampleRepo ? `[${sampleRepo.name}](${sampleRepo.url})` : '[AI-Job-Finder](https://github.com)';
+
+  return `\n── VERIFIED GITHUB PORTFOLIO (@${profile.githubInsights.username}) ──${matchSummary}
+${repoLines}
+Verified Core Languages: ${profile.githubInsights.topLanguages?.join(', ') || 'Various'}
+
+IMPORTANT: When citing a project marked [MATCHES JD STACK], wrap the exact project name in a clean markdown link using its exact Repo URL, e.g. "${sampleCitation}". Limit to 1 or 2 repo links max in the body so it looks natural, authentic, and maintains 100% email deliverability.`;
+}
+
 
 router.post('/verify-email', requireAuth, async (req, res) => {
   const { email } = req.body;
@@ -26,12 +136,32 @@ router.post('/verify-email', requireAuth, async (req, res) => {
 });
 
 router.post('/discover-email', requireAuth, async (req, res) => {
-  const { company, jd, failedEmails = [], hrName = null, hrLinkedInUrl = null, applyLink = null } = req.body;
+  const { company, jd, failedEmails = [], hrName = null, hrLinkedInUrl = null, applyLink = null, location = 'India' } = req.body;
   if (!company) return res.status(400).json({ error: 'Company name required' });
   
+  let effectiveHrName = hrName;
+  let effectiveHrLinkedIn = hrLinkedInUrl;
+
+  // If no HR recruiter was associated with the job yet, attempt to find the local HR recruiter for this company
+  if (!effectiveHrName && company && company !== 'Direct Recruiter / Agency') {
+    try {
+      const discoveredHr = await findHROnLinkedIn(company, location || 'India');
+      if (discoveredHr && discoveredHr.name) {
+        effectiveHrName = discoveredHr.name;
+        effectiveHrLinkedIn = discoveredHr.linkedinUrl || '';
+      }
+    } catch (hrErr) {
+      console.warn('[Discover Email] Could not discover HR on LinkedIn:', hrErr.message);
+    }
+  }
+
   const domain = await resolveCompanyDomain(company, applyLink);
-  const result = await discoverEmailForJob(company, domain, jd, failedEmails, callAIWithRetry, hrName, hrLinkedInUrl, applyLink);
-  res.json(result);
+  const result = await discoverEmailForJob(company, domain, jd, failedEmails, callAIWithRetry, effectiveHrName, effectiveHrLinkedIn, applyLink);
+  res.json({
+    ...result,
+    hrName: effectiveHrName,
+    hrLinkedIn: effectiveHrLinkedIn
+  });
 });
 
 router.post('/generate-linkedin-note', requireAuth, async (req, res) => {
@@ -77,6 +207,8 @@ router.post('/generate-email', requireAuth, async (req, res) => {
     const skillsText = profile.skills && profile.skills.length > 0 ? `Core Skills: ${profile.skills.join(', ')}` : '';
     const achText = profile.achievements && profile.achievements.length > 0 ? `Key Achievements:\n- ${profile.achievements.join('\n- ')}` : '';
 
+    const gitInsightText = buildGitInsightText(profile, jd, role, company);
+
     const targetCompany = company || 'the company';
     const targetRole = role || 'the open role';
 
@@ -93,19 +225,37 @@ ${profile.resumeText || 'No resume available'}
 """
 ${skillsText}
 ${achText}
+${profile.portfolio ? `Candidate Portfolio / Website: ${profile.portfolio}` : ''}
+${profile.github ? `Candidate GitHub: ${profile.github}` : ''}
+${profile.linkedin ? `Candidate LinkedIn: ${profile.linkedin}` : ''}
+${gitInsightText}
 
-INSTRUCTIONS FOR THE EMAIL DRAFT:
-1. DEEP JD ANALYSIS: Internally identify the top 2-3 most critical technical requirements mentioned in the Job Description. DO NOT OUTPUT THIS ANALYSIS in your response.
-2. VALUE MAPPING: Explicitly map those exact JD requirements to specific, quantifiable achievements from ${profile.name}'s resume. DO NOT OUTPUT THIS MAPPING process in your response.
-3. TONE & STRUCTURE: Keep it concise, confident, and highly impressive. Do not use generic filler (e.g., "I hope this email finds you well"). Start with a strong hook, deliver the value proposition (the mapped skills), and end with a soft call to action.
-${profile.enableFlex !== false ? '4. THE FLEX: ALWAYS include this exact postscript right before the end of your text: "P.S. I\'m highly passionate about automation and software engineering—in fact, I built the AI web-scraper and autonomous agent that found this job and drafted this email!"' : ''}
-5. THE RESUME LINK: You MUST include the exact phrase "You can view my CV here." somewhere naturally towards the end of the email (before the postscript). DO NOT add any URLs, colons, or markdown links after this phrase. Just the exact phrase and a period. 
-6. NO SIGN-OFF: DO NOT include any sign-off whatsoever (no "Best regards", "Sincerely", or your name). The backend system will automatically append the signature.
-7. OUTPUT FORMAT: You MUST output the response EXACTLY in the following format so our system can parse it. If the exact company name or job role was not provided, you MUST extract them from the Job Description.
+CRITICAL RULES FOR HIGH-CONVERTING COLD OUTREACH:
+1. INTELLIGENT JD READING & SPECIAL INSTRUCTIONS:
+   - Read the Job Description thoroughly. If it contains specific application instructions, questions, required deliverables, or required tools (e.g. "include your query/results from our Finder tool", "mention your timezone", "answer why X"), you MUST directly and credibly address them in the email body or bullet points.
+   - If the Job Description is concise / short (such as a Hacker News "Who is hiring?" post, startup board snippet, or terse tech stack list like "Python/FastAPI, Go, OpenSearch/Elasticsearch, Docker"), extract the listed technologies and immediately map them to concrete engineering solutions from the candidate's projects.
+   - If the Job Description specifies an explicit email subject line (e.g. 'with subject "HN Software Engineer"'), extract it into the SUBJECT output field.
+   - When the candidate's verified GitHub projects or personal portfolio (${profile.portfolio || ''}) relate to the job's tech stack, cite the actual project name or portfolio as a clean markdown link [ProjectName](RepoURL) (max 1-2 repo/portfolio links in the body) as authentic, clickable proof of capability.
+2. ABSOLUTE UNIQUENESS & ZERO FAKE METRICS (ANTI-AI CLICHÉ):
+   - NEVER fabricate generic percentages like "reduced latency by ~20%", "improved throughput by 15%", or generic filler claims unless explicitly stated in the candidate's resume/README. Technical hiring managers instantly spot this as AI-generated slop.
+   - Ground technical claims in REAL engineering mechanisms: describe actual architectural decisions, state management, cache invalidation, retry algorithms with exponential backoff, schema design, concurrent worker pools, or streaming pipelines from the candidate's actual projects.
+   - NEVER reuse repetitive boilerplate bullet headers like "- **Backend & Search Optimization**:" or "- **System Reliability & Automation**:".
+   - DYNAMICALLY INVENT 2-3 unique, punchy category titles that mirror the exact domain of ${targetCompany} and the JD (e.g. for audio: "- **Low-Latency Audio Streaming**:", for fintech: "- **Idempotent Transaction Processing**:", for dev tools: "- **AST Parsing & CLI Ergonomics**:", for web/mobile: "- **Optimistic State & Fast Render Paths**:").
+3. NO APOLOGETIC "SKILL TRANSLATION" LANGUAGE: NEVER write phrases like "my skills in X translate to learning Y" or "I know TypeScript so I can pick up C#". Instead, frame capabilities around core engineering principles: strongly typed architectures, OOP design patterns, dependency injection, relational schema design, query optimization, and resilient API construction.
+4. CRISP BULLETED STRUCTURE (NO WALL OF TEXT):
+   - Start with a compelling, role-tailored 1-2 sentence hook referencing ${targetCompany}'s actual engineering mission or product challenge. Avoid boring boilerplate like "I am writing to express interest in the...".
+   - Provide 2-3 distinct, punchy bullet points with bold custom category titles highlighting genuine architectural substance and project proof.
+   - End with a clean 1-sentence wrap-up inviting a conversation.
+5. CONCISE & SCANNABLE: Keep the entire body between 100 and 160 words total. Recruiter scanning time is 5 seconds.
+${profile.enableFlex !== false ? '5. THE FLEX: ALWAYS include this exact postscript right before the end of your text: "P.S. I prioritize high-leverage automation—in fact, this entire outreach was discovered, tech-stack verified, and drafted by an autonomous multi-LLM pipeline I architected from scratch."' : ''}
+6. THE RESUME LINK: You MUST include the exact phrase "You can view my CV here." naturally towards the end of the email (before the postscript). DO NOT add any URLs, colons, or markdown links after this phrase. Just the exact phrase and a period.
+7. NO SIGN-OFF: DO NOT include any sign-off whatsoever (no "Best regards", "Sincerely", or your name). The backend system will automatically append the signature.
+8. OUTPUT FORMAT: You MUST output the response EXACTLY in the following format so our system can parse it. If the exact company name, role, or subject was not provided, you MUST extract or infer them from the Job Description.
 ${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructions}` : ''}
 
 COMPANY: [Extracted Company Name or "Unknown Company"]
 ROLE: [Extracted Job Title or "General Position"]
+SUBJECT: [Exact subject requested in JD if any, e.g. "HN Software Engineer", or default "Application for [Role] - ${profile.name}"]
 BODY:
 [If company is unknown/generic, start with: Dear Hiring Manager,]
 [Otherwise start with: Dear Hiring Manager at [Extracted Company Name],]
@@ -117,28 +267,43 @@ BODY:
 
     let extractedCompany = company;
     let extractedRole = role;
+    let extractedSubject = null;
     let draftText = rawText;
 
     const companyMatch = rawText.match(/COMPANY:\s*(.*)/i);
     const roleMatch = rawText.match(/ROLE:\s*(.*)/i);
+    const subjectMatch = rawText.match(/SUBJECT:\s*(.*)/i);
     const bodyMatch = rawText.match(/BODY:\s*([\s\S]*)/i);
 
     if (companyMatch) extractedCompany = companyMatch[1].trim() || extractedCompany;
     if (roleMatch) extractedRole = roleMatch[1].trim() || extractedRole;
+    if (subjectMatch) extractedSubject = subjectMatch[1].trim();
     if (bodyMatch) draftText = bodyMatch[1].trim();
 
     const emailStartMatch = draftText.match(/(?:Here is the email.*?:|Here's the email.*?:|Here is the cold email.*?:|Subject:.*?\n)\n*/i);
     if (emailStartMatch) {
       draftText = draftText.substring(emailStartMatch.index + emailStartMatch[0].length);
     }
-    draftText = draftText.trim();
+    draftText = cleanDraftEmailText(draftText.trim(), profile);
 
-    res.json({ draft: draftText, company: extractedCompany, role: extractedRole });
+    res.json({ draft: draftText, company: extractedCompany, role: extractedRole, subject: extractedSubject });
   } catch (error) {
     console.error('Error generating email:', error);
     res.status(500).json({ error: 'Failed to generate email' });
   }
 });
+
+function buildSignatureLinks(profile, trackClick) {
+  const links = [];
+  if (profile.linkedin) links.push(`🔗 <a href="${trackClick(profile.linkedin)}">LinkedIn</a>`);
+  if (profile.github) links.push(`💻 <a href="${trackClick(profile.github)}">GitHub</a>`);
+  if (profile.portfolio) links.push(`🌐 <a href="${trackClick(profile.portfolio)}">Portfolio</a>`);
+  if (links.length === 0) {
+    links.push(`🔗 <a href="${trackClick(profile.linkedin || '')}">LinkedIn</a>`);
+    links.push(`💻 <a href="${trackClick(profile.github || '')}">GitHub</a>`);
+  }
+  return links.join(' | ');
+}
 
 router.post('/send-email', requireAuth, async (req, res) => {
   const { jobId, to, subject, body } = req.body;
@@ -151,12 +316,10 @@ router.post('/send-email', requireAuth, async (req, res) => {
     const baseUrl = process.env.PUBLIC_URL;
 
     const trackClick = (url) => (baseUrl && url) ? `${baseUrl}/api/track-click/${jobId}?url=${encodeURIComponent(url)}` : (url || '');
-    const linkedInUrl = trackClick(profile.linkedin);
-    const githubUrl = trackClick(profile.github);
+    const linksHtml = buildSignatureLinks(profile, trackClick);
     const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${jobId}" width="1" height="1" style="display:none;" />` : '';
 
-    let formattedDraft = body.replace(/\n/g, '<br/>');
-    formattedDraft = formattedDraft.replace('You can view my CV here.', 'I have attached my CV to this email for your reference.');
+    const formattedDraft = formatEmailTextToHtml(body);
 
     const htmlBody = `
       <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
@@ -166,7 +329,7 @@ router.post('/send-email', requireAuth, async (req, res) => {
         <b>${profile.name}</b><br/>
         ${profile.title}<br/>
         📞 ${profile.phone}<br/>
-        🔗 <a href="${linkedInUrl}">LinkedIn</a> | 💻 <a href="${githubUrl}">GitHub</a>
+        ${linksHtml}
         <br/>
         ${trackingPixel}
       </div>
@@ -194,6 +357,7 @@ router.post('/send-email', requireAuth, async (req, res) => {
       if (to && to !== job.emailRecipient) {
         job.emailRecipient = to; // Update if changed manually
       }
+      job.deliverabilityStatus = 'deliverable';
       await job.save();
     }
 
@@ -215,6 +379,8 @@ router.post('/single-draft', requireAuth, async (req, res) => {
     const skillsText = profile.skills && profile.skills.length > 0 ? `Core Skills: ${profile.skills.join(', ')}` : '';
     const achText = profile.achievements && profile.achievements.length > 0 ? `Key Achievements:\n- ${profile.achievements.join('\n- ')}` : '';
 
+    const gitInsightText = buildGitInsightText(profile, jd, role, company);
+
     const targetCompany = company || 'the company';
     const targetRole = role || 'the open role';
 
@@ -231,19 +397,34 @@ ${profile.resumeText || 'No resume available'}
 """
 ${skillsText}
 ${achText}
+${gitInsightText}
 
-INSTRUCTIONS FOR THE EMAIL DRAFT:
-1. DEEP JD ANALYSIS: Internally identify the top 2-3 most critical technical requirements mentioned in the Job Description. DO NOT OUTPUT THIS ANALYSIS in your response.
-2. VALUE MAPPING: Explicitly map those exact JD requirements to specific, quantifiable achievements from ${profile.name}'s resume. DO NOT OUTPUT THIS MAPPING process in your response.
-3. TONE & STRUCTURE: Keep it concise, confident, and highly impressive. Start with a strong hook, deliver the value proposition, and end with a soft call to action.
-${profile.enableFlex !== false ? '4. THE FLEX: ALWAYS include this exact postscript right before the end of your text: "P.S. I\'m highly passionate about automation and software engineering—in fact, I built the AI web-scraper and autonomous agent that found this job and drafted this email!"' : ''}
-5. THE RESUME LINK: You MUST include the exact phrase "You can view my CV here." somewhere naturally towards the end of the email (before the postscript). DO NOT add any URLs, colons, or markdown links after this phrase. Just the exact phrase and a period. 
-6. NO SIGN-OFF: DO NOT include any sign-off whatsoever (no "Best regards", "Sincerely", or your name). The backend system will automatically append the signature.
-7. OUTPUT FORMAT: You MUST output the response EXACTLY in the following format so our system can parse it. If the exact company name or job role was not provided, you MUST extract them from the Job Description.
+CRITICAL RULES FOR HIGH-CONVERTING COLD OUTREACH:
+1. INTELLIGENT JD READING & SPECIAL INSTRUCTIONS:
+   - Read the Job Description thoroughly. If it contains specific application instructions, questions, required deliverables, or required tools (e.g. "include your query/results from our Finder tool", "mention your timezone", "answer why X"), you MUST directly and credibly address them in the email body or bullet points.
+   - If the Job Description is concise / short (such as a Hacker News "Who is hiring?" post, startup board snippet, or terse tech stack list like "Python/FastAPI, Go, OpenSearch/Elasticsearch, Docker"), extract the listed technologies and immediately map them to concrete engineering solutions from the candidate's projects.
+   - If the Job Description specifies an explicit email subject line (e.g. 'with subject "HN Software Engineer"'), extract it into the SUBJECT output field.
+   - When the candidate's verified GitHub projects relate to the job's tech stack, cite the actual project name as a clean markdown link [ProjectName](RepoURL) (max 1-2 repo links in the body) as authentic, clickable proof of capability.
+2. ABSOLUTE UNIQUENESS & ZERO FAKE METRICS (ANTI-AI CLICHÉ):
+   - NEVER fabricate generic percentages like "reduced latency by ~20%", "improved throughput by 15%", or generic filler claims unless explicitly stated in the candidate's resume/README. Technical hiring managers instantly spot this as AI-generated slop.
+   - Ground technical claims in REAL engineering mechanisms: describe actual architectural decisions, state management, cache invalidation, retry algorithms with exponential backoff, schema design, concurrent worker pools, or streaming pipelines from the candidate's actual projects.
+   - NEVER reuse repetitive boilerplate bullet headers like "- **Backend & Search Optimization**:" or "- **System Reliability & Automation**:".
+   - DYNAMICALLY INVENT 2-3 unique, punchy category titles that mirror the exact domain of ${targetCompany} and the JD (e.g. for audio: "- **Low-Latency Audio Streaming**:", for fintech: "- **Idempotent Transaction Processing**:", for dev tools: "- **AST Parsing & CLI Ergonomics**:", for web/mobile: "- **Optimistic State & Fast Render Paths**:").
+3. NO APOLOGETIC "SKILL TRANSLATION" LANGUAGE: NEVER write phrases like "my skills in X translate to learning Y" or "I know TypeScript so I can pick up C#". Instead, frame capabilities around core engineering principles: strongly typed architectures, OOP design patterns, dependency injection, relational schema design, query optimization, and resilient API construction.
+4. CRISP BULLETED STRUCTURE (NO WALL OF TEXT):
+   - Start with a compelling, role-tailored 1-2 sentence hook referencing ${targetCompany}'s actual engineering mission or product challenge. Avoid boring boilerplate like "I am writing to express interest in the...".
+   - Provide 2-3 distinct, punchy bullet points with bold custom category titles highlighting genuine architectural substance and project proof.
+   - End with a clean 1-sentence wrap-up inviting a conversation.
+5. CONCISE & SCANNABLE: Keep the entire body between 100 and 160 words total. Recruiter scanning time is 5 seconds.
+${profile.enableFlex !== false ? '5. THE FLEX: ALWAYS include this exact postscript right before the end of your text: "P.S. I prioritize high-leverage automation—in fact, this entire outreach was discovered, tech-stack verified, and drafted by an autonomous multi-LLM pipeline I architected from scratch."' : ''}
+6. THE RESUME LINK: You MUST include the exact phrase "You can view my CV here." naturally towards the end of the email (before the postscript). DO NOT add any URLs, colons, or markdown links after this phrase. Just the exact phrase and a period. 
+7. NO SIGN-OFF: DO NOT include any sign-off whatsoever (no "Best regards", "Sincerely", or your name). The backend system will automatically append the signature.
+8. OUTPUT FORMAT: You MUST output the response EXACTLY in the following format so our system can parse it. If the exact company name, role, or subject was not provided, you MUST extract or infer them from the Job Description.
 ${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructions}` : ''}
 
 COMPANY: [Extracted Company Name or "Unknown Company"]
 ROLE: [Extracted Job Title or "General Position"]
+SUBJECT: [Exact subject requested in JD if any, e.g. "HN Software Engineer", or default "Application for [Role] - ${profile.name}"]
 BODY:
 [If company is unknown/generic, start with: Dear Hiring Manager,]
 [Otherwise start with: Dear Hiring Manager at [Extracted Company Name],]
@@ -255,33 +436,45 @@ BODY:
 
     let extractedCompany = company || 'Unknown Company';
     let extractedRole = role || 'General Position';
+    let extractedSubject = null;
     let draftText = rawText;
 
     const companyMatch = rawText.match(/COMPANY:\s*(.*)/i);
     const roleMatch = rawText.match(/ROLE:\s*(.*)/i);
+    const subjectMatch = rawText.match(/SUBJECT:\s*(.*)/i);
     const bodyMatch = rawText.match(/BODY:\s*([\s\S]*)/i);
 
     if (companyMatch) extractedCompany = companyMatch[1].trim() || extractedCompany;
     if (roleMatch) extractedRole = roleMatch[1].trim() || extractedRole;
+    if (subjectMatch) extractedSubject = subjectMatch[1].trim();
     if (bodyMatch) draftText = bodyMatch[1].trim();
 
     const emailStartMatch = draftText.match(/(?:Here is the email.*?:|Here's the email.*?:|Here is the cold email.*?:|Subject:.*?\n)\n*/i);
     if (emailStartMatch) {
       draftText = draftText.substring(emailStartMatch.index + emailStartMatch[0].length).trim();
     }
+    draftText = cleanDraftEmailText(draftText, profile);
+
+    let finalRecipientEmail = (recipientEmail || '').trim();
+    if (!finalRecipientEmail && jd) {
+      const emailMatch = jd.match(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/);
+      if (emailMatch) {
+        finalRecipientEmail = emailMatch[0].trim();
+      }
+    }
+
+    if (!finalRecipientEmail) {
+      return res.status(400).json({ error: 'No recipient email specified or found in JD.' });
+    }
 
     const baseUrl = process.env.PUBLIC_URL;
-    let formattedDraft = draftText.replace(/\n/g, '<br/>');
-
     const jobId = Date.now().toString() + Math.random().toString().substring(2, 6);
     const trackClick = (url) => (baseUrl && url) ? `${baseUrl}/api/track-click/${jobId}?url=${encodeURIComponent(url)}` : (url || '');
     const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${jobId}" width="1" height="1" style="display:none;" />` : '';
 
+    const formattedDraft = formatEmailTextToHtml(draftText);
 
-    formattedDraft = formattedDraft.replace('You can view my CV here.', 'I have attached my CV to this email for your reference.');
-
-    const linkedInUrl = trackClick(profile.linkedin);
-    const githubUrl = trackClick(profile.github);
+    const linksHtml = buildSignatureLinks(profile, trackClick);
     const htmlBody = `
       <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
         ${formattedDraft}
@@ -290,16 +483,18 @@ BODY:
         <b>${profile.name}</b><br/>
         ${profile.title}<br/>
         📞 ${profile.phone}<br/>
-        🔗 <a href="${linkedInUrl}">LinkedIn</a> | 💻 <a href="${githubUrl}">GitHub</a>
+        ${linksHtml}
         <br/>
         ${trackingPixel}
       </div>
     `;
 
+    const emailSubject = extractedSubject || `Application for ${extractedRole} - ${profile.name}`;
+
     const mailOptions = {
       from: user.email || process.env.EMAIL_USER,
-      to: recipientEmail,
-      subject: `Application for ${extractedRole} - ${profile.name}`,
+      to: finalRecipientEmail,
+      subject: emailSubject,
       html: htmlBody,
       attachments: []
     };
@@ -326,8 +521,8 @@ BODY:
 
     res.json({ success: true, message: 'Email sent and job tracked!', job: newJob });
   } catch (error) {
-    console.error('Error in Single Mail Drafter:', error);
-    res.status(500).json({ error: 'Failed to draft and send email.' });
+    console.error('Error in Single Mail Drafter:', error.message || error);
+    res.status(500).json({ error: error.message || 'Failed to draft and send email.' });
   }
 });
 
@@ -370,16 +565,14 @@ ${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructio
     if (emailStartMatch) {
       draftText = draftText.substring(emailStartMatch.index + emailStartMatch[0].length);
     }
-    draftText = draftText.trim();
+    draftText = cleanDraftEmailText(draftText.trim(), profile);
 
     const baseUrl = process.env.PUBLIC_URL;
     const testJobId = Date.now().toString();
     const trackClick = (url) => (baseUrl && url) ? `${baseUrl}/api/track-click/${testJobId}?url=${encodeURIComponent(url)}` : (url || '');
     const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${testJobId}" width="1" height="1" style="display:none;" />` : '';
 
-    let formattedDraft = draftText.replace(/\n/g, '<br/>');
-    formattedDraft = formattedDraft.replace('You can view my CV here.', 'I have attached my CV to this email for your reference.');
-
+    const linksHtml = buildSignatureLinks(profile, trackClick);
     const htmlBody = `
       <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
         ${formattedDraft}
@@ -388,7 +581,7 @@ ${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructio
         <b>${profile.name}</b><br/>
         ${profile.title}<br/>
         📞 ${profile.phone}<br/>
-        🔗 <a href="${trackClick(profile.linkedin)}">LinkedIn</a> | 💻 <a href="${trackClick(profile.github)}">GitHub</a>
+        ${linksHtml}
         <br/>
         ${trackingPixel}
       </div>
@@ -561,7 +754,7 @@ router.get('/inbox', requireAuth, async (req, res) => {
     }
 
     // Get all jobs sorted by most recently sent / created FIRST
-    const jobs = await Job.find({ userId: req.user.id }).sort({ sentAt: -1, createdAt: -1, _id: -1 });
+    const jobs = await Job.find({ userId: req.user.id, isDeleted: { $ne: true } }).sort({ sentAt: -1, createdAt: -1, _id: -1 });
 
     const hrEmails = [...new Set(jobs.map(j => j.emailRecipient || j.recruiterEmail).filter(Boolean))];
     const companyDomains = [...new Set(jobs.map(j => {
@@ -732,6 +925,10 @@ router.post('/inbox/draft-reply', requireAuth, async (req, res) => {
 Candidate Title: ${profile.title || 'Software Developer'}
 Candidate Skills: ${(profile.skills || []).join(', ') || 'React, Node.js, Python, MongoDB'}
 Candidate Phone: ${profile.phone || ''}
+Candidate Location: ${profile.location || 'India'}
+Candidate Portfolio: ${profile.portfolio || ''}
+Candidate GitHub: ${profile.github || ''}
+Candidate LinkedIn: ${profile.linkedin || ''}
 
 You just received the following email from a hiring manager or recruiter:
 From: ${from}
@@ -743,6 +940,13 @@ ${body}
 
 Goal / Objective:
 ${intentGuidance}
+
+CRITICAL FORMATTING & WRITING INSTRUCTIONS:
+- Write strictly in clean, human, professional PLAIN TEXT for an email body.
+- NEVER USE MARKDOWN BOLDING (NEVER use ** or __). Never output asterisks like **Availability:** or **Location:**.
+- If listing points, use clean standard bullet symbols (• ) or dashes (- ). NEVER use * or ** for lists.
+- If the recruiter asks for work samples, live demos, portfolio, personal website, or code links, naturally include the candidate's portfolio (${profile.portfolio || ''}) or GitHub (${profile.github || ''}).
+- NEVER use placeholder brackets like [Your City, Country], [Link to Portfolio], [Your Name], etc. Use the candidate's real details provided above or omit placeholder text entirely.
 
 Draft 3 distinct options (Option 1: Warm & Enthusiastic, Option 2: Direct & Professional, Option 3: Confident & Concise).
 Separate each draft using the exact delimiter "===DRAFT===" on its own line.
@@ -767,7 +971,7 @@ Do not include any conversational text, explanations, or markdown code fences. R
     if (draftOptions.length === 0 && rawText.length > 20) {
       draftOptions = [rawText];
     }
-    draftOptions = draftOptions.slice(0, 3);
+    draftOptions = draftOptions.slice(0, 3).map(draft => cleanDraftEmailText(draft, profile));
 
     res.json({ drafts: draftOptions });
   } catch (err) {
@@ -782,7 +986,7 @@ router.post('/inbox/send-reply', requireAuth, async (req, res) => {
     const user = await User.findById(req.user.id);
     const profile = await getProfile(req.user.id);
 
-    const formattedDraft = body.replace(/\n/g, '<br/>');
+    const formattedDraft = formatEmailTextToHtml(body);
     
     const htmlBody = `
       <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
