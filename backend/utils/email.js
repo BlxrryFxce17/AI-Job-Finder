@@ -14,6 +14,18 @@ const {
 
 // In-Memory Domain Resolution Cache (1-hour TTL)
 const domainResolutionCache = new Map(); // companyKey -> { timestamp, domain }
+let serperCreditsExhaustedUntil = 0;
+
+/**
+ * Checks if a domain belongs to a job aggregator, job board, ATS platform, or social network.
+ * These domains must NEVER be treated as the employer's official email domain.
+ */
+function isJobBoardOrAtsDomain(host) {
+  if (!host || typeof host !== 'string') return false;
+  const clean = host.toLowerCase().trim().replace(/^www\./, '');
+  const jobBoardPattern = /\b(adzuna|indeed|naukri|linkedin|glassdoor|internshala|foundit|monster|shine|timesjobs|hirist|instahyre|cuvette|unstop|wellfound|angel\.co|ziprecruiter|simplyhired|careerbuilder|dice|apify|google|facebook|twitter|instagram|youtube|wikipedia|github|medium|zaubacorp|tofler|ambitionbox|zoominfo|greenhouse|lever|workday|myworkdayjobs|smartrecruiters|ashbyhq|breezy|recruitee|jobvite|bamboohr|workable)\b/i;
+  return jobBoardPattern.test(clean);
+}
 
 async function resolveCompanyDomain(company, applyLink = null) {
   if (!company || typeof company !== 'string') return null;
@@ -24,11 +36,12 @@ async function resolveCompanyDomain(company, applyLink = null) {
   // Check cache first
   const cacheKey = `${lowerComp}|${applyLink || ''}`;
   const cached = domainResolutionCache.get(cacheKey);
-  if (cached && (Date.now() - cached.timestamp < 60 * 60 * 1000)) {
+  if (cached && (Date.now() - cached.timestamp < 60 * 60 * 1000) && !isJobBoardOrAtsDomain(cached.domain)) {
     return cached.domain;
   }
 
   const finalizeDomain = (dom) => {
+    if (dom && isJobBoardOrAtsDomain(dom)) dom = null;
     if (domainResolutionCache.size > 2000) domainResolutionCache.clear();
     domainResolutionCache.set(cacheKey, { timestamp: Date.now(), domain: dom });
     return dom;
@@ -48,17 +61,18 @@ async function resolveCompanyDomain(company, applyLink = null) {
   const urlMatch = rawComp.match(/(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+)/i);
   if (urlMatch) {
     const host = urlMatch[1].toLowerCase();
-    const mx = await checkMxRecords(host);
-    if (mx.valid) return finalizeDomain(host);
+    if (!isJobBoardOrAtsDomain(host)) {
+      const mx = await checkMxRecords(host);
+      if (mx.valid) return finalizeDomain(host);
+    }
   }
 
-  // 2. Direct ATS / careers website from applyLink
+  // 2. Direct company website from applyLink (strictly filter out job boards & ATS platforms)
   if (applyLink) {
     try {
       const parsed = new URL(applyLink);
       const host = parsed.hostname.replace(/^www\./, '').toLowerCase();
-      const genericBoards = ['linkedin.com', 'indeed.com', 'naukri.com', 'adzuna.com', 'glassdoor.com', 'internshala.com', 'google.com', 'apify.com', 'greenhouse.io', 'lever.co', 'workday.com', 'myworkdayjobs.com', 'smartrecruiters.com'];
-      if (!genericBoards.some(gb => host.includes(gb))) {
+      if (!isJobBoardOrAtsDomain(host)) {
         const mx = await checkMxRecords(host);
         if (mx.valid) return finalizeDomain(host);
       }
@@ -77,39 +91,48 @@ async function resolveCompanyDomain(company, applyLink = null) {
     cleanName = rawComp.replace(/[^a-zA-Z0-9]/g, '');
   }
 
-  // 3. Clearbit Autocomplete
+  // 3. Clearbit Autocomplete (Free company domain lookup)
   try {
-    const clearbitRes = await axios.get(`https://autocomplete.clearbit.com/v1/companies/suggest?query=${encodeURIComponent(cleanName || rawComp)}`, { timeout: 3000 });
-    if (clearbitRes.data && clearbitRes.data.length > 0 && clearbitRes.data[0].domain) {
-      const cbDomain = clearbitRes.data[0].domain.toLowerCase();
-      const mx = await checkMxRecords(cbDomain);
-      if (mx.valid) return finalizeDomain(cbDomain);
+    const clearbitRes = await axios.get(`https://autocomplete.clearbit.com/v1/companies/suggest?query=${encodeURIComponent(cleanName || rawComp)}`, { timeout: 3500 });
+    if (clearbitRes.data && clearbitRes.data.length > 0) {
+      for (const entry of clearbitRes.data) {
+        if (entry && entry.domain) {
+          const cbDomain = entry.domain.toLowerCase().trim();
+          if (!isJobBoardOrAtsDomain(cbDomain)) {
+            const mx = await checkMxRecords(cbDomain);
+            if (mx.valid) return finalizeDomain(cbDomain);
+          }
+        }
+      }
     }
   } catch (err) { }
 
   // 4. Serper Google Search for Company Official Website (High precision)
-  if (process.env.SERPER_API_KEY) {
+  if (process.env.SERPER_API_KEY && Date.now() > serperCreditsExhaustedUntil) {
     try {
       const serperRes = await axios.post('https://google.serper.dev/search', {
         q: `"${cleanName}" official website`,
         num: 4
       }, {
         headers: { 'X-API-KEY': process.env.SERPER_API_KEY, 'Content-Type': 'application/json' },
-        timeout: 4000
+        timeout: 3000
       });
       const organic = serperRes.data?.organic || [];
-      const nonCompany = ['linkedin.', 'facebook.', 'glassdoor.', 'indeed.', 'zaubacorp.', 'tofler.', 'ambitionbox.', 'instahyre.', 'wikipedia.', 'naukri.', 'youtube.', 'twitter.', 'instagram.', 'zoominfo.', 'github.com', 'medium.com'];
       for (const o of organic) {
         try {
           const u = new URL(o.link);
           const host = u.hostname.replace(/^www\./, '').toLowerCase();
-          if (!nonCompany.some(nc => host.includes(nc))) {
+          if (!isJobBoardOrAtsDomain(host)) {
             const mx = await checkMxRecords(host);
             if (mx.valid) return finalizeDomain(host);
           }
         } catch(e) {}
       }
-    } catch(err) { }
+    } catch(err) {
+      if (err.response?.status === 400 || err.response?.data?.message?.includes('credit')) {
+        serperCreditsExhaustedUntil = Date.now() + 30 * 60 * 1000;
+      }
+    }
   }
 
   // 5. Candidate domain generation with legal suffix stripping - strictly require MX validation
@@ -126,8 +149,10 @@ async function resolveCompanyDomain(company, applyLink = null) {
   ].filter(Boolean);
 
   for (const dom of candidates) {
-    const mx = await checkMxRecords(dom);
-    if (mx.valid) return finalizeDomain(dom);
+    if (!isJobBoardOrAtsDomain(dom)) {
+      const mx = await checkMxRecords(dom);
+      if (mx.valid) return finalizeDomain(dom);
+    }
   }
 
   // NEVER return an unverified synthetic domain to prevent bounces
@@ -597,7 +622,7 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
   let verificationInfo = null;
 
   let cleanDomain = (domain || '').toLowerCase().trim();
-  if (!cleanDomain || cleanDomain.includes('unknown') || cleanDomain.startsWith('http') || cleanDomain.includes('recruiter') || cleanDomain.includes('agency')) {
+  if (!cleanDomain || cleanDomain.includes('unknown') || isJobBoardOrAtsDomain(cleanDomain) || cleanDomain.startsWith('http') || cleanDomain.includes('recruiter') || cleanDomain.includes('agency')) {
     cleanDomain = await resolveCompanyDomain(company, applyLink);
   }
 
@@ -609,7 +634,7 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
   // Dynamic Learning Engine: Check learned company memory first
   const learnedMemory = await getLearnedMemory(company);
   if (learnedMemory) {
-    if (learnedMemory.verifiedDomain && (!cleanDomain || cleanDomain.includes('unknown'))) {
+    if (learnedMemory.verifiedDomain && (!cleanDomain || cleanDomain.includes('unknown') || isJobBoardOrAtsDomain(cleanDomain))) {
       cleanDomain = learnedMemory.verifiedDomain;
     }
     // If domain is already known dead, abort early
@@ -636,6 +661,8 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
       return { email: null, source: 'Invalid MX domain', verification: null };
     }
   }
+
+  const isGenericOrgName = !hrName || /\b(talent|acquisition|recruitment|recruiter|hiring|team|lead|manager|human resources|resources|staffing|agency)\b/i.test(hrName) || hrName.toLowerCase().includes(company.toLowerCase());
 
   // Helper to test and accept candidate email
   async function testCandidate(candidate, sourceName, isExplicitJd = false, allowDomainMismatch = false) {
@@ -671,11 +698,11 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
       }
     }
 
-    const result = await verifyEmail(candidate, { isFromJd: isExplicitJd, hrName });
+    const result = await verifyEmail(candidate, { isFromJd: isExplicitJd, hrName: isGenericOrgName ? null : hrName });
     // Require strict deliverability confirmation to prevent bounces:
     // Explicit JD emails allowed if isValid === true and deliverabilityScore >= 60.
-    // Inferred/scraped emails require deliverabilityScore >= 70 and isValid === true.
-    const threshold = isExplicitJd ? 60 : 70;
+    // Inferred/scraped emails require deliverabilityScore >= 65 and isValid === true.
+    const threshold = isExplicitJd ? 60 : 65;
     if (result.isValid && result.deliverabilityScore >= threshold && result.status !== 'undeliverable') {
       discoveredEmail = candidate.trim();
       source = `${sourceName} [Verified ${result.deliverabilityScore}%]`;
@@ -721,7 +748,7 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
   }
 
   // Tier 1.2: Advanced Deep Web Search (OSINT & LinkedIn Contact Info with STRICT Domain Matching)
-  if (!discoveredEmail && hrName && process.env.SERPER_API_KEY && domainMx.valid) {
+  if (!discoveredEmail && hrName && !isGenericOrgName && process.env.SERPER_API_KEY && domainMx.valid && Date.now() > serperCreditsExhaustedUntil) {
     try {
       const linkedInSlug = hrLinkedInUrl ? hrLinkedInUrl.split('/in/')[1]?.split('/')[0]?.split('?')[0] : '';
       const queries = [
@@ -734,8 +761,14 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
       
       const searchPromises = queries.map(q => 
         axios.post('https://google.serper.dev/search', { q, num: 3 }, {
-          headers: { 'X-API-KEY': process.env.SERPER_API_KEY, 'Content-Type': 'application/json' }
-        }).catch(() => null)
+          headers: { 'X-API-KEY': process.env.SERPER_API_KEY, 'Content-Type': 'application/json' },
+          timeout: 3000
+        }).catch((err) => {
+          if (err.response?.status === 400 || err.response?.data?.message?.includes('credit')) {
+            serperCreditsExhaustedUntil = Date.now() + 30 * 60 * 1000;
+          }
+          return null;
+        })
       );
       
       const results = await Promise.all(searchPromises);
@@ -778,8 +811,8 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
     } catch (err) { }
   }
 
-  // Tier 1.5: HR Name Permutations (Corporate Email Patterns - Hunter/Disify Verified Only)
-  if (!discoveredEmail && hrName && domainMx.valid) {
+  // Tier 1.5: HR Name Permutations (Corporate Email Patterns for genuine personal recruiter names)
+  if (!discoveredEmail && hrName && !isGenericOrgName && domainMx.valid) {
     const parts = hrName.toLowerCase().replace(/[^a-z0-9 ]/g, '').split(' ').filter(Boolean);
     if (parts.length >= 2) {
       const first = parts[0];
@@ -803,12 +836,13 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
   }
 
   // Tier 3: Google Dorking for Company Recruiter on Company Domain
-  if (!discoveredEmail && process.env.SERPER_API_KEY && domainMx.valid) {
+  if (!discoveredEmail && process.env.SERPER_API_KEY && domainMx.valid && Date.now() > serperCreditsExhaustedUntil) {
     try {
       const sRes = await axios.post('https://google.serper.dev/search', {
         q: `"${company}" ("recruiter" OR "talent acquisition" OR "hiring") email "@${cleanDomain}"`
       }, {
-        headers: { 'X-API-KEY': process.env.SERPER_API_KEY, 'Content-Type': 'application/json' }
+        headers: { 'X-API-KEY': process.env.SERPER_API_KEY, 'Content-Type': 'application/json' },
+        timeout: 3000
       });
       const snippets = sRes.data?.organic?.map(r => r.snippet).join(' ') || '';
       const emailRegex = /[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}/g;
@@ -821,16 +855,21 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
           }
         }
       }
-    } catch (err) { }
+    } catch (err) {
+      if (err.response?.status === 400 || err.response?.data?.message?.includes('credit')) {
+        serperCreditsExhaustedUntil = Date.now() + 30 * 60 * 1000;
+      }
+    }
   }
 
-  // Tier 4: Company Recruitment Inboxes (ONLY accepted if individual mailbox existence is strictly verified)
-  // NEVER blindly assume careers@ or hr@ exists solely based on domain MX presence!
+  // Tier 4: Company Recruitment Inboxes (Standard corporate talent & recruitment inboxes)
   const isInvalidDomain = /\b(sourcingstrategist|technicalrecruiter|juniordeveloper|softwaredeveloper|softwareengineer|talentacquisition|directrecruiter|recruiteragency)\b/i.test(cleanDomain || '');
   if (!discoveredEmail && domainMx.valid && cleanDomain && !isInvalidDomain) {
     const candidateInboxes = [
       `careers@${cleanDomain}`,
       `jobs@${cleanDomain}`,
+      `talent@${cleanDomain}`,
+      `recruitment@${cleanDomain}`,
       `hr@${cleanDomain}`
     ];
     for (const candidate of candidateInboxes) {

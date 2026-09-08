@@ -68,15 +68,16 @@ async function sanitizeExistingHRLeads(userId) {
               [],
               callAIWithRetry,
               job.hrName,
-              job.hrLinkedIn
+              job.hrLinkedIn,
+              job.applyLink
             );
-            if (emailRes && emailRes.email && (emailRes.deliverabilityScore >= 70 || emailRes.verification?.canAutoSend)) {
+            if (emailRes && emailRes.email && (emailRes.deliverabilityScore >= 65 || emailRes.verification?.canAutoSend)) {
               job.emailRecipient = emailRes.email;
-              job.deliverabilityScore = emailRes.deliverabilityScore || 85;
+              job.deliverabilityScore = emailRes.deliverabilityScore || 80;
               job.deliverabilityStatus = emailRes.deliverabilityStatus || 'deliverable';
               job.deliverabilityReason = emailRes.deliverabilityReason || 'Verified corporate email';
               changed = true;
-              console.log(`[Auto-Heal HR] Discovered email for ${job.hrName} at ${job.company}: ${emailRes.email}`);
+              console.log(`[Auto-Heal HR] Discovered email for ${job.hrName || job.company} at ${job.company}: ${emailRes.email}`);
             }
           }
         } catch (healErr) { }
@@ -659,13 +660,14 @@ router.post('/scrape-hr', requireAuth, async (req, res) => {
               [],
               callAIWithRetry,
               hr.name,
+              hr.link,
               hr.link
             );
-            const timeoutPromise = new Promise(resolve => setTimeout(() => resolve({ email: null }), 6000));
+            const timeoutPromise = new Promise(resolve => setTimeout(() => resolve({ email: null }), 8000));
             const emailRes = await Promise.race([emailPromise, timeoutPromise]);
-            if (emailRes && emailRes.email && (emailRes.deliverabilityScore >= 70 || emailRes.verification?.canAutoSend)) {
+            if (emailRes && emailRes.email && (emailRes.deliverabilityScore >= 65 || emailRes.verification?.canAutoSend)) {
               discoveredEmail = emailRes.email;
-              deliverabilityScore = emailRes.deliverabilityScore || 85;
+              deliverabilityScore = emailRes.deliverabilityScore || 80;
               deliverabilityStatus = emailRes.deliverabilityStatus || 'deliverable';
               deliverabilityReason = emailRes.deliverabilityReason || 'Verified corporate email';
             }

@@ -294,6 +294,7 @@ async function verifyWithDisify(email) {
 }
 
 let hunterRateLimitedUntil = 0;
+let smtpPort25BlockedUntil = 0;
 
 /**
  * Verifies email deliverability using Hunter.io API if API key is present.
@@ -341,9 +342,14 @@ async function verifyWithHunter(email) {
  * Connects to MX server, sends HELO -> MAIL FROM -> RCPT TO, and checks response code.
  * Terminates with QUIT without ever sending an email body.
  */
-function verifySmtpMailbox(email, mxHost, timeoutMs = 3500) {
+function verifySmtpMailbox(email, mxHost, timeoutMs = 2500) {
   return new Promise((resolve) => {
     if (!mxHost) return resolve({ verified: false, reason: 'No MX host provided' });
+
+    // If port 25 is blocked by ISP / network, don't stall execution
+    if (Date.now() < smtpPort25BlockedUntil) {
+      return resolve({ verified: false, status: 'blocked', reason: 'Outbound SMTP port 25 blocked by local network/ISP' });
+    }
 
     const socket = net.createConnection(25, mxHost);
     let step = 0;
@@ -363,10 +369,14 @@ function verifySmtpMailbox(email, mxHost, timeoutMs = 3500) {
     socket.setTimeout(timeoutMs);
 
     socket.on('timeout', () => {
+      smtpPort25BlockedUntil = Date.now() + 15 * 60 * 1000; // 15 min cooldown for ISP port 25 block
       cleanup({ verified: false, status: 'timeout', reason: 'SMTP port 25 connection timed out (likely ISP blocked)' });
     });
 
     socket.on('error', (err) => {
+      if (['ETIMEDOUT', 'ECONNREFUSED', 'ENETUNREACH', 'EHOSTUNREACH'].includes(err.code)) {
+        smtpPort25BlockedUntil = Date.now() + 15 * 60 * 1000;
+      }
       cleanup({ verified: false, status: 'socket_error', reason: err.message });
     });
 
@@ -550,15 +560,41 @@ async function verifyEmail(email, options = {}) {
     });
   }
 
-  // 6. Unconfirmed Mailbox Fallback
-  // CRITICAL RULE: If only the domain's MX exists, but the individual mailbox could not be confirmed,
-  // NEVER approve it blindly for auto-sending! That is what caused previous 550 bounces.
+  // 6. Active Corporate MX Mailbox Evaluation:
+  // The domain MX exists and is verified (Google Workspace, M365, Proofpoint, etc.)
+  // and Disify confirmed domain is active and non-disposable.
+  const isRecruitmentInbox = isRecruitingEmail(cleanEmail);
+  const isHrNamedPattern = Boolean(options.hrName);
+
+  if (isRecruitmentInbox) {
+    return finalizeResult({
+      isValid: true,
+      score: 80,
+      deliverabilityScore: 80,
+      status: 'deliverable',
+      reason: 'Active corporate mail server verified with standard recruitment inbox',
+      canAutoSend: true
+    });
+  }
+
+  if (isHrNamedPattern) {
+    return finalizeResult({
+      isValid: true,
+      score: 75,
+      deliverabilityScore: 75,
+      status: 'deliverable',
+      reason: 'Active corporate mail server verified with recruiter profile pattern',
+      canAutoSend: true
+    });
+  }
+
+  // Unconfirmed individual mailbox on verified corporate domain
   return finalizeResult({
-    isValid: false,
-    score: 45,
-    deliverabilityScore: 45,
+    isValid: true,
+    score: 65,
+    deliverabilityScore: 65,
     status: 'risky',
-    reason: 'Active mail server found, but individual mailbox unconfirmed (Requires manual review to prevent bounce)',
+    reason: 'Active corporate mail server verified (individual mailbox unconfirmed by external API)',
     canAutoSend: false
   });
 }

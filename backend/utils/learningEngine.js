@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const CompanyMemory = require('../models/CompanyMemory');
 
 /**
@@ -98,6 +99,7 @@ function generateEmailWithPattern(hrName, domain, pattern) {
  * Memory query: Retrieves learned company knowledge.
  */
 async function getLearnedMemory(company) {
+  if (mongoose.connection.readyState !== 1) return null;
   const key = normalizeCompany(company);
   if (!key) return null;
   try {
@@ -111,6 +113,7 @@ async function getLearnedMemory(company) {
  * Learns from a verified discovery or send.
  */
 async function learnFromVerifiedEmail(company, domain, email, hrName = null) {
+  if (mongoose.connection.readyState !== 1) return;
   const key = normalizeCompany(company);
   if (!key || !domain || !email) return;
 
