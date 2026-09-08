@@ -118,6 +118,104 @@ router.post('/sanitize-leads', requireAuth, async (req, res) => {
   }
 });
 
+router.post('/check-all-emails', requireAuth, async (req, res) => {
+  const { scope = 'all', jobIds } = req.body;
+  try {
+    let queryFilter = { userId: req.user.id, isDeleted: { $ne: true } };
+
+    if (Array.isArray(jobIds) && jobIds.length > 0) {
+      queryFilter.$or = [
+        { id: { $in: jobIds } },
+        { _id: { $in: jobIds.filter(id => mongoose.Types.ObjectId.isValid(id)) } }
+      ];
+    } else {
+      if (scope === 'jobs') {
+        queryFilter.status = { $in: ['Found', 'Drafting'] };
+      } else if (scope === 'hr') {
+        queryFilter.status = 'HR_Found';
+      } else {
+        queryFilter.status = { $in: ['Found', 'Drafting', 'HR_Found'] };
+      }
+      queryFilter.$or = [
+        { emailRecipient: { $in: ['', null] } },
+        { deliverabilityScore: { $lt: 60 } },
+        { deliverabilityStatus: { $in: ['undeliverable', 'unverified', 'unknown'] } }
+      ];
+    }
+
+    const candidateJobs = await Job.find(queryFilter).limit(35);
+    let checkedCount = 0;
+    let foundCount = 0;
+    const updatedJobs = [];
+
+    // Process jobs in parallel batches of 5
+    const batchSize = 5;
+    for (let i = 0; i < candidateJobs.length; i += batchSize) {
+      const slice = candidateJobs.slice(i, i + batchSize);
+      await Promise.all(slice.map(async (job) => {
+        if (!job.company || job.company === 'Direct Recruiter / Agency' || isInvalidCompany(job.company)) {
+          return;
+        }
+        checkedCount++;
+        try {
+          const domain = await resolveCompanyDomain(job.company, job.applyLink);
+          if (domain && domain !== 'unknown.com') {
+            const emailRes = await discoverEmailForJob(
+              job.company,
+              domain,
+              job.jd || '',
+              job.failedEmails || [],
+              callAIWithRetry,
+              job.hrName || null,
+              job.hrLinkedIn || null,
+              job.applyLink || null
+            );
+
+            if (emailRes && emailRes.email && (emailRes.deliverabilityScore >= 65 || emailRes.verification?.canAutoSend)) {
+              job.emailRecipient = emailRes.email;
+              job.deliverabilityScore = emailRes.deliverabilityScore || 80;
+              job.deliverabilityStatus = emailRes.deliverabilityStatus || 'deliverable';
+              job.deliverabilityReason = emailRes.deliverabilityReason || 'Verified corporate email';
+              await job.save();
+              foundCount++;
+              updatedJobs.push({
+                id: job.id || job._id.toString(),
+                emailRecipient: job.emailRecipient,
+                deliverabilityScore: job.deliverabilityScore,
+                deliverabilityStatus: job.deliverabilityStatus,
+                deliverabilityReason: job.deliverabilityReason
+              });
+            } else if (!job.emailRecipient) {
+              job.deliverabilityStatus = 'undeliverable';
+              job.deliverabilityReason = emailRes?.deliverabilityReason || 'No verified recipient mailbox found';
+              await job.save();
+              updatedJobs.push({
+                id: job.id || job._id.toString(),
+                emailRecipient: '',
+                deliverabilityScore: 0,
+                deliverabilityStatus: job.deliverabilityStatus,
+                deliverabilityReason: job.deliverabilityReason
+              });
+            }
+          }
+        } catch (jobErr) {
+          console.warn(`[Check-All-Emails] Error checking ${job.company}:`, jobErr.message);
+        }
+      }));
+    }
+
+    res.json({
+      success: true,
+      checked: checkedCount,
+      found: foundCount,
+      updatedJobs
+    });
+  } catch (err) {
+    console.error('Error checking all emails:', err);
+    res.status(500).json({ error: 'Failed to check emails' });
+  }
+});
+
 router.post('/', requireAuth, async (req, res) => {
   try {
     const job = new Job({ ...req.body, id: Date.now().toString(), userId: req.user.id });

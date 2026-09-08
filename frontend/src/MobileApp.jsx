@@ -321,6 +321,7 @@ export default function MobileApp(props) {
   const [inboxSearch, setInboxSearch] = React.useState('');
   const [draftingIntent, setDraftingIntent] = React.useState(null);
   const [updatingJobStatus, setUpdatingJobStatus] = React.useState(false);
+  const [checkingAllScope, setCheckingAllScope] = React.useState(null);
 
   // HR Dashboard State for Mobile
   const [hrFilter, setHrFilter] = React.useState('all');
@@ -671,6 +672,52 @@ export default function MobileApp(props) {
       setEditingEmailId(null);
     } catch (err) {
       notify('Failed to update email', 'error');
+    }
+  };
+
+  const handleCheckAllEmails = async (scope = 'all') => {
+    if (checkingAllScope) return;
+    setCheckingAllScope(scope);
+    const scopeLabel = scope === 'hr' ? 'HR leads' : scope === 'jobs' ? 'jobs' : 'all jobs and HR leads';
+    notify(`🔍 Scanning & verifying mailboxes for ${scopeLabel}...`, 'info');
+    try {
+      const res = await props.apiFetch(`${API_BASE}/api/jobs/check-all-emails`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scope })
+      });
+      const data = await res.json();
+      if (data && data.success) {
+        if (data.updatedJobs && data.updatedJobs.length > 0) {
+          const updateMap = new Map(data.updatedJobs.map(uj => [uj.id, uj]));
+          setJobs(prev => prev.map(j => {
+            const uj = updateMap.get(j.id) || updateMap.get(j._id);
+            if (uj) {
+              return {
+                ...j,
+                emailRecipient: uj.emailRecipient,
+                deliverabilityScore: uj.deliverabilityScore,
+                deliverabilityStatus: uj.deliverabilityStatus,
+                deliverabilityReason: uj.deliverabilityReason
+              };
+            }
+            return j;
+          }));
+        }
+        if (data.found > 0) {
+          notify(`🎉 Checked ${data.checked} entries. Discovered & verified ${data.found} deliverable email addresses!`, 'success');
+        } else if (data.checked > 0) {
+          notify(`ℹ️ Checked ${data.checked} entries. All corporate inboxes and deliverability checks are up to date.`, 'info');
+        } else {
+          notify(`✨ All current ${scopeLabel} already have verified email addresses!`, 'info');
+        }
+      } else {
+        notify(data?.error || 'Email check completed', 'info');
+      }
+    } catch (err) {
+      notify('Failed to check emails: ' + (err.message || 'Network error'), 'error');
+    } finally {
+      setCheckingAllScope(null);
     }
   };
 
@@ -2069,20 +2116,42 @@ export default function MobileApp(props) {
               </div>
             )}
             {activeJobs.length > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '14px', padding: '0 4px' }}>
-                <button
-                  className="btn btn-ghost"
-                  style={{ padding: '6px 12px', fontSize: '12px', background: 'var(--surface-3)', borderRadius: '6px', color: 'var(--text-1)' }}
-                  onClick={() => {
-                    if (selectedJobs.length === activeJobs.length) {
-                      setSelectedJobs([]);
-                    } else {
-                      setSelectedJobs(activeJobs.map(j => j.id));
-                    }
-                  }}
-                >
-                  {selectedJobs.length === activeJobs.length ? 'Deselect All' : 'Select All'}
-                </button>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '14px', padding: '0 4px', gap: '8px' }}>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <button
+                    className="btn btn-ghost"
+                    style={{ padding: '6px 12px', fontSize: '12px', background: 'var(--surface-3)', borderRadius: '6px', color: 'var(--text-1)' }}
+                    onClick={() => {
+                      if (selectedJobs.length === activeJobs.length) {
+                        setSelectedJobs([]);
+                      } else {
+                        setSelectedJobs(activeJobs.map(j => j.id));
+                      }
+                    }}
+                  >
+                    {selectedJobs.length === activeJobs.length ? 'Deselect All' : 'Select All'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleCheckAllEmails('all')}
+                    disabled={!!checkingAllScope}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      padding: '6px 10px',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      borderRadius: '6px',
+                      background: checkingAllScope ? 'rgba(56, 189, 248, 0.25)' : 'rgba(56, 189, 248, 0.12)',
+                      border: '1px solid rgba(56, 189, 248, 0.4)',
+                      color: '#38bdf8',
+                      cursor: checkingAllScope ? 'wait' : 'pointer'
+                    }}
+                  >
+                    {checkingAllScope ? '⚡ Scanning...' : '⚡ Check All'}
+                  </button>
+                </div>
                 <span style={{ fontSize: '12px', color: 'var(--text-3)', fontWeight: '500' }}>{activeJobs.length} jobs found</span>
               </div>
             )}
@@ -2686,7 +2755,7 @@ export default function MobileApp(props) {
               const withEmailCount = allHrJobs.filter(j => !!j.emailRecipient).length;
               const noEmailCount = allHrJobs.filter(j => !j.emailRecipient).length;
               return (
-                <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', padding: '0 4px' }}>
+                <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', padding: '0 4px', alignItems: 'center' }}>
                   {[
                     { id: 'all', label: `All (${allHrJobs.length})` },
                     { id: 'with_email', label: `✉️ With Email (${withEmailCount})` },
@@ -2711,6 +2780,27 @@ export default function MobileApp(props) {
                       {f.label}
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    onClick={() => handleCheckAllEmails('hr')}
+                    disabled={!!checkingAllScope}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      padding: '5px 10px',
+                      borderRadius: '12px',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      border: '1px solid rgba(56, 189, 248, 0.4)',
+                      background: checkingAllScope === 'hr' ? 'rgba(56, 189, 248, 0.25)' : 'rgba(56, 189, 248, 0.12)',
+                      color: '#38bdf8',
+                      cursor: checkingAllScope ? 'wait' : 'pointer',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    {checkingAllScope === 'hr' ? 'Scanning...' : '⚡ Check HR Mails'}
+                  </button>
                 </div>
               );
             })()}

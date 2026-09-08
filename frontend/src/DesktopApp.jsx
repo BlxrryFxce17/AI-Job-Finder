@@ -478,6 +478,7 @@ export default function DesktopApp(props) {
 
   const [showLocationPicker, setShowLocationPicker] = React.useState(false);
   const [newCustomLoc, setNewCustomLoc] = React.useState('');
+  const [checkingAllScope, setCheckingAllScope] = React.useState(null); // 'jobs' | 'hr' | 'all' | null
   const locationPickerRef = React.useRef(null);
 
   React.useEffect(() => {
@@ -794,6 +795,52 @@ export default function DesktopApp(props) {
       notify('Email discovery scan failed', 'error');
     } finally {
       setDiscoveringHrId(null);
+    }
+  };
+
+  const handleCheckAllEmails = async (scope = 'all') => {
+    if (checkingAllScope) return;
+    setCheckingAllScope(scope);
+    const scopeLabel = scope === 'hr' ? 'HR leads' : scope === 'jobs' ? 'jobs' : 'all jobs and HR leads';
+    notify(`🔍 Scanning & verifying mailboxes for ${scopeLabel}...`, 'info');
+    try {
+      const res = await props.apiFetch(`${API_BASE}/api/jobs/check-all-emails`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scope })
+      });
+      const data = await res.json();
+      if (data && data.success) {
+        if (data.updatedJobs && data.updatedJobs.length > 0) {
+          const updateMap = new Map(data.updatedJobs.map(uj => [uj.id, uj]));
+          setJobs(prev => prev.map(j => {
+            const uj = updateMap.get(j.id) || updateMap.get(j._id);
+            if (uj) {
+              return {
+                ...j,
+                emailRecipient: uj.emailRecipient,
+                deliverabilityScore: uj.deliverabilityScore,
+                deliverabilityStatus: uj.deliverabilityStatus,
+                deliverabilityReason: uj.deliverabilityReason
+              };
+            }
+            return j;
+          }));
+        }
+        if (data.found > 0) {
+          notify(`🎉 Checked ${data.checked} entries. Discovered & verified ${data.found} deliverable email addresses!`, 'success');
+        } else if (data.checked > 0) {
+          notify(`ℹ️ Checked ${data.checked} entries. All corporate inboxes and deliverability checks are up to date.`, 'info');
+        } else {
+          notify(`✨ All current ${scopeLabel} already have verified email addresses!`, 'info');
+        }
+      } else {
+        notify(data?.error || 'Email check completed', 'info');
+      }
+    } catch (err) {
+      notify('Failed to check emails: ' + (err.message || 'Network error'), 'error');
+    } finally {
+      setCheckingAllScope(null);
     }
   };
 
@@ -2982,6 +3029,53 @@ export default function DesktopApp(props) {
                       </button>
                     ))}
 
+                    <button
+                      type="button"
+                      onClick={() => handleCheckAllEmails('hr')}
+                      disabled={!!checkingAllScope}
+                      title="Scan and discover verified emails for HR leads"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '6px 14px',
+                        borderRadius: '8px',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        border: '1px solid rgba(56, 189, 248, 0.45)',
+                        background: checkingAllScope === 'hr' || checkingAllScope === 'all'
+                          ? 'rgba(56, 189, 248, 0.25)'
+                          : 'rgba(56, 189, 248, 0.12)',
+                        color: '#38bdf8',
+                        cursor: checkingAllScope ? 'wait' : 'pointer',
+                        transition: 'all 0.2s',
+                        boxShadow: '0 2px 6px rgba(0, 0, 0, 0.2)'
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!checkingAllScope) {
+                          e.currentTarget.style.background = 'rgba(56, 189, 248, 0.22)';
+                          e.currentTarget.style.borderColor = '#38bdf8';
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!checkingAllScope) {
+                          e.currentTarget.style.background = 'rgba(56, 189, 248, 0.12)';
+                          e.currentTarget.style.borderColor = 'rgba(56, 189, 248, 0.45)';
+                        }
+                      }}
+                    >
+                      {checkingAllScope === 'hr' || checkingAllScope === 'all' ? (
+                        <>
+                          <span className="spinner" style={{ width: '12px', height: '12px', borderWidth: '1.5px' }} />
+                          <span>Scanning HR Mails...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>⚡ Check All HR Mails</span>
+                        </>
+                      )}
+                    </button>
+
                     {activeHrJobs.length > 0 && (
                       <button
                         onClick={() => {
@@ -4416,7 +4510,14 @@ export default function DesktopApp(props) {
                         </th>
                         <th style={{ width: tab === 'applications' ? '18%' : '20%' }}>Company</th>
                         <th style={{ width: tab === 'applications' ? '22%' : '24%' }}>Role & Level</th>
-                        <th style={{ width: tab === 'applications' ? '22%' : '24%' }}>{tab === 'applications' ? 'Contact & Mailbox' : 'Recipient & Status'}</th>
+                        <th style={{ width: tab === 'applications' ? '22%' : '24%' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                            <span>{tab === 'applications' ? 'Contact & Mailbox' : 'Recipient & Status'}</span>
+                            {tab === 'applications' && (
+                              <span className="skeleton-box" style={{ width: 62, height: 18, borderRadius: 5 }} />
+                            )}
+                          </div>
+                        </th>
                         <th style={{ width: tab === 'applications' ? '14%' : '17%' }}>Location</th>
                         {tab === 'applications' && <th style={{ width: '10%' }}>Package</th>}
                         <th style={{ width: tab === 'applications' ? '9%' : '10%' }}>{tab === 'applied' ? 'Date Applied' : 'Date Found'}</th>
@@ -4545,7 +4646,66 @@ export default function DesktopApp(props) {
                       </th>
                       <th style={{ width: tab === 'applications' ? '18%' : '20%' }}>Company</th>
                       <th style={{ width: tab === 'applications' ? '22%' : '24%' }}>Role & Level</th>
-                      <th style={{ width: tab === 'applications' ? '22%' : '24%' }}>{tab === 'applications' ? 'Contact & Mailbox' : 'Recipient & Status'}</th>
+                      <th style={{ width: tab === 'applications' ? '22%' : '24%' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                          <span>{tab === 'applications' ? 'Contact & Mailbox' : 'Recipient & Status'}</span>
+                          {tab === 'applications' && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleCheckAllEmails('all');
+                              }}
+                              disabled={!!checkingAllScope}
+                              title="Check & discover deliverable emails for all jobs and HR contacts"
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                padding: '2px 8px',
+                                borderRadius: '6px',
+                                background: checkingAllScope
+                                  ? 'rgba(56, 189, 248, 0.25)'
+                                  : 'rgba(56, 189, 248, 0.12)',
+                                border: '1px solid rgba(56, 189, 248, 0.4)',
+                                color: '#38bdf8',
+                                fontSize: '11px',
+                                fontWeight: 600,
+                                cursor: checkingAllScope ? 'wait' : 'pointer',
+                                transition: 'all 0.15s ease',
+                                lineHeight: '1.3',
+                                textTransform: 'none',
+                                letterSpacing: 'normal'
+                              }}
+                              onMouseEnter={(e) => {
+                                if (!checkingAllScope) {
+                                  e.currentTarget.style.background = 'rgba(56, 189, 248, 0.22)';
+                                  e.currentTarget.style.borderColor = '#38bdf8';
+                                  e.currentTarget.style.transform = 'translateY(-1px)';
+                                }
+                              }}
+                              onMouseLeave={(e) => {
+                                if (!checkingAllScope) {
+                                  e.currentTarget.style.background = 'rgba(56, 189, 248, 0.12)';
+                                  e.currentTarget.style.borderColor = 'rgba(56, 189, 248, 0.4)';
+                                  e.currentTarget.style.transform = 'none';
+                                }
+                              }}
+                            >
+                              {checkingAllScope ? (
+                                <>
+                                  <span className="spinner" style={{ width: '9px', height: '9px', borderWidth: '1.5px' }} />
+                                  <span>Scanning...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <span>⚡ Check All</span>
+                                </>
+                              )}
+                            </button>
+                          )}
+                        </div>
+                      </th>
                       <th style={{ width: tab === 'applications' ? '14%' : '17%' }}>Location</th>
                       {tab === 'applications' && <th style={{ width: '10%' }}>Package</th>}
                       <th style={{ width: tab === 'applications' ? '9%' : '10%' }}>{tab === 'applied' ? 'Date Applied' : 'Date Found'}</th>
