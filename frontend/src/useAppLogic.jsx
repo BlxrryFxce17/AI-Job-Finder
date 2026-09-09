@@ -403,7 +403,7 @@ export function useAppLogic() {
             });
             const sendData = await sendRes.json();
             if (sendData.success) {
-               updateStatus(job.id, 'Sent', discoveredEmail, genData.draft, sendData.tracked);
+               updateStatus(job.id, 'Sent', discoveredEmail, sendData.emailDraft || genData.draft, sendData.tracked);
                setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] 🚀 Successfully sent! Delivery verified (Tracked: ${sendData.tracked ? 'Yes' : 'No'})`] }));
             } else {
                setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] 🛑 Send blocked: ${sendData.error || 'High bounce risk detected'}`] }));

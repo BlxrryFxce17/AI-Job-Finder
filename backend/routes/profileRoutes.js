@@ -6,6 +6,7 @@ const User = require('../models/User');
 const Profile = require('../models/Profile');
 const requireAuth = require('../middleware/requireAuth');
 const { callAIWithRetry } = require('../utils/ai');
+const { extractPortfolioUrl, getEffectivePortfolio } = require('../utils/email');
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -49,13 +50,11 @@ router.get('/', requireAuth, async (req, res) => {
         } catch (e) { }
       }
 
-      if (!extractedPortfolio && profile.resumeText) {
-        const portfolioMatch = profile.resumeText.match(/(?:portfolio|website|site|web|link|live)\s*[:\-–]\s*(https?:\/\/[^\s,;]+)/i) ||
-          profile.resumeText.match(/\b(https?:\/\/(?:www\.)?[a-zA-Z0-9-]+\.(?:dev|me|io|app|site|vercel\.app|netlify\.app|pages\.dev)(?:\/[^\s,;]*)?)\b/i);
-        if (portfolioMatch) extractedPortfolio = portfolioMatch[1].trim();
+      if (!extractedPortfolio) {
+        extractedPortfolio = getEffectivePortfolio(profile);
       }
 
-      if (extractedPortfolio) {
+      if (extractedPortfolio && !extractedPortfolio.includes('github.com/')) {
         profile.portfolio = extractedPortfolio;
         await Profile.updateOne({ _id: profile._id }, { $set: { portfolio: extractedPortfolio } });
       }
@@ -183,10 +182,9 @@ ${data.text.substring(0, 4000)}${linksContext}
 
       // Regex fallback to capture personal portfolio / website URL from resume text if not yet set
       if (!profile.portfolio && data.text) {
-        const portfolioMatch = data.text.match(/(?:portfolio|website|site|web|link|live)\s*[:\-–]\s*(https?:\/\/[^\s,;]+)/i) ||
-          data.text.match(/\b(https?:\/\/(?:www\.)?[a-zA-Z0-9-]+\.(?:dev|me|io|app|site|vercel\.app|netlify\.app|pages\.dev)(?:\/[^\s,;]*)?)\b/i);
-        if (portfolioMatch) {
-          profile.portfolio = portfolioMatch[1].trim();
+        const extracted = extractPortfolioUrl(data.text);
+        if (extracted) {
+          profile.portfolio = extracted;
         }
       }
 

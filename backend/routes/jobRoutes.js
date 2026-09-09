@@ -249,7 +249,14 @@ router.put('/:id', requireAuth, async (req, res) => {
       job.status = status;
     }
     if (emailRecipient !== undefined) job.emailRecipient = emailRecipient;
-    if (emailDraft !== undefined) job.emailDraft = emailDraft;
+    if (emailDraft !== undefined) {
+      // If job already has a full signature saved and the incoming draft is missing it, preserve the full signature
+      if (job.emailDraft && job.emailDraft.includes('Yours Sincerely') && !emailDraft.includes('Yours Sincerely')) {
+        // keep full draft
+      } else {
+        job.emailDraft = emailDraft;
+      }
+    }
     if (tracked !== undefined) job.tracked = tracked;
     if (req.body.role !== undefined) job.role = req.body.role;
     if (req.body.company !== undefined) job.company = req.body.company;

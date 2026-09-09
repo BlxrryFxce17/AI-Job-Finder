@@ -1037,6 +1037,89 @@ function cleanDraftEmailText(text, profile = {}) {
   return cleaned.trim();
 }
 
+function stripSignOff(text) {
+  if (!text || typeof text !== 'string') return '';
+  return text.replace(/(?:\r?\n\s*)+(?:Yours\s+Sincerely|Sincerely|Best\s+regards|Warm\s+regards|Kind\s+regards|Regards|Best|Cheers)[\s\S]*$/i, '').trim();
+}
+
+function extractPortfolioUrl(resumeText) {
+  if (!resumeText || typeof resumeText !== 'string') return '';
+  // 1. Explicit keyword with optional protocol: e.g. "portfolio: https://akash.dev" or "website: akash.vercel.app"
+  const kwMatch = resumeText.match(/(?:portfolio|website|site|web|link|live)\s*[:\-–]\s*(?:https?:\/\/)?([a-zA-Z0-9][-a-zA-Z0-9]*\.[a-zA-Z0-9_.\/:-]+)/i);
+  if (kwMatch) {
+    let url = kwMatch[1].trim().replace(/[,;)\]]+$/, '');
+    if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+    if (!/@|linkedin\.com|twitter\.com|x\.com/i.test(url)) {
+      return url;
+    }
+  }
+
+  // 2. Common developer portfolio domain patterns with or without https://
+  const domainMatch = resumeText.match(/(?<!@)\b(?:https?:\/\/)?((?:www\.)?[a-zA-Z0-9-]+\.(?:dev|me|io|app|site|vercel\.app|netlify\.app|pages\.dev|github\.io)(?:\/[^\s,;)]*)?)\b/i);
+  if (domainMatch) {
+    let url = domainMatch[1].trim().replace(/[,;)\]]+$/, '');
+    if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+    if (!/@|linkedin\.com|twitter\.com|x\.com/i.test(url)) {
+      return url;
+    }
+  }
+
+  return '';
+}
+
+function getEffectivePortfolio(profile) {
+  if (!profile) return '';
+  if (profile.portfolio && typeof profile.portfolio === 'string' && profile.portfolio.trim()) {
+    let p = profile.portfolio.trim();
+    if (!/^https?:\/\//i.test(p)) p = `https://${p}`;
+    return p;
+  }
+  const extracted = extractPortfolioUrl(profile.resumeText);
+  if (extracted) return extracted;
+
+  // Derive GitHub Pages portfolio URL from username if available
+  let ghUser = profile.githubInsights?.username || '';
+  if (!ghUser && profile.github) {
+    const m = profile.github.match(/github\.com\/([a-zA-Z0-9_-]+)/i);
+    if (m && m[1] && !['settings', 'pulls', 'issues', 'notifications'].includes(m[1].toLowerCase())) {
+      ghUser = m[1];
+    }
+  }
+  if (ghUser) {
+    return `https://${ghUser}.github.io`;
+  }
+
+  return profile.github || '';
+}
+
+function buildSignatureLinks(profile, trackClick = (url) => url) {
+  const links = [];
+  const portfolioUrl = getEffectivePortfolio(profile);
+  
+  if (profile && profile.linkedin) links.push(`🔗 <a href="${trackClick(profile.linkedin)}">LinkedIn</a>`);
+  if (profile && profile.github) links.push(`💻 <a href="${trackClick(profile.github)}">GitHub</a>`);
+  if (portfolioUrl) links.push(`🌐 <a href="${trackClick(portfolioUrl)}">Portfolio</a>`);
+  
+  if (links.length === 0) {
+    if (profile && profile.linkedin) links.push(`🔗 <a href="${trackClick(profile.linkedin || '')}">LinkedIn</a>`);
+    if (profile && profile.github) links.push(`💻 <a href="${trackClick(profile.github || '')}">GitHub</a>`);
+    if (portfolioUrl) links.push(`🌐 <a href="${trackClick(portfolioUrl)}">Portfolio</a>`);
+  }
+  return links.join(' | ');
+}
+
+function buildPlainTextSignature(profile) {
+  const portfolioUrl = getEffectivePortfolio(profile);
+  const links = [];
+  if (profile && profile.linkedin) links.push(`LinkedIn: ${profile.linkedin}`);
+  if (profile && profile.github) links.push(`GitHub: ${profile.github}`);
+  if (portfolioUrl) links.push(`Portfolio: ${portfolioUrl}`);
+
+  const phoneLine = profile && profile.phone ? `📞 ${profile.phone}\n` : '';
+  const linksLine = links.length > 0 ? `${links.join(' | ')}` : '';
+  return `\n\nYours Sincerely,\n${profile?.name || 'Akash V'}\n${profile?.title || 'Software Developer'}\n${phoneLine}${linksLine}`.trim();
+}
+
 module.exports = {
   sendEmailViaAPI,
   checkGmailForReply,
@@ -1047,7 +1130,13 @@ module.exports = {
   checkMxRecords,
   validateEmailSyntax,
   formatEmailTextToHtml,
-  cleanDraftEmailText
+  cleanDraftEmailText,
+  stripSignOff,
+  getEffectivePortfolio,
+  buildSignatureLinks,
+  buildPlainTextSignature,
+  extractPortfolioUrl
 };
+
 
 

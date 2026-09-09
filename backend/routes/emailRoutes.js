@@ -6,7 +6,7 @@ const User = require('../models/User');
 const Profile = require('../models/Profile');
 const requireAuth = require('../middleware/requireAuth');
 const { callAIWithRetry } = require('../utils/ai');
-const { sendEmailViaAPI, discoverEmailForJob, resolveCompanyDomain, getInboxReplies, verifyEmail, formatEmailTextToHtml, cleanDraftEmailText } = require('../utils/email');
+const { sendEmailViaAPI, discoverEmailForJob, resolveCompanyDomain, getInboxReplies, verifyEmail, formatEmailTextToHtml, cleanDraftEmailText, stripSignOff, getEffectivePortfolio, buildSignatureLinks, buildPlainTextSignature, extractPortfolioUrl } = require('../utils/email');
 const { findHROnLinkedIn } = require('../utils/scraper');
 const { generateTailoredResumePDF } = require('../utils/pdfGenerator');
 
@@ -19,6 +19,13 @@ async function getProfile(userId, includePdf = false) {
   if (!profile) {
     profile = new Profile({ userId });
     await profile.save();
+  }
+  if (profile && !profile.portfolio) {
+    const eff = getEffectivePortfolio(profile);
+    if (eff && !eff.includes('github.com/')) {
+      profile.portfolio = eff;
+      await Profile.updateOne({ _id: profile._id }, { $set: { portfolio: eff } }).catch(() => {});
+    }
   }
   return profile;
 }
@@ -290,6 +297,7 @@ BODY:
       draftText = draftText.substring(emailStartMatch.index + emailStartMatch[0].length);
     }
     draftText = cleanDraftEmailText(draftText.trim(), profile);
+    draftText = stripSignOff(draftText);
 
     res.json({ draft: draftText, company: extractedCompany, role: extractedRole, subject: extractedSubject });
   } catch (error) {
@@ -298,17 +306,7 @@ BODY:
   }
 });
 
-function buildSignatureLinks(profile, trackClick) {
-  const links = [];
-  if (profile.linkedin) links.push(`🔗 <a href="${trackClick(profile.linkedin)}">LinkedIn</a>`);
-  if (profile.github) links.push(`💻 <a href="${trackClick(profile.github)}">GitHub</a>`);
-  if (profile.portfolio) links.push(`🌐 <a href="${trackClick(profile.portfolio)}">Portfolio</a>`);
-  if (links.length === 0) {
-    links.push(`🔗 <a href="${trackClick(profile.linkedin || '')}">LinkedIn</a>`);
-    links.push(`💻 <a href="${trackClick(profile.github || '')}">GitHub</a>`);
-  }
-  return links.join(' | ');
-}
+
 
 router.post('/send-email', requireAuth, async (req, res) => {
   const { jobId, to, subject, body } = req.body;
@@ -324,7 +322,8 @@ router.post('/send-email', requireAuth, async (req, res) => {
     const linksHtml = buildSignatureLinks(profile, trackClick);
     const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${jobId}" width="1" height="1" style="display:none;" />` : '';
 
-    const formattedDraft = formatEmailTextToHtml(body);
+    const cleanBody = stripSignOff(cleanDraftEmailText(body, profile));
+    const formattedDraft = formatEmailTextToHtml(cleanBody);
 
     const htmlBody = `
       <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
@@ -333,20 +332,21 @@ router.post('/send-email', requireAuth, async (req, res) => {
         Yours Sincerely,<br/>
         <b>${profile.name}</b><br/>
         ${profile.title}<br/>
-        📞 ${profile.phone}<br/>
+        ${profile.phone ? `📞 ${profile.phone}<br/>` : ''}
         ${linksHtml}
         <br/>
         ${trackingPixel}
       </div>
     `;
 
-    const cleanText = cleanDraftEmailText(body, profile);
+    const plainTextSignature = buildPlainTextSignature(profile);
+    const fullPlainText = `${cleanBody}\n\n${plainTextSignature}`;
 
     const mailOptions = {
       from: user.email || process.env.EMAIL_USER,
       to: (to || '').trim(),
       subject: subject || (job ? `Application for ${job.role} - ${profile.name}` : 'Job Application'),
-      text: cleanText,
+      text: fullPlainText,
       html: htmlBody,
       attachments: []
     };
@@ -361,7 +361,7 @@ router.post('/send-email', requireAuth, async (req, res) => {
       job.status = 'Sent';
       job.sentAt = new Date();
       job.tracked = !!baseUrl;
-      job.emailDraft = cleanText; // Save the final cleaned draft sent
+      job.emailDraft = fullPlainText; // Save the final cleaned draft with full signature sent
       if (to && to !== job.emailRecipient) {
         job.emailRecipient = to; // Update if changed manually
       }
@@ -369,7 +369,7 @@ router.post('/send-email', requireAuth, async (req, res) => {
       await job.save();
     }
 
-    res.json({ success: true, tracked: !!baseUrl, message: 'Email sent successfully!', messageId: info.messageId });
+    res.json({ success: true, tracked: !!baseUrl, emailDraft: fullPlainText, message: 'Email sent successfully!', messageId: info.messageId });
   } catch (error) {
     console.error('Error sending email:', error);
     res.status(500).json({ error: error.message || 'Failed to send email. Check credentials.' });
@@ -461,18 +461,27 @@ BODY:
     if (emailStartMatch) {
       draftText = draftText.substring(emailStartMatch.index + emailStartMatch[0].length).trim();
     }
-    draftText = cleanDraftEmailText(draftText, profile);
+    const cleanBody = stripSignOff(cleanDraftEmailText(draftText, profile));
+    const plainTextSignature = buildPlainTextSignature(profile);
+    const fullPlainText = `${cleanBody}\n\n${plainTextSignature}`;
 
     let finalRecipientEmail = (recipientEmail || '').trim();
     if (!finalRecipientEmail && jd) {
       const emailMatch = jd.match(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/);
-      if (emailMatch) {
-        finalRecipientEmail = emailMatch[0].trim();
-      }
+      if (emailMatch) finalRecipientEmail = emailMatch[0];
     }
 
+    const emailSubject = extractedSubject || `Application for ${extractedRole} - ${profile.name}`;
+
     if (!finalRecipientEmail) {
-      return res.status(400).json({ error: 'No recipient email specified or found in JD.' });
+      return res.json({
+        success: true,
+        draft: fullPlainText,
+        company: extractedCompany,
+        role: extractedRole,
+        subject: emailSubject,
+        message: 'Draft generated successfully! Add a recipient email to send directly.'
+      });
     }
 
     const baseUrl = process.env.PUBLIC_URL;
@@ -480,8 +489,7 @@ BODY:
     const trackClick = (url) => (baseUrl && url) ? `${baseUrl}/api/track-click/${jobId}?url=${encodeURIComponent(url)}` : (url || '');
     const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${jobId}" width="1" height="1" style="display:none;" />` : '';
 
-    const formattedDraft = formatEmailTextToHtml(draftText);
-
+    const formattedDraft = formatEmailTextToHtml(cleanBody);
     const linksHtml = buildSignatureLinks(profile, trackClick);
     const htmlBody = `
       <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
@@ -490,22 +498,18 @@ BODY:
         Yours Sincerely,<br/>
         <b>${profile.name}</b><br/>
         ${profile.title}<br/>
-        📞 ${profile.phone}<br/>
+        ${profile.phone ? `📞 ${profile.phone}<br/>` : ''}
         ${linksHtml}
         <br/>
         ${trackingPixel}
       </div>
     `;
 
-    const emailSubject = extractedSubject || `Application for ${extractedRole} - ${profile.name}`;
-
-    const cleanText = cleanDraftEmailText(draftText, profile);
-
     const mailOptions = {
       from: user.email || process.env.EMAIL_USER,
       to: finalRecipientEmail,
       subject: emailSubject,
-      text: cleanText,
+      text: fullPlainText,
       html: htmlBody,
       attachments: []
     };
@@ -523,8 +527,8 @@ BODY:
       role: extractedRole,
       jd: jd,
       status: 'Sent',
-      emailRecipient: recipientEmail,
-      emailDraft: cleanText,
+      emailRecipient: finalRecipientEmail,
+      emailDraft: fullPlainText,
       tracked: !!baseUrl,
       sentAt: new Date()
     });
@@ -576,7 +580,8 @@ ${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructio
     if (emailStartMatch) {
       draftText = draftText.substring(emailStartMatch.index + emailStartMatch[0].length);
     }
-    draftText = cleanDraftEmailText(draftText.trim(), profile);
+    const cleanBody = stripSignOff(cleanDraftEmailText(draftText.trim(), profile));
+    const formattedDraft = formatEmailTextToHtml(cleanBody);
 
     const baseUrl = process.env.PUBLIC_URL;
     const testJobId = Date.now().toString();
@@ -591,17 +596,20 @@ ${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructio
         Yours Sincerely,<br/>
         <b>${profile.name}</b><br/>
         ${profile.title}<br/>
-        📞 ${profile.phone}<br/>
+        ${profile.phone ? `📞 ${profile.phone}<br/>` : ''}
         ${linksHtml}
         <br/>
         ${trackingPixel}
       </div>
     `;
 
+    const fullPlainText = `${cleanBody}\n\n${buildPlainTextSignature(profile)}`;
+
     const mailOptions = {
       from: myEmail,
       to: myEmail,
       subject: `[TEST EMAIL] Application for ${role} at ${company}`,
+      text: fullPlainText,
       html: htmlBody,
       attachments: []
     };
@@ -619,7 +627,7 @@ ${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructio
       role: role,
       jd: jd,
       status: 'Sent',
-      emailDraft: draftText,
+      emailDraft: fullPlainText,
       emailRecipient: myEmail,
       tracked: !!baseUrl,
       sentAt: new Date()
@@ -997,7 +1005,9 @@ router.post('/inbox/send-reply', requireAuth, async (req, res) => {
     const user = await User.findById(req.user.id);
     const profile = await getProfile(req.user.id);
 
-    const formattedDraft = formatEmailTextToHtml(body);
+    const cleanBody = stripSignOff(cleanDraftEmailText(body, profile));
+    const formattedDraft = formatEmailTextToHtml(cleanBody);
+    const linksHtml = buildSignatureLinks(profile);
     
     const htmlBody = `
       <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
@@ -1006,14 +1016,19 @@ router.post('/inbox/send-reply', requireAuth, async (req, res) => {
         Yours Sincerely,<br/>
         <b>${profile.name}</b><br/>
         ${profile.title}<br/>
-        📞 ${profile.phone}
+        ${profile.phone ? `📞 ${profile.phone}<br/>` : ''}
+        ${linksHtml}
       </div>
     `;
+
+    const plainTextSignature = buildPlainTextSignature(profile);
+    const fullPlainText = `${cleanBody}\n\n${plainTextSignature}`;
 
     const mailOptions = {
       from: user.email || process.env.EMAIL_USER,
       to,
       subject: subject.startsWith('Re:') ? subject : `Re: ${subject}`,
+      text: fullPlainText,
       html: htmlBody,
       inReplyTo: messageId,
       references: [messageId],

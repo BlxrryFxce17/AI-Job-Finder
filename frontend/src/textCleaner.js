@@ -1,3 +1,35 @@
+export function getEffectivePortfolio(profile) {
+  if (!profile) return '';
+  if (profile.portfolio && typeof profile.portfolio === 'string' && profile.portfolio.trim()) {
+    let p = profile.portfolio.trim();
+    if (!/^https?:\/\//i.test(p)) p = `https://${p}`;
+    return p;
+  }
+  if (profile.resumeText) {
+    const kwMatch = profile.resumeText.match(/(?:portfolio|website|site|web|link|live)\s*[:\-–]\s*(?:https?:\/\/)?([a-zA-Z0-9][-a-zA-Z0-9]*\.[a-zA-Z0-9_.\/:-]+)/i);
+    if (kwMatch) {
+      let url = kwMatch[1].trim().replace(/[,;)\]]+$/, '');
+      if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+      if (!/@|linkedin\.com|twitter\.com|x\.com/i.test(url)) return url;
+    }
+    const domainMatch = profile.resumeText.match(/(?<!@)\b(?:https?:\/\/)?((?:www\.)?[a-zA-Z0-9-]+\.(?:dev|me|io|app|site|vercel\.app|netlify\.app|pages\.dev|github\.io)(?:\/[^\s,;)]*)?)\b/i);
+    if (domainMatch) {
+      let url = domainMatch[1].trim().replace(/[,;)\]]+$/, '');
+      if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+      if (!/@|linkedin\.com|twitter\.com|x\.com/i.test(url)) return url;
+    }
+  }
+  let ghUser = profile.githubInsights?.username || '';
+  if (!ghUser && profile.github) {
+    const m = profile.github.match(/github\.com\/([a-zA-Z0-9_-]+)/i);
+    if (m && m[1] && !['settings', 'pulls', 'issues', 'notifications'].includes(m[1].toLowerCase())) {
+      ghUser = m[1];
+    }
+  }
+  if (ghUser) return `https://${ghUser}.github.io`;
+  return profile.github || '';
+}
+
 /**
  * Utility function to clean email drafts from raw markdown artifacts.
  * Strips raw bolding (**, __), standardizes bullet points, strips rogue asterisks,
@@ -26,13 +58,13 @@ export function cleanDraftText(text, profile = {}) {
   const loc = (profile && profile.location) || 'India';
   const github = (profile && profile.github) || '';
   const linkedin = (profile && profile.linkedin) || '';
-  const portfolio = (profile && (profile.portfolio || profile.github || profile.linkedin)) || '';
+  const portfolio = getEffectivePortfolio(profile);
 
   cleaned = cleaned.replace(/\[(?:Your\s+)?(?:City|Location)(?:,\s*Country)?\]/gi, loc);
   if (portfolio) {
-    cleaned = cleaned.replace(/\[(?:Link\s+to\s+)?Portfolio\]/gi, portfolio);
+    cleaned = cleaned.replace(/\[(?:Link\s+to\s+)?(?:Portfolio|Website|Portfolio\s+Website)(?:\s+URL)?\]/gi, portfolio);
   } else {
-    cleaned = cleaned.replace(/\[(?:Link\s+to\s+)?Portfolio\]/gi, 'available upon request');
+    cleaned = cleaned.replace(/\[(?:Link\s+to\s+)?(?:Portfolio|Website|Portfolio\s+Website)(?:\s+URL)?\]/gi, 'available upon request');
   }
   if (github) {
     cleaned = cleaned.replace(/\[(?:Link\s+to\s+)?GitHub\]/gi, github);
@@ -73,5 +105,25 @@ export function cleanDraftText(text, profile = {}) {
   // 7. Clean any stray brackets around words e.g. [AI Job Finder]
   cleaned = cleaned.replace(/\[([A-Za-z0-9\s._-]+)\](?!\()/g, '$1');
 
+  // 8. Ensure signature is present and includes portfolio link
+  if (profile && (profile.name || profile.github || profile.linkedin || portfolio)) {
+    if (!cleaned.includes('Yours Sincerely')) {
+      const links = [];
+      if (linkedin) links.push(`LinkedIn: ${linkedin}`);
+      if (github) links.push(`GitHub: ${github}`);
+      if (portfolio) links.push(`Portfolio: ${portfolio}`);
+      const phoneLine = profile.phone ? `📞 ${profile.phone}\n` : '';
+      const linksLine = links.length > 0 ? links.join(' | ') : '';
+      cleaned = `${cleaned.trim()}\n\nYours Sincerely,\n${profile.name || 'Akash V'}\n${profile.title || 'Software Developer'}\n${phoneLine}${linksLine}`;
+    } else if (portfolio && !/portfolio/i.test(cleaned)) {
+      if (/(?:GitHub|LinkedIn):[^\r\n]+/i.test(cleaned)) {
+        cleaned = cleaned.replace(/((?:GitHub|LinkedIn):[^\r\n]+)/i, (m) => `${m} | Portfolio: ${portfolio}`);
+      } else {
+        cleaned = `${cleaned.trim()}\nPortfolio: ${portfolio}`;
+      }
+    }
+  }
+
   return cleaned.trim();
 }
+

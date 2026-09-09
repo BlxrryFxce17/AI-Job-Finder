@@ -5,13 +5,30 @@ const User = require('../models/User');
 const Profile = require('../models/Profile');
 const requireAuth = require('../middleware/requireAuth');
 const { callAIWithRetry } = require('../utils/ai');
-const { sendEmailViaAPI, checkGmailForReply, formatEmailTextToHtml, cleanDraftEmailText } = require('../utils/email');
+const {
+  sendEmailViaAPI,
+  checkGmailForReply,
+  formatEmailTextToHtml,
+  cleanDraftEmailText,
+  stripSignOff,
+  getEffectivePortfolio,
+  buildSignatureLinks,
+  buildPlainTextSignature,
+  extractPortfolioUrl
+} = require('../utils/email');
 
 async function getProfile(userId) {
   let profile = await Profile.findOne({ userId });
   if (!profile) {
     profile = new Profile({ userId });
     await profile.save();
+  }
+  if (profile && !profile.portfolio) {
+    const eff = getEffectivePortfolio(profile);
+    if (eff && !eff.includes('github.com/')) {
+      profile.portfolio = eff;
+      await Profile.updateOne({ _id: profile._id }, { $set: { portfolio: eff } }).catch(() => {});
+    }
   }
   return profile;
 }
@@ -30,19 +47,12 @@ router.post('/send-followup', requireAuth, async (req, res) => {
 
     const baseUrl = process.env.PUBLIC_URL;
     const trackClick = (url) => (baseUrl && url) ? `${baseUrl}/api/track-click/${job.id}?url=${encodeURIComponent(url)}` : (url || '');
-    const linkedInUrl = trackClick(profile.linkedin);
-    const githubUrl = trackClick(profile.github);
-    const portfolioUrl = trackClick(profile.portfolio);
     const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${job.id}" width="1" height="1" style="display:none;" />` : '';
 
     const resumeLinkUrl = baseUrl ? trackClick(`${baseUrl}/api/profile/resume-pdf?userId=${user._id}`) : null;
-    const formattedDraft = formatEmailTextToHtml(followUp.draft, resumeLinkUrl);
-
-    const linkItems = [];
-    if (profile.linkedin) linkItems.push(`🔗 <a href="${linkedInUrl}">LinkedIn</a>`);
-    if (profile.github) linkItems.push(`💻 <a href="${githubUrl}">GitHub</a>`);
-    if (profile.portfolio) linkItems.push(`🌐 <a href="${portfolioUrl}">Portfolio</a>`);
-    const linksHtml = linkItems.length > 0 ? linkItems.join(' | ') : `🔗 <a href="${linkedInUrl}">LinkedIn</a> | 💻 <a href="${githubUrl}">GitHub</a>`;
+    const cleanBody = stripSignOff(cleanDraftEmailText(followUp.draft, profile));
+    const formattedDraft = formatEmailTextToHtml(cleanBody, resumeLinkUrl);
+    const linksHtml = buildSignatureLinks(profile, trackClick);
 
     const htmlBody = `
       <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
@@ -51,18 +61,21 @@ router.post('/send-followup', requireAuth, async (req, res) => {
         Yours Sincerely,<br/>
         <b>${profile.name}</b><br/>
         ${profile.title}<br/>
-        📞 ${profile.phone}<br/>
+        ${profile.phone ? `📞 ${profile.phone}<br/>` : ''}
         ${linksHtml}
         <br/>
         ${trackingPixel}
       </div>
     `;
 
+    const plainTextSignature = buildPlainTextSignature(profile);
+    const fullPlainText = `${cleanBody}\n\n${plainTextSignature}`;
+
     const mailOptions = {
       from: `"${profile.name}" <${user.email || process.env.EMAIL_USER}>`,
       to: job.emailRecipient,
       subject: `Re: Application for ${job.role} - ${profile.name}`,
-      text: cleanDraftEmailText(followUp.draft, profile),
+      text: fullPlainText,
       html: htmlBody,
       attachments: []
     };

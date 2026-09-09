@@ -10,7 +10,7 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const cron = require('node-cron');
 const { callAIWithRetry } = require('./utils/ai');
-const { checkGmailForReply, sendEmailViaAPI, formatEmailTextToHtml, cleanDraftEmailText } = require('./utils/email');
+const { checkGmailForReply, sendEmailViaAPI, formatEmailTextToHtml, cleanDraftEmailText, buildSignatureLinks, buildPlainTextSignature } = require('./utils/email');
 
 // Import Models
 const User = require('./models/User');
@@ -158,12 +158,26 @@ Guidelines:
           try {
             console.log(`[Cron] Sending Day ${targetDay} follow-up to ${job.emailRecipient}`);
             const cleanText = cleanDraftEmailText(draftToSend, profile);
-            const htmlBody = formatEmailTextToHtml(draftToSend);
+            const plainTextSignature = buildPlainTextSignature(profile);
+            const fullPlainText = cleanText.includes('Yours Sincerely') ? cleanText : `${cleanText}${plainTextSignature}`;
+            const linksHtml = buildSignatureLinks(profile);
+            const formattedDraft = formatEmailTextToHtml(draftToSend);
+            const htmlBody = `
+              <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
+                ${formattedDraft}
+                <br/><br/>
+                Yours Sincerely,<br/>
+                <b>${profile.name}</b><br/>
+                ${profile.title}<br/>
+                ${profile.phone ? `📞 ${profile.phone}<br/>` : ''}
+                ${linksHtml}
+              </div>
+            `;
             const mailOptions = {
               from: user.email || process.env.EMAIL_USER,
               to: job.emailRecipient,
               subject: `Re: Application for ${job.role} - ${profile.name}`,
-              text: cleanText,
+              text: fullPlainText,
               html: htmlBody,
               replyTo: user.email || process.env.EMAIL_USER,
               inReplyTo: job.messageId || undefined,
