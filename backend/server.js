@@ -10,7 +10,7 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const cron = require('node-cron');
 const { callAIWithRetry } = require('./utils/ai');
-const { checkGmailForReply, sendEmailViaAPI } = require('./utils/email');
+const { checkGmailForReply, sendEmailViaAPI, formatEmailTextToHtml, cleanDraftEmailText } = require('./utils/email');
 
 // Import Models
 const User = require('./models/User');
@@ -157,11 +157,14 @@ Guidelines:
         if (draftToSend) {
           try {
             console.log(`[Cron] Sending Day ${targetDay} follow-up to ${job.emailRecipient}`);
+            const cleanText = cleanDraftEmailText(draftToSend, profile);
+            const htmlBody = formatEmailTextToHtml(draftToSend);
             const mailOptions = {
               from: user.email || process.env.EMAIL_USER,
               to: job.emailRecipient,
               subject: `Re: Application for ${job.role} - ${profile.name}`,
-              text: draftToSend,
+              text: cleanText,
+              html: htmlBody,
               replyTo: user.email || process.env.EMAIL_USER,
               inReplyTo: job.messageId || undefined,
               references: job.messageId ? [job.messageId] : undefined

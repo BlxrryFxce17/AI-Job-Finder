@@ -5344,7 +5344,21 @@ export default function DesktopApp(props) {
                   </div>
                 )}
               </div>
-              {selectedMail.emailDraft || 'No draft saved for this job.'}
+              {(() => {
+                if (!selectedMail.emailDraft) return 'No draft saved for this job.';
+                const cleanedText = cleanDraftText(selectedMail.emailDraft, props.profile);
+                const parts = cleanedText.split(/(https?:\/\/[^\s)]+)/g);
+                return parts.map((part, idx) => {
+                  if (/^https?:\/\//i.test(part)) {
+                    return (
+                      <a key={idx} href={part} target="_blank" rel="noopener noreferrer" style={{ color: '#38bdf8', textDecoration: 'underline', fontWeight: 500 }}>
+                        {part}
+                      </a>
+                    );
+                  }
+                  return part;
+                });
+              })()}
             </div>
           </div>
         </div>

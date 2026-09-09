@@ -62,7 +62,7 @@ router.post('/send-followup', requireAuth, async (req, res) => {
       from: `"${profile.name}" <${user.email || process.env.EMAIL_USER}>`,
       to: job.emailRecipient,
       subject: `Re: Application for ${job.role} - ${profile.name}`,
-      text: followUp.draft,
+      text: cleanDraftEmailText(followUp.draft, profile),
       html: htmlBody,
       attachments: []
     };

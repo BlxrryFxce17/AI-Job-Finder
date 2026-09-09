@@ -3072,9 +3072,21 @@ export default function MobileApp(props) {
                 <div><strong>To:</strong> {selectedMail.emailRecipient || 'Unknown'}</div>
                 <div><strong>Tracked:</strong> {selectedMail.tracked ? 'Yes' : 'No'}</div>
               </div>
-              <div style={{ whiteSpace: 'pre-wrap', lineHeight: '1.5' }}>
-                {selectedMail.emailDraft || 'No draft found.'}
-              </div>
+              {(() => {
+                if (!selectedMail.emailDraft) return 'No draft found.';
+                const cleanedText = cleanDraftText(selectedMail.emailDraft, props.profile);
+                const parts = cleanedText.split(/(https?:\/\/[^\s)]+)/g);
+                return parts.map((part, idx) => {
+                  if (/^https?:\/\//i.test(part)) {
+                    return (
+                      <a key={idx} href={part} target="_blank" rel="noopener noreferrer" style={{ color: '#38bdf8', textDecoration: 'underline', fontWeight: 500 }}>
+                        {part}
+                      </a>
+                    );
+                  }
+                  return part;
+                });
+              })()}
             </div>
           </div>
         </div>

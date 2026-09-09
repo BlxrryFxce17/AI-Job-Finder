@@ -118,13 +118,18 @@ function buildGitInsightText(profile, jd, role, company) {
   console.log(`[GitHub Match] JD keywords: [${jdKeywords.join(', ')}] → matched ${highlyRelevant.length} repos (${finalRepos.map(r => r.name).join(', ')})`);
 
   const sampleRepo = finalRepos[0];
-  const sampleCitation = sampleRepo ? `[${sampleRepo.name}](${sampleRepo.url})` : '[AI-Job-Finder](https://github.com)';
+  const sampleRepoUrl = sampleRepo ? sampleRepo.url : (profile.github ? `${profile.github.replace(/\/$/, '')}/AI-Job-Finder` : 'https://github.com');
+  const sampleRepoName = sampleRepo ? sampleRepo.name : 'AI Job Finder';
 
   return `\n── VERIFIED GITHUB PORTFOLIO (@${profile.githubInsights.username}) ──${matchSummary}
 ${repoLines}
 Verified Core Languages: ${profile.githubInsights.topLanguages?.join(', ') || 'Various'}
 
-IMPORTANT: When citing a project marked [MATCHES JD STACK], wrap the exact project name in a clean markdown link using its exact Repo URL, e.g. "${sampleCitation}". Limit to 1 or 2 repo links max in the body so it looks natural, authentic, and maintains 100% email deliverability.`;
+IMPORTANT LINK & CITATION RULES:
+- When citing a project marked [MATCHES JD STACK], reference the project name naturally (e.g. "${sampleRepoName}") alongside its verified repository URL "${sampleRepoUrl}".
+- NEVER use raw markdown brackets like "[${sampleRepoName}](${sampleRepoUrl})" in the email text.
+- NEVER link a project to the root profile URL ("https://github.com/${profile.githubInsights.username}"). ONLY cite the specific repository URL.
+- Limit project links to 1 or 2 max in the body so it looks natural, authentic, and maintains 100% email deliverability.`;
 }
 
 
@@ -235,7 +240,7 @@ CRITICAL RULES FOR HIGH-CONVERTING COLD OUTREACH:
    - Read the Job Description thoroughly. If it contains specific application instructions, questions, required deliverables, or required tools (e.g. "include your query/results from our Finder tool", "mention your timezone", "answer why X"), you MUST directly and credibly address them in the email body or bullet points.
    - If the Job Description is concise / short (such as a Hacker News "Who is hiring?" post, startup board snippet, or terse tech stack list like "Python/FastAPI, Go, OpenSearch/Elasticsearch, Docker"), extract the listed technologies and immediately map them to concrete engineering solutions from the candidate's projects.
    - If the Job Description specifies an explicit email subject line (e.g. 'with subject "HN Software Engineer"'), extract it into the SUBJECT output field.
-   - When the candidate's verified GitHub projects or personal portfolio (${profile.portfolio || ''}) relate to the job's tech stack, cite the actual project name or portfolio as a clean markdown link [ProjectName](RepoURL) (max 1-2 repo/portfolio links in the body) as authentic, clickable proof of capability.
+   - When the candidate's verified GitHub projects or personal portfolio (${profile.portfolio || ''}) relate to the job's tech stack, cite the actual project name cleanly (e.g. "AI Job Finder" or "AI Job Finder (repo-url)"). NEVER output raw markdown brackets like "[Project](url)" and NEVER link a specific project to the root GitHub profile instead of the repository.
 2. ABSOLUTE UNIQUENESS & ZERO FAKE METRICS (ANTI-AI CLICHÉ):
    - NEVER fabricate generic percentages like "reduced latency by ~20%", "improved throughput by 15%", or generic filler claims unless explicitly stated in the candidate's resume/README. Technical hiring managers instantly spot this as AI-generated slop.
    - Ground technical claims in REAL engineering mechanisms: describe actual architectural decisions, state management, cache invalidation, retry algorithms with exponential backoff, schema design, concurrent worker pools, or streaming pipelines from the candidate's actual projects.
@@ -335,10 +340,13 @@ router.post('/send-email', requireAuth, async (req, res) => {
       </div>
     `;
 
+    const cleanText = cleanDraftEmailText(body, profile);
+
     const mailOptions = {
       from: user.email || process.env.EMAIL_USER,
       to: (to || '').trim(),
       subject: subject || (job ? `Application for ${job.role} - ${profile.name}` : 'Job Application'),
+      text: cleanText,
       html: htmlBody,
       attachments: []
     };
@@ -353,7 +361,7 @@ router.post('/send-email', requireAuth, async (req, res) => {
       job.status = 'Sent';
       job.sentAt = new Date();
       job.tracked = !!baseUrl;
-      job.emailDraft = body; // Save the final draft sent
+      job.emailDraft = cleanText; // Save the final cleaned draft sent
       if (to && to !== job.emailRecipient) {
         job.emailRecipient = to; // Update if changed manually
       }
@@ -404,7 +412,7 @@ CRITICAL RULES FOR HIGH-CONVERTING COLD OUTREACH:
    - Read the Job Description thoroughly. If it contains specific application instructions, questions, required deliverables, or required tools (e.g. "include your query/results from our Finder tool", "mention your timezone", "answer why X"), you MUST directly and credibly address them in the email body or bullet points.
    - If the Job Description is concise / short (such as a Hacker News "Who is hiring?" post, startup board snippet, or terse tech stack list like "Python/FastAPI, Go, OpenSearch/Elasticsearch, Docker"), extract the listed technologies and immediately map them to concrete engineering solutions from the candidate's projects.
    - If the Job Description specifies an explicit email subject line (e.g. 'with subject "HN Software Engineer"'), extract it into the SUBJECT output field.
-   - When the candidate's verified GitHub projects relate to the job's tech stack, cite the actual project name as a clean markdown link [ProjectName](RepoURL) (max 1-2 repo links in the body) as authentic, clickable proof of capability.
+   - When the candidate's verified GitHub projects relate to the job's tech stack, cite the actual project name cleanly (e.g. "AI Job Finder" or "AI Job Finder (repo-url)"). NEVER output raw markdown brackets like "[Project](url)" and NEVER link a specific project to the root GitHub profile instead of the repository.
 2. ABSOLUTE UNIQUENESS & ZERO FAKE METRICS (ANTI-AI CLICHÉ):
    - NEVER fabricate generic percentages like "reduced latency by ~20%", "improved throughput by 15%", or generic filler claims unless explicitly stated in the candidate's resume/README. Technical hiring managers instantly spot this as AI-generated slop.
    - Ground technical claims in REAL engineering mechanisms: describe actual architectural decisions, state management, cache invalidation, retry algorithms with exponential backoff, schema design, concurrent worker pools, or streaming pipelines from the candidate's actual projects.
@@ -491,10 +499,13 @@ BODY:
 
     const emailSubject = extractedSubject || `Application for ${extractedRole} - ${profile.name}`;
 
+    const cleanText = cleanDraftEmailText(draftText, profile);
+
     const mailOptions = {
       from: user.email || process.env.EMAIL_USER,
       to: finalRecipientEmail,
       subject: emailSubject,
+      text: cleanText,
       html: htmlBody,
       attachments: []
     };
@@ -513,7 +524,7 @@ BODY:
       jd: jd,
       status: 'Sent',
       emailRecipient: recipientEmail,
-      emailDraft: draftText,
+      emailDraft: cleanText,
       tracked: !!baseUrl,
       sentAt: new Date()
     });

@@ -42,5 +42,36 @@ export function cleanDraftText(text, profile = {}) {
   cleaned = cleaned.replace(/\[(?:Your\s+)?Name\]/gi, (profile && profile.name) || 'Akash V');
   cleaned = cleaned.replace(/\[(?:Your\s+)?Phone(?:\s+Number)?\]/gi, (profile && profile.phone) || '');
 
+  // 6. Clean up raw markdown links [Label](URL) so no bracketed markdown leaks into plain text or email
+  cleaned = cleaned.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (match, label, url) => {
+    const trimmedLabel = label.trim();
+    const cleanUrl = url.trim().replace(/\/$/, '');
+    const userGithub = (profile && profile.github ? profile.github.trim().replace(/\/$/, '') : '').toLowerCase();
+
+    // Check if the URL is just the root github profile (e.g. https://github.com/BlxrryFxce17)
+    if (userGithub && cleanUrl.toLowerCase() === userGithub) {
+      // Check if label matches a project repo in profile, e.g. "AI Job Finder"
+      const repos = (profile && profile.githubInsights && Array.isArray(profile.githubInsights.repos)) ? profile.githubInsights.repos : [];
+      const matched = repos.find(r => 
+        (r.name && r.name.toLowerCase().replace(/[-_]/g, ' ') === trimmedLabel.toLowerCase().replace(/[-_]/g, ' ')) ||
+        (r.name && trimmedLabel.toLowerCase().includes(r.name.toLowerCase().replace(/[-_]/g, ' ')))
+      );
+      if (matched && matched.url) {
+        return `${trimmedLabel} (${matched.url})`;
+      }
+      // If label looks like a project name, try slugifying to repo url
+      if (/^[A-Za-z0-9\s_-]+$/.test(trimmedLabel) && trimmedLabel.length < 35) {
+        const repoSlug = trimmedLabel.replace(/\s+/g, '-');
+        return `${trimmedLabel} (${cleanUrl}/${repoSlug})`;
+      }
+      return trimmedLabel;
+    }
+
+    return `${trimmedLabel} (${cleanUrl})`;
+  });
+
+  // 7. Clean any stray brackets around words e.g. [AI Job Finder]
+  cleaned = cleaned.replace(/\[([A-Za-z0-9\s._-]+)\](?!\()/g, '$1');
+
   return cleaned.trim();
 }
