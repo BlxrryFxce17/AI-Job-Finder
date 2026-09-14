@@ -4,18 +4,155 @@ const { GoogleGenAI } = require('@google/genai');
 const { callAIWithRetry } = require('./ai');
 const { isSeniorRole, detectExperienceLevel, shouldExcludeSenior } = require('./jobFilter');
 
+// Track Serper quota cooldown
+let serperCreditsExhaustedUntil = 0;
+
+// Check if a date string is older than 12 hours
+function isOlderThan12Hours(text) {
+  if (!text || typeof text !== 'string') return false;
+  const lower = text.toLowerCase().trim();
+
+  // Days, weeks, or months ago
+  if (/\b(?:[1-9]\d*)\s*(?:days?|weeks?|months?|yrs?|years?)\s*ago\b/i.test(lower)) return true;
+  if (/\b(?:yesterday|last\s+week|last\s+month)\b/i.test(lower)) return true;
+
+  // Hours ago (e.g. "13 hours ago", "18h ago")
+  const hourMatch = lower.match(/\b(\d+)\s*(?:hours?|hrs?|h)\s*ago\b/i);
+  if (hourMatch) {
+    const hours = parseInt(hourMatch[1], 10);
+    if (!isNaN(hours) && hours > 12) return true;
+  }
+
+  // Absolute date string
+  const parsedDate = new Date(text);
+  if (!isNaN(parsedDate.getTime())) {
+    const ageMs = Date.now() - parsedDate.getTime();
+    if (ageMs > 12 * 60 * 60 * 1000) return true;
+  }
+
+  return false;
+}
+
+// Normalize company name for duplicate checking
+function normalizeCompanyKey(name) {
+  if (!name || typeof name !== 'string') return '';
+  return name
+    .toLowerCase()
+    .replace(/\b(inc|incorporated|corp|corporation|ltd|limited|pvt|private|llc|gmbh|technologies|technology|solutions|services|group|systems|software|global|india|careers)\b/gi, '')
+    .replace(/[^a-z0-9]/g, '')
+    .trim();
+}
+
+// Normalize job role for duplicate checking
+function normalizeRoleKey(title) {
+  if (!title || typeof title !== 'string') return '';
+  return title
+    .toLowerCase()
+    .replace(/\s*[-–—(].*$/, '') // remove suffixes like "- Remote" or "(0-2 Yrs)"
+    .replace(/\b(remote|wfh|hybrid|fulltime|full-time|contract|urgent|immediate)\b/gi, '')
+    .replace(/[^a-z0-9]/g, '')
+    .trim();
+}
+
+// Normalize job URL by removing tracking parameters
+function normalizeApplyUrl(url) {
+  if (!url || typeof url !== 'string') return '';
+  try {
+    const parsed = new URL(url);
+    parsed.searchParams.delete('utm_source');
+    parsed.searchParams.delete('utm_medium');
+    parsed.searchParams.delete('utm_campaign');
+    parsed.searchParams.delete('utm_term');
+    parsed.searchParams.delete('utm_content');
+    parsed.searchParams.delete('ref');
+    parsed.searchParams.delete('source');
+    parsed.searchParams.delete('se');
+    parsed.hash = '';
+    return (parsed.origin + parsed.pathname).toLowerCase().replace(/\/+$/, '');
+  } catch (e) {
+    return url.split('?')[0].toLowerCase().replace(/\/+$/, '');
+  }
+}
+
+// Extract LinkedIn username handle from profile URL
+function extractLinkedInHandle(url) {
+  if (!url || typeof url !== 'string') return '';
+  const match = url.match(/linkedin\.com\/in\/([a-zA-Z0-9_-]+)/i);
+  return match ? match[1].toLowerCase().trim() : '';
+}
+
+// Normalize HR name by removing titles, pronouns, and credentials
+function normalizeHrName(name) {
+  if (!name || typeof name !== 'string') return '';
+  return name
+    .toLowerCase()
+    .replace(/\s*\([^)]*\)/g, '') // remove (he/him), (she/her), (hiring)
+    .replace(/[-–—/|]/g, ' ') // convert separators to spaces
+    .replace(/\b(mba|phr|sphr|shrm|cp|scp|pmp|cpc|recruiter|hr|talent|hiring|lead|manager|director)\b/gi, '')
+    .replace(/[^a-z0-9\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 async function scrapeJobsFree(query, location = 'India', excludeCompanies = []) {
   const jobs = [];
   
-  if (!process.env.SERPER_API_KEY) {
-    console.log('No SERPER_API_KEY, skipping free scrape.');
+  // Search jobs via Tavily if available
+  if (process.env.TAVILY_API_KEY) {
+    try {
+      const tavilyRes = await axios.post('https://api.tavily.com/search', {
+        api_key: process.env.TAVILY_API_KEY,
+        query: `site:linkedin.com/jobs/view "${query}" "${location}"`,
+        max_results: 10
+      }, { timeout: 8000 });
+
+      const results = tavilyRes.data?.results || [];
+      for (const res of results) {
+        const url = res.url || '';
+        const titleSnippet = res.title || '';
+        const descSnippet = res.content || '';
+
+        let company = 'Unknown Company';
+        let role = titleSnippet.split('|')[0].split('-')[0].trim() || 'Software Engineer';
+        if (titleSnippet.includes(' hiring ')) {
+          const parts = titleSnippet.split(' hiring ');
+          company = parts[0].trim();
+          role = parts[1].split(' in ')[0].trim();
+        } else if (titleSnippet.includes(' at ')) {
+          const parts = titleSnippet.split(' at ');
+          role = parts[0].trim();
+          company = parts[1].split('|')[0].split('-')[0].trim();
+        }
+
+        const compKey = normalizeCompanyKey(company);
+        if (compKey && excludeCompanies.some(ex => ex.length > 2 && (compKey.includes(ex) || ex.includes(compKey)))) {
+          continue;
+        }
+
+        jobs.push({
+          company,
+          role,
+          jd: descSnippet,
+          applyLink: url,
+          location: location,
+          source: url.includes('linkedin.com') ? 'LinkedIn' : 'Other',
+          experienceLevel: detectExperienceLevel(role, descSnippet),
+          publishedAt: new Date()
+        });
+      }
+    } catch (tavilyErr) {
+      console.warn('[Scraper] Tavily jobs search error:', tavilyErr.message);
+    }
+  }
+
+  if (!process.env.SERPER_API_KEY || Date.now() < serperCreditsExhaustedUntil) {
     return jobs;
   }
 
   const excludeSenior = shouldExcludeSenior(query);
   const seniorNegativeDorks = excludeSenior ? '-senior -sr -lead -principal -staff -architect -manager -director' : '';
 
-  // Google Dorking for recent job postings (last 24 hours)
+  // Google Dorking for recent job postings (strictly past 24 hours, filtered to <= 12 hours)
   const dorkQueries = [
     `site:linkedin.com/jobs/view "${query}" "India" ${seniorNegativeDorks}`.trim(),
     `site:in.indeed.com/viewjob "${query}" "India" ${seniorNegativeDorks}`.trim(),
@@ -24,11 +161,8 @@ async function scrapeJobsFree(query, location = 'India', excludeCompanies = []) 
 
   for (const q of dorkQueries) {
     try {
-      // Free tier Serper doesn't allow 'page' or 'num > 10' for 'site:' queries
-      // We will inject recent exclusions into the query string to get fresh results
       let dynamicQuery = q;
       if (excludeCompanies.length > 0) {
-        // Shuffle and pick 5 exclusions to dynamically shift search results without hitting limits
         const shuffledExclusions = [...excludeCompanies].sort(() => 0.5 - Math.random());
         const exclusions = shuffledExclusions.slice(0, 5).map(c => `-"${c}"`).join(' ');
         dynamicQuery = `${q} ${exclusions}`;
@@ -36,7 +170,7 @@ async function scrapeJobsFree(query, location = 'India', excludeCompanies = []) 
 
       const res = await axios.post('https://google.serper.dev/search', {
         q: dynamicQuery,
-        tbs: "qdr:w", // Expanded to Past week for wider net
+        tbs: "qdr:d", // Strictly past 24 hours
         num: 10
       }, {
         headers: {
@@ -52,6 +186,12 @@ async function scrapeJobsFree(query, location = 'India', excludeCompanies = []) 
           const url = result.link;
           const titleSnippet = result.title || '';
           const descSnippet = result.snippet || '';
+          const dateSnippet = result.date || '';
+
+          // Strictly enforce < 12 hours max freshness
+          if (isOlderThan12Hours(dateSnippet) || isOlderThan12Hours(descSnippet)) {
+            continue;
+          }
 
           // Deduce Source
           let source = 'Other';
@@ -143,7 +283,12 @@ Return ONLY valid JSON: {"company": "Extracted Company", "role": "Extracted Role
         }
       }
     } catch (err) {
-      console.error(`[Scraper] Error searching ${q}:`, err.message);
+      if (err.response?.data?.message === 'Not enough credits' || err.response?.status === 400) {
+        serperCreditsExhaustedUntil = Date.now() + 60 * 60 * 1000;
+        console.warn('[Scraper] Serper API credits exhausted (status 400). Pausing Serper requests.');
+        break;
+      }
+      console.warn(`[Scraper] Error searching ${q}:`, err.message);
     }
   }
 
@@ -186,7 +331,43 @@ Return valid JSON only: {"name": "Full Name", "linkedinUrl": "https://www.linked
 async function findHROnLinkedIn(company, location = 'India') {
   if (!company) return null;
 
-  if (process.env.SERPER_API_KEY) {
+  // 1. Search LinkedIn for HR via Tavily
+  if (process.env.TAVILY_API_KEY) {
+    try {
+      const tavilyRes = await axios.post('https://api.tavily.com/search', {
+        api_key: process.env.TAVILY_API_KEY,
+        query: `site:linkedin.com/in/ HR Recruiter "${company}" "${location}"`,
+        max_results: 5
+      }, { timeout: 8000 });
+
+      const results = tavilyRes.data?.results || [];
+      for (const item of results) {
+        if (!item.url?.includes('linkedin.com/in/')) continue;
+        let rawTitle = item.title || '';
+        let cleanName = rawTitle
+          .split('|')[0]
+          .split('-')[0]
+          .split('–')[0]
+          .split(':')[0]
+          .replace(/\b(HR|Talent|Recruiter|Manager|Director|Lead|Executive|Head|Consultant|Specialist|LinkedIn)\b/gi, '')
+          .replace(/[^a-zA-Z\s]/g, '')
+          .trim();
+
+        const nameParts = cleanName.split(/\s+/).filter(Boolean);
+        if (nameParts.length >= 2 && nameParts.length <= 4) {
+          return {
+            name: cleanName,
+            linkedinUrl: item.url,
+            snippet: item.content || item.title || `Recruiter at ${company}`
+          };
+        }
+      }
+    } catch (tavilyErr) {
+      console.warn('[HR-Scraper] Tavily HR search error:', tavilyErr.message);
+    }
+  }
+
+  if (process.env.SERPER_API_KEY && Date.now() >= serperCreditsExhaustedUntil) {
     try {
       const query = `site:linkedin.com/in/ "HR" OR "Talent Acquisition" OR "Recruiter" "${company}" "${location}"`;
       const res = await axios.post('https://google.serper.dev/search', {
@@ -233,9 +414,10 @@ async function findHROnLinkedIn(company, location = 'India') {
       }
     } catch (err) {
       if (err.response?.data?.message === 'Not enough credits' || err.response?.status === 400) {
+        serperCreditsExhaustedUntil = Date.now() + 60 * 60 * 1000;
         console.warn('[Scraper] Serper API credits exhausted. Switching to Gemini Company HR search...');
       } else {
-        console.error('[Scraper] Error finding HR via Serper:', err.message);
+        console.warn('[Scraper] Error finding HR via Serper:', err.message);
       }
     }
   }
@@ -402,12 +584,29 @@ const VERIFIED_TECH_RECRUITERS_DIRECTORY = [
   }
 ];
 
-function discoverHRProfilesFromDirectory(query = 'software engineer', location = 'India', existingUrls = []) {
-  const seenUrls = new Set((existingUrls || []).map(u => (u || '').toLowerCase().trim()));
+function discoverHRProfilesFromDirectory(query = 'software engineer', location = 'India', existingUrls = [], existingNames = [], existingHandles = []) {
+  const seenUrls = new Set((existingUrls || []).map(u => normalizeApplyUrl(u) || (u || '').toLowerCase().trim()));
+  const seenHandles = new Set((existingHandles || []).map(h => (h || '').toLowerCase().trim()).filter(Boolean));
+  for (const u of existingUrls || []) {
+    const h = extractLinkedInHandle(u);
+    if (h) seenHandles.add(h);
+  }
+  const seenNames = new Set((existingNames || []).map(n => normalizeHrName(n)).filter(Boolean));
   const qLower = (query || '').toLowerCase().trim();
 
+  const isDuplicate = (r) => {
+    const normUrl = normalizeApplyUrl(r.link);
+    const rawUrl = (r.link || '').toLowerCase().trim();
+    if (seenUrls.has(normUrl) || seenUrls.has(rawUrl)) return true;
+    const handle = extractLinkedInHandle(r.link);
+    if (handle && seenHandles.has(handle)) return true;
+    const normName = normalizeHrName(r.name);
+    if (normName && seenNames.has(normName)) return true;
+    return false;
+  };
+
   let matches = VERIFIED_TECH_RECRUITERS_DIRECTORY.filter(r => {
-    if (seenUrls.has(r.link.toLowerCase().trim())) return false;
+    if (isDuplicate(r)) return false;
     if (!qLower || qLower === 'software engineer' || qLower === 'software developer' || qLower === 'developer') return true;
     return r.company.toLowerCase().includes(qLower) ||
            r.role.toLowerCase().includes(qLower) ||
@@ -415,7 +614,7 @@ function discoverHRProfilesFromDirectory(query = 'software engineer', location =
   });
 
   if (matches.length < 6) {
-    const remaining = VERIFIED_TECH_RECRUITERS_DIRECTORY.filter(r => !seenUrls.has(r.link.toLowerCase().trim()) && !matches.includes(r));
+    const remaining = VERIFIED_TECH_RECRUITERS_DIRECTORY.filter(r => !isDuplicate(r) && !matches.includes(r));
     matches = [...matches, ...remaining];
   }
 
@@ -508,13 +707,26 @@ function parseHRItem(item) {
   return { name, role, company: company || '', link, snippet, rawTitle: title };
 }
 
-async function discoverHRProfilesGemini(query = 'software engineer', location = 'India', existingUrls = []) {
+async function discoverHRProfilesGemini(query = 'software engineer', location = 'India', existingUrls = [], existingNames = [], existingHandles = []) {
   if (!process.env.GEMINI_API_KEY) return [];
   try {
     const gemini = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const cleanQuery = (query || 'software engineer').trim();
+
+    const seenUrls = new Set((existingUrls || []).map(u => normalizeApplyUrl(u) || (u || '').toLowerCase().trim()));
+    const seenHandles = new Set((existingHandles || []).map(h => (h || '').toLowerCase().trim()).filter(Boolean));
+    for (const u of existingUrls || []) {
+      const h = extractLinkedInHandle(u);
+      if (h) seenHandles.add(h);
+    }
+    const seenNames = new Set((existingNames || []).map(n => normalizeHrName(n)).filter(Boolean));
+
+    const excludeNote = seenNames.size > 0
+      ? `\nDO NOT return any of these previously discovered recruiters: ${Array.from(seenNames).slice(0, 30).join(', ')}.`
+      : '';
+
     const prompt = `Search Google for 8 active Technical Recruiters, HR Managers, or Talent Acquisition Specialists in ${location} on LinkedIn using search query: site:linkedin.com/in/ ("Technical Recruiter" OR "Talent Acquisition" OR "IT Recruiter") "${cleanQuery}" "${location}".
-Extract only individual personal LinkedIn member profiles.
+Extract only individual personal LinkedIn member profiles.${excludeNote}
 Return a valid JSON array of objects:
 [
   {
@@ -543,14 +755,24 @@ IMPORTANT:
     if (jsonMatch) text = jsonMatch[0];
     const parsed = JSON.parse(text);
     if (Array.isArray(parsed)) {
-      const seenUrls = new Set((existingUrls || []).map(u => (u || '').toLowerCase().trim()));
       return parsed
         .filter(item => {
           if (!item.name || item.name.length < 2) return false;
           if (!item.link || !item.link.includes('linkedin.com/in/')) return false;
-          const lowerLink = item.link.toLowerCase().trim();
-          if (seenUrls.has(lowerLink)) return false;
-          seenUrls.add(lowerLink);
+          const rawLink = item.link.toLowerCase().trim();
+          const normLink = normalizeApplyUrl(item.link);
+          if (seenUrls.has(rawLink) || (normLink && seenUrls.has(normLink))) return false;
+
+          const handle = extractLinkedInHandle(item.link);
+          if (handle && seenHandles.has(handle)) return false;
+
+          const normName = normalizeHrName(item.name);
+          if (normName && seenNames.has(normName)) return false;
+
+          seenUrls.add(rawLink);
+          if (normLink) seenUrls.add(normLink);
+          if (handle) seenHandles.add(handle);
+          if (normName) seenNames.add(normName);
           return true;
         })
         .map(item => ({
@@ -569,11 +791,44 @@ IMPORTANT:
 }
 
 // Directly discover HR recruiters and talent acquisition leads on LinkedIn
-async function discoverHRProfiles(query = 'software engineer', location = 'India', existingUrls = []) {
+async function discoverHRProfiles(query = 'software engineer', location = 'India', existingUrls = [], existingNames = [], existingHandles = []) {
   const cleanQuery = (query || 'software engineer').trim();
   let allItems = [];
 
-  if (process.env.SERPER_API_KEY) {
+  const seenUrls = new Set((existingUrls || []).map(u => normalizeApplyUrl(u) || (u || '').toLowerCase().trim()));
+  const seenHandles = new Set((existingHandles || []).map(h => (h || '').toLowerCase().trim()).filter(Boolean));
+  for (const u of existingUrls || []) {
+    const h = extractLinkedInHandle(u);
+    if (h) seenHandles.add(h);
+  }
+  const seenNames = new Set((existingNames || []).map(n => normalizeHrName(n)).filter(Boolean));
+
+  // Tier 1: Discover HR profiles via Tavily
+  if (process.env.TAVILY_API_KEY) {
+    try {
+      const tavilyRes = await axios.post('https://api.tavily.com/search', {
+        api_key: process.env.TAVILY_API_KEY,
+        query: `site:linkedin.com/in/ ("Technical Recruiter" OR "Talent Acquisition") "${cleanQuery}" "${location}"`,
+        max_results: 10
+      }, { timeout: 8000 });
+
+      const results = tavilyRes.data?.results || [];
+      for (const item of results) {
+        if (item.url && item.url.includes('linkedin.com/in/')) {
+          allItems.push({
+            title: item.title,
+            link: item.url,
+            snippet: item.content || item.title
+          });
+        }
+      }
+    } catch (tavilyErr) {
+      console.warn('[HR-Scraper] Tavily leads search error:', tavilyErr.message);
+    }
+  }
+
+  // Tier 2: Serper fallback if Tavily found 0 and Serper credits available
+  if (allItems.length === 0 && process.env.SERPER_API_KEY && Date.now() >= serperCreditsExhaustedUntil) {
     const searchQueries = [
       `site:linkedin.com/in/ ("Technical Recruiter" OR "Talent Acquisition" OR "IT Recruiter") "${cleanQuery}" "${location}"`,
       `site:linkedin.com/in/ ("HR Manager" OR "Hiring" OR "Talent Partner") "${cleanQuery}" "${location}"`
@@ -596,11 +851,12 @@ async function discoverHRProfiles(query = 'software engineer', location = 'India
         }
       } catch (err) {
         if (err.response?.data?.message === 'Not enough credits' || err.response?.status === 400) {
-          console.warn('[Scraper] Serper API credits exhausted (400 Not enough credits). Switching to Gemini Google Search...');
+          serperCreditsExhaustedUntil = Date.now() + 60 * 60 * 1000;
+          console.warn('[Scraper] Serper API credits exhausted (status 400). Switching to Gemini Google Search...');
           allItems = [];
           break;
         } else {
-          console.error(`[Scraper] Error in Serper HR search for "${q}":`, err.message);
+          console.warn(`[Scraper] Error in Serper HR search for "${q}":`, err.message);
         }
       }
     }
@@ -610,7 +866,7 @@ async function discoverHRProfiles(query = 'software engineer', location = 'India
   if (allItems.length === 0) {
     console.log(`[Scraper] Discovering HR profiles via Gemini Google Search Grounding for "${cleanQuery}" in ${location}...`);
     try {
-      const geminiProfiles = await discoverHRProfilesGemini(cleanQuery, location, existingUrls);
+      const geminiProfiles = await discoverHRProfilesGemini(cleanQuery, location, existingUrls, existingNames, existingHandles);
       if (geminiProfiles && geminiProfiles.length > 0) {
         return geminiProfiles;
       }
@@ -618,34 +874,42 @@ async function discoverHRProfiles(query = 'software engineer', location = 'India
       console.warn('[Scraper] Gemini HR discovery failed, using directory:', e.message);
     }
     console.log(`[Scraper] Using verified recruiter directory for "${cleanQuery}" in ${location}...`);
-    return discoverHRProfilesFromDirectory(cleanQuery, location, existingUrls);
+    return discoverHRProfilesFromDirectory(cleanQuery, location, existingUrls, existingNames, existingHandles);
   }
 
-  // Deduplicate and filter out already known profile URLs
-  const seenUrls = new Set((existingUrls || []).map(u => (u || '').toLowerCase().trim()));
+  // Deduplicate and filter out already known profile URLs and handles
   const uniqueItems = [];
   for (const item of allItems) {
     if (!item.link) continue;
-    const lowerLink = item.link.toLowerCase().trim();
-    if (!seenUrls.has(lowerLink)) {
-      seenUrls.add(lowerLink);
-      uniqueItems.push(item);
-    }
+    const rawLink = item.link.toLowerCase().trim();
+    const normLink = normalizeApplyUrl(item.link);
+    const handle = extractLinkedInHandle(item.link);
+
+    if (seenUrls.has(rawLink) || (normLink && seenUrls.has(normLink))) continue;
+    if (handle && seenHandles.has(handle)) continue;
+
+    seenUrls.add(rawLink);
+    if (normLink) seenUrls.add(normLink);
+    if (handle) seenHandles.add(handle);
+    uniqueItems.push(item);
   }
 
   if (uniqueItems.length === 0) {
-    return discoverHRProfilesFromDirectory(cleanQuery, location, existingUrls);
+    return discoverHRProfilesFromDirectory(cleanQuery, location, existingUrls, existingNames, existingHandles);
   }
 
   // Parse candidate profiles using regex
   const candidates = uniqueItems.map(parseHRItem).filter(c => {
     const isRecruiter = /\b(recruiter|talent|hr|hiring|staffing|sourcer|people|human resources|ta\b)/i.test(c.role) ||
                         /\b(recruiter|talent|hr|hiring|staffing|sourcer|people|human resources|ta\b)/i.test(c.snippet);
-    return isRecruiter && c.name && c.name.length >= 2;
+    if (!isRecruiter || !c.name || c.name.length < 2) return false;
+    const normName = normalizeHrName(c.name);
+    if (normName && seenNames.has(normName)) return false;
+    return true;
   });
 
   if (candidates.length === 0) {
-    return discoverHRProfilesFromDirectory(cleanQuery, location, existingUrls);
+    return discoverHRProfilesFromDirectory(cleanQuery, location, existingUrls, existingNames, existingHandles);
   }
 
   // Single fast batch AI refinement to accurately extract Company and Role
@@ -690,15 +954,33 @@ Return ONLY valid JSON array.`;
     console.log('[Scraper] Batch AI HR refinement skipped:', aiErr.message);
   }
 
-  return candidates.map(c => ({
-    name: c.name,
-    role: c.role || 'Technical Recruiter',
-    company: (c.company && !isInvalidCompany(c.company)) ? c.company : 'Direct Recruiter / Agency',
-    link: c.link,
-    snippet: c.snippet,
-    location: location
-  }));
+  return candidates
+    .filter(c => {
+      const normName = normalizeHrName(c.name);
+      if (normName && seenNames.has(normName)) return false;
+      seenNames.add(normName);
+      return true;
+    })
+    .map(c => ({
+      name: c.name,
+      role: c.role || 'Technical Recruiter',
+      company: (c.company && !isInvalidCompany(c.company)) ? c.company : 'Direct Recruiter / Agency',
+      link: c.link,
+      snippet: c.snippet,
+      location: location
+    }));
 }
 
-module.exports = { scrapeJobsFree, findHROnLinkedIn, discoverHRProfiles, isInvalidCompany };
+module.exports = {
+  scrapeJobsFree,
+  findHROnLinkedIn,
+  discoverHRProfiles,
+  isInvalidCompany,
+  normalizeCompanyKey,
+  normalizeRoleKey,
+  normalizeApplyUrl,
+  extractLinkedInHandle,
+  normalizeHrName,
+  isOlderThan12Hours
+};
 

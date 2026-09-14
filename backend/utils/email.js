@@ -107,7 +107,29 @@ async function resolveCompanyDomain(company, applyLink = null) {
     }
   } catch (err) { }
 
-  // 4. Serper Google Search for Company Official Website (High precision)
+  // 4. Tavily search for Company Official Website (High precision, reliable)
+  if (process.env.TAVILY_API_KEY) {
+    try {
+      const tavilyRes = await axios.post('https://api.tavily.com/search', {
+        api_key: process.env.TAVILY_API_KEY,
+        query: `"${cleanName}" official website`,
+        max_results: 4
+      }, { timeout: 3500 });
+      const results = tavilyRes.data?.results || [];
+      for (const o of results) {
+        try {
+          const u = new URL(o.url);
+          const host = u.hostname.replace(/^www\./, '').toLowerCase();
+          if (!isJobBoardOrAtsDomain(host)) {
+            const mx = await checkMxRecords(host);
+            if (mx.valid) return finalizeDomain(host);
+          }
+        } catch(e) {}
+      }
+    } catch(err) { }
+  }
+
+  // 5. Serper Google Search fallback (if credits available)
   if (process.env.SERPER_API_KEY && Date.now() > serperCreditsExhaustedUntil) {
     try {
       const serperRes = await axios.post('https://google.serper.dev/search', {
@@ -192,6 +214,11 @@ async function sendEmailViaAPI(user, mailOptions) {
   }
 
   console.log(`✅ [Deliverability Guard] APPROVED for dispatch! (Score: ${verification.deliverabilityScore}%, Status: ${verification.status})`);
+  if (mailOptions.attachments && mailOptions.attachments.length > 0) {
+    console.log(`📎 [Email Dispatch] Including ${mailOptions.attachments.length} attachment(s): ${mailOptions.attachments.map(a => a.filename).join(', ')}`);
+  } else {
+    console.log(`ℹ️ [Email Dispatch] No attachments included for this dispatch.`);
+  }
   console.log(`======================================================\n`);
 
   const userEmail = user.email || process.env.EMAIL_USER;
@@ -964,7 +991,7 @@ function formatEmailTextToHtml(rawText, resumeLinkUrl = null) {
   return html;
 }
 
-function cleanDraftEmailText(text, profile = {}) {
+function cleanDraftEmailText(text, profile = {}, company = '', role = '') {
   if (!text) return '';
   let cleaned = String(text);
 
@@ -988,20 +1015,60 @@ function cleanDraftEmailText(text, profile = {}) {
   const github = (profile && profile.github) || '';
   const linkedin = (profile && profile.linkedin) || '';
   const portfolio = (profile && (profile.portfolio || profile.github || profile.linkedin)) || '';
+  const candName = (profile && profile.name) || 'Akash V';
+  const phone = (profile && profile.phone) || '';
+  const title = (profile && profile.title) || '';
 
+  // Name placeholders: replace [Your Name], [Name], [Candidate Name], etc.
+  cleaned = cleaned.replace(/\[(?:Your\s+|Candidate\s+|Applicant\s+|My\s+|Insert\s+)?(?:Full\s+|First\s+)?Name\]/gi, candName);
+  cleaned = cleaned.replace(/\b\[Your\s+Name\]\b/gi, candName);
+
+  // Location placeholders
   cleaned = cleaned.replace(/\[(?:Your\s+)?(?:City|Location)(?:,\s*Country)?\]/gi, loc);
+
+  // Portfolio / Website placeholders
   if (portfolio) {
-    cleaned = cleaned.replace(/\[(?:Link\s+to\s+)?Portfolio\]/gi, portfolio);
+    cleaned = cleaned.replace(/\[(?:Link\s+to\s+)?(?:Portfolio|Website|Portfolio\s+Website)(?:\s+URL)?\]/gi, portfolio);
   } else {
-    cleaned = cleaned.replace(/\[(?:Link\s+to\s+)?Portfolio\]/gi, 'available upon request');
+    cleaned = cleaned.replace(/\[(?:Link\s+to\s+)?(?:Portfolio|Website|Portfolio\s+Website)(?:\s+URL)?\]/gi, '');
   }
+
+  // GitHub placeholders
   if (github) {
     cleaned = cleaned.replace(/\[(?:Link\s+to\s+)?GitHub\]/gi, github);
   } else {
-    cleaned = cleaned.replace(/\[(?:Link\s+to\s+)?GitHub\]/gi, 'available upon request');
+    cleaned = cleaned.replace(/\[(?:Link\s+to\s+)?GitHub\]/gi, '');
   }
-  cleaned = cleaned.replace(/\[(?:Your\s+)?Name\]/gi, (profile && profile.name) || 'Akash V');
-  cleaned = cleaned.replace(/\[(?:Your\s+)?Phone(?:\s+Number)?\]/gi, (profile && profile.phone) || '');
+
+  // LinkedIn placeholders
+  if (linkedin) {
+    cleaned = cleaned.replace(/\[(?:Link\s+to\s+)?LinkedIn\]/gi, linkedin);
+  } else {
+    cleaned = cleaned.replace(/\[(?:Link\s+to\s+)?LinkedIn\]/gi, '');
+  }
+
+  // Phone placeholders
+  if (phone) {
+    cleaned = cleaned.replace(/\[(?:Your\s+|My\s+)?Phone(?:\s+Number)?\]/gi, phone);
+  } else {
+    cleaned = cleaned.replace(/\[(?:Your\s+|My\s+)?Phone(?:\s+Number)?\]/gi, '');
+  }
+
+  // Title placeholders
+  if (title) {
+    cleaned = cleaned.replace(/\[(?:Your\s+|Current\s+)?(?:Job\s+Title|Title|Position)\]/gi, title);
+  }
+
+  // Company / Role placeholders
+  if (company && typeof company === 'string' && company.toLowerCase() !== 'unknown company') {
+    cleaned = cleaned.replace(/\[(?:Target\s+)?Company(?:\s+Name)?\]/gi, company);
+  }
+  if (role && typeof role === 'string' && role.toLowerCase() !== 'general position') {
+    cleaned = cleaned.replace(/\[(?:Target\s+)?(?:Job\s+Title|Role|Position)\]/gi, role);
+  }
+
+  // Strip any remaining generic bracket placeholders like [Insert ...] or [Link to ...]
+  cleaned = cleaned.replace(/\[(?:Insert|Link\s+to)\s+[^\]]+\]/gi, '');
 
   // 6. Clean up raw markdown links [Label](URL) so no bracketed markdown leaks into plain text or email
   cleaned = cleaned.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (match, label, url) => {
@@ -1031,15 +1098,114 @@ function cleanDraftEmailText(text, profile = {}) {
     return `${trimmedLabel} (${cleanUrl})`;
   });
 
-  // 7. Clean any stray brackets around words e.g. [AI Job Finder]
+  // 7. Clean any stray brackets around words e.g. [AI Job Finder] -> AI Job Finder
   cleaned = cleaned.replace(/\[([A-Za-z0-9\s._-]+)\](?!\()/g, '$1');
 
   return cleaned.trim();
 }
 
-function stripSignOff(text) {
+function stripSignOff(text, profile = {}) {
   if (!text || typeof text !== 'string') return '';
-  return text.replace(/(?:\r?\n\s*)+(?:Yours\s+Sincerely|Sincerely|Best\s+regards|Warm\s+regards|Kind\s+regards|Regards|Best|Cheers)[\s\S]*$/i, '').trim();
+  let cleaned = text.trim();
+
+  // 1. Remove standard email closing valedictions (e.g. "Best regards,", "Sincerely,", "Thanks,")
+  // and everything following them to the end of the text.
+  cleaned = cleaned.replace(
+    /(?:\r?\n\s*)+(?:Yours\s+(?:Sincerely|Faithfully|Truly)|Sincerely|Best\s+regards|Warm\s+regards|Kind\s+regards|With\s+(?:warm\s+|kind\s+)?regards|Regards|Best|Cheers|Warmly|Respectfully|Cordially|Many\s+thanks|With\s+thanks|Thank\s+you|Thanks|Talk\s+soon|Best\s+wishes)\b[,.\s!]*[\s\S]*$/i,
+    ''
+  ).trim();
+
+  // 2. Remove trailing placeholder name lines like "\n\n[Your Name]" or "\n\nYour Name"
+  cleaned = cleaned.replace(
+    /(?:\r?\n\s*)+(?:\[(?:Your\s+|Candidate\s+|Applicant\s+|My\s+|Insert\s+)?(?:Full\s+|First\s+)?Name\]|(?:Your|Candidate|Applicant)\s+Name)[\s\S]*$/i,
+    ''
+  ).trim();
+
+  // 3. Remove trailing candidate name if the model outputted the user's name on its own trailing line
+  if (profile && profile.name && profile.name.trim().length >= 2) {
+    const escapedName = profile.name.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const trailingNameRegex = new RegExp(`(?:\\r?\\n\\s*)+(?:${escapedName})[,.\\s]*$`, 'i');
+    cleaned = cleaned.replace(trailingNameRegex, '').trim();
+  }
+
+  return cleaned;
+}
+
+/**
+ * Generates an intelligent, human, high-converting follow-up email draft (Day 3 or Day 6).
+ * Strictly prevents placeholders, robotic clichés, and rogue sign-offs.
+ */
+async function generateFollowUpEmail({ job, targetDay, profile = {}, callAIWithRetry }) {
+  const companyName = (job.company && !['unknown company', 'unknown', 'direct recruiter / agency'].includes(job.company.toLowerCase().trim()))
+    ? job.company.trim()
+    : '';
+  const greeting = companyName ? `Dear Hiring Manager at ${companyName},` : `Dear Hiring Manager,`;
+  const roleName = job.role || 'the open engineering role';
+  const candidateName = profile.name || 'Akash V';
+  const candidateTitle = profile.title || 'Software Developer';
+  const candidateSkills = (profile.skills && profile.skills.length > 0)
+    ? profile.skills.slice(0, 5).join(', ')
+    : 'React, Node.js, TypeScript, Python, Distributed Systems';
+  const candidatePortfolio = getEffectivePortfolio(profile);
+
+  const dayGuidelines = targetDay >= 6
+    ? `DAY 6 FINAL CHECK-IN RULES (CLOSING THE LOOP):
+- Keep it ultra-concise: strictly 2 to 3 sentences (between 40 and 65 words).
+- Graciously acknowledge that engineering hiring moves fast and inboxes get crowded.
+- Reaffirm genuine excitement for ${companyName || 'the team'} and the ${roleName} position.
+- State politely that this will be your final check-in so you don't clutter their inbox, but you'd welcome the chance to connect if priorities align now or in the future.
+- Tone: Confident, respectful, zero desperation or passive aggression.`
+    : `DAY 3 CHECK-IN RULES (CONCISE TOUCHPOINT):
+- Keep it ultra-concise: strictly 2 to 3 sentences (between 45 and 75 words).
+- Cordially float your previous outreach back to the top of their inbox with zero pressure.
+- Briefly highlight your enthusiasm for ${companyName || 'the team'} and how your hands-on background in ${candidateSkills} connects to their technical challenges.
+- End with a low-friction, open-ended question (e.g. asking if they'd be open to a brief 10-minute introductory conversation or if they'd like to see code samples/demo walkthroughs).
+- Tone: Crisp, proactive, highly professional.`;
+
+  const prompt = `You are ${candidateName}, a skilled ${candidateTitle}.
+Candidate Portfolio: ${candidatePortfolio || 'Available upon request'}
+Candidate GitHub: ${profile.github || ''}
+Candidate Key Tech: ${candidateSkills}
+
+You are writing a short, high-converting Day ${targetDay} follow-up email to the hiring team at ${companyName || 'the company'} for the "${roleName}" role.
+
+ORIGINAL EMAIL CONTEXT:
+"""
+${job.emailDraft || 'Initial application sent for ' + roleName}
+"""
+
+${dayGuidelines}
+
+CRITICAL RULES (ABSOLUTE COMPLIANCE REQUIRED):
+1. ZERO PLACEHOLDERS: NEVER output bracketed placeholders like [Your Name], [Name], [Candidate Name], [Company], [Link], [Phone], etc. Use real details or omit them entirely.
+2. STRICTLY NO SIGN-OFF OR CLOSING: DO NOT include any sign-off whatsoever (NO "Best regards,", "Sincerely,", "Warm regards,", "Cheers,", "Thanks,", and DO NOT include your name or "[Your Name]" at the end). The backend dispatch system will automatically append your verified signature with contact links. End IMMEDIATELY on the last sentence of your email body.
+3. ANTI-AI CLICHÉS (NO ROBOTIC CORPORATE FLUFF): NEVER write stiff phrases like:
+   - "regarding my technical experience to assist in your decision-making process"
+   - "I look forward to the possibility of discussing how my skills can benefit..."
+   - "I am writing to follow up on my previous application"
+   - "I hope this email finds you well"
+   - "Please do not hesitate to contact me"
+   Write in a genuine, confident, human developer voice.
+4. STARTING LINE: Start immediately with:
+${greeting}
+5. OUTPUT FORMAT: Return strictly the plain-text email body. No markdown fences (\`\`\`), no subject line, and no intro/outro commentary.`;
+
+  const response = await callAIWithRetry(prompt, 3, 2000);
+  let rawText = response.text.replace(/```(?:html|json|markdown)?\s*([\s\S]*?)```/g, '$1').trim();
+
+  // Strip any accidental email headers like "Subject: ..." or "Here is the follow-up:"
+  rawText = rawText.replace(/^(?:Subject:.*?[\r\n]+|Here(?:'s| is).*?:[\r\n]+)/i, '').trim();
+
+  // Ensure greeting is present
+  if (!rawText.toLowerCase().startsWith('dear')) {
+    rawText = `${greeting}\n\n${rawText}`;
+  }
+
+  // Clean placeholders and strip any trailing sign-off or [Your Name]
+  let cleaned = cleanDraftEmailText(rawText, profile, companyName, roleName);
+  cleaned = stripSignOff(cleaned, profile);
+
+  return cleaned.trim();
 }
 
 function extractPortfolioUrl(resumeText) {
@@ -1132,6 +1298,7 @@ module.exports = {
   formatEmailTextToHtml,
   cleanDraftEmailText,
   stripSignOff,
+  generateFollowUpEmail,
   getEffectivePortfolio,
   buildSignatureLinks,
   buildPlainTextSignature,

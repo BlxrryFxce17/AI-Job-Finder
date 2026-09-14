@@ -10,7 +10,7 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const cron = require('node-cron');
 const { callAIWithRetry } = require('./utils/ai');
-const { checkGmailForReply, sendEmailViaAPI, formatEmailTextToHtml, cleanDraftEmailText, buildSignatureLinks, buildPlainTextSignature } = require('./utils/email');
+const { checkGmailForReply, sendEmailViaAPI, formatEmailTextToHtml, cleanDraftEmailText, stripSignOff, generateFollowUpEmail, buildSignatureLinks, buildPlainTextSignature } = require('./utils/email');
 
 // Import Models
 const User = require('./models/User');
@@ -118,21 +118,14 @@ cron.schedule('0 9 * * *', async () => {
           draftToSend = existingFollowUp.draft;
         } else {
           console.log(`[Cron] Generating Day ${targetDay} follow-up for ${job.company}`);
-          const companyTarget = job.company && job.company.toLowerCase() !== 'unknown company' && job.company.toLowerCase() !== 'unknown' ? `at ${job.company}` : '';
-          const prompt = `Write a short, polite, and confident Day ${targetDay} follow-up email to the hiring manager ${companyTarget} for the ${job.role} position.
-Original Email Context:
-"""
-${job.emailDraft}
-"""
-Guidelines:
-- If Day 3: Reiterate interest and ask if they need more info.
-- If Day 6: Final polite bump, mentioning you're still highly interested.
-- Tone: ${profile.tone || 'Professional'}
-- Output ONLY the body of the email, starting with exactly "Dear Hiring Manager at ${job.company},". No subject, no sign-off, no markdown blocks.`;
-
           try {
-            const resAI = await callAIWithRetry(prompt, 3, 2000);
-            draftToSend = resAI.text.replace(/```(?:html|json|markdown)?\s*([\s\S]*?)```/g, '$1').trim();
+            const draft = await generateFollowUpEmail({
+              job,
+              targetDay,
+              profile,
+              callAIWithRetry
+            });
+            draftToSend = draft;
 
             if (!job.followUps) job.followUps = [];
             job.followUps.push({
@@ -157,11 +150,11 @@ Guidelines:
         if (draftToSend) {
           try {
             console.log(`[Cron] Sending Day ${targetDay} follow-up to ${job.emailRecipient}`);
-            const cleanText = cleanDraftEmailText(draftToSend, profile);
+            const cleanBody = stripSignOff(cleanDraftEmailText(draftToSend, profile, job.company, job.role), profile);
             const plainTextSignature = buildPlainTextSignature(profile);
-            const fullPlainText = cleanText.includes('Yours Sincerely') ? cleanText : `${cleanText}${plainTextSignature}`;
+            const fullPlainText = `${cleanBody}\n\n${plainTextSignature}`;
             const linksHtml = buildSignatureLinks(profile);
-            const formattedDraft = formatEmailTextToHtml(draftToSend);
+            const formattedDraft = formatEmailTextToHtml(cleanBody);
             const htmlBody = `
               <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
                 ${formattedDraft}

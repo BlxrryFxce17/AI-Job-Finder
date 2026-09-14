@@ -11,6 +11,7 @@ const {
   formatEmailTextToHtml,
   cleanDraftEmailText,
   stripSignOff,
+  generateFollowUpEmail,
   getEffectivePortfolio,
   buildSignatureLinks,
   buildPlainTextSignature,
@@ -50,7 +51,7 @@ router.post('/send-followup', requireAuth, async (req, res) => {
     const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${job.id}" width="1" height="1" style="display:none;" />` : '';
 
     const resumeLinkUrl = baseUrl ? trackClick(`${baseUrl}/api/profile/resume-pdf?userId=${user._id}`) : null;
-    const cleanBody = stripSignOff(cleanDraftEmailText(followUp.draft, profile));
+    const cleanBody = stripSignOff(cleanDraftEmailText(followUp.draft, profile, job.company, job.role), profile);
     const formattedDraft = formatEmailTextToHtml(cleanBody, resumeLinkUrl);
     const linksHtml = buildSignatureLinks(profile, trackClick);
 
@@ -132,22 +133,13 @@ router.post('/check-followups', requireAuth, async (req, res) => {
       }
 
       console.log(`[Manual Check] Generating Day ${targetDay} follow-up for ${job.company}`);
-      const companyTarget = job.company && job.company.toLowerCase() !== 'unknown company' && job.company.toLowerCase() !== 'unknown' ? `at ${job.company}` : '';
-      const prompt = `Write a short, polite, and confident Day ${targetDay} follow-up email to the hiring manager ${companyTarget} for the ${job.role} position.
-Original Email Context:
-"""
-${job.emailDraft}
-"""
-Guidelines:
-- If Day 3: Reiterate interest and ask if they need more info.
-- If Day 6: Final polite bump, mentioning you're still highly interested.
-- Tone: ${profile.tone || 'Professional'}
-- Output ONLY the body of the email, starting with exactly "Dear Hiring Manager at ${job.company},". No subject, no sign-off, no markdown blocks.`;
-
       try {
-        const resAI = await callAIWithRetry(prompt, 3, 2000);
-        let draft = resAI.text.replace(/\`\`\`(?:html|json|markdown)?\s*([\s\S]*?)\`\`\`/g, '$1').trim();
-        draft = cleanDraftEmailText(draft, profile);
+        const draft = await generateFollowUpEmail({
+          job,
+          targetDay,
+          profile,
+          callAIWithRetry
+        });
 
         if (!job.followUps) job.followUps = [];
         job.followUps.push({

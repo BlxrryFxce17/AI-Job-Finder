@@ -30,6 +30,38 @@ async function getProfile(userId, includePdf = false) {
   return profile;
 }
 
+// Attach user resume PDF to mail options if available
+async function attachResumeToMailOptions(mailOptions, profile, userId) {
+  if (!mailOptions.attachments) mailOptions.attachments = [];
+
+  let resumeBuffer = profile?.resumePdf;
+  let resumeFilename = profile?.resumeFilename || 'resume.pdf';
+
+  // If resume buffer is not loaded, fetch directly from database
+  if (!resumeBuffer && (userId || profile?.userId || profile?._id)) {
+    const targetUserId = userId || profile?.userId || profile?._id;
+    const fullProf = await Profile.findOne({ $or: [{ userId: targetUserId }, { _id: targetUserId }] }).select('resumePdf resumeFilename');
+    if (fullProf && fullProf.resumePdf) {
+      resumeBuffer = fullProf.resumePdf;
+      resumeFilename = fullProf.resumeFilename || resumeFilename;
+    }
+  }
+
+  if (resumeBuffer && resumeBuffer.length > 0) {
+    const filename = resumeFilename.toLowerCase().endsWith('.pdf') ? resumeFilename : `${resumeFilename}.pdf`;
+    mailOptions.attachments.push({
+      filename,
+      content: resumeBuffer,
+      contentType: 'application/pdf'
+    });
+    console.log(`📎 [Email Dispatch] Attached user CV: "${filename}" (${(resumeBuffer.length / 1024).toFixed(1)} KB)`);
+    return true;
+  } else {
+    console.warn(`⚠️ [Email Dispatch] No resume PDF found to attach for user: ${userId || profile?.userId}`);
+    return false;
+  }
+}
+
 // ── Intelligent JD-to-Repo Matching Engine ────────────────────────
 // Extracts tech keywords from the JD, scores each repo for relevance,
 // and returns a formatted string with the best-matched repos + deeper README context.
@@ -261,8 +293,9 @@ CRITICAL RULES FOR HIGH-CONVERTING COLD OUTREACH:
 5. CONCISE & SCANNABLE: Keep the entire body between 100 and 160 words total. Recruiter scanning time is 5 seconds.
 ${profile.enableFlex !== false ? '5. THE FLEX: ALWAYS include this exact postscript right before the end of your text: "P.S. I prioritize high-leverage automation—in fact, this entire outreach was discovered, tech-stack verified, and drafted by an autonomous multi-LLM pipeline I architected from scratch."' : ''}
 6. THE RESUME LINK: You MUST include the exact phrase "You can view my CV here." naturally towards the end of the email (before the postscript). DO NOT add any URLs, colons, or markdown links after this phrase. Just the exact phrase and a period.
-7. NO SIGN-OFF: DO NOT include any sign-off whatsoever (no "Best regards", "Sincerely", or your name). The backend system will automatically append the signature.
-8. OUTPUT FORMAT: You MUST output the response EXACTLY in the following format so our system can parse it. If the exact company name, role, or subject was not provided, you MUST extract or infer them from the Job Description.
+7. STRICTLY ZERO SIGN-OFF OR CLOSING VALEDICTION: DO NOT include any sign-off whatsoever (NO "Best regards", "Sincerely", "Warm regards", "Cheers", "Thanks", "Respectfully", and DO NOT include your name or "[Your Name]" at the end). The backend dispatch system autonomously appends the candidate's verified signature block and portfolio links. End immediately on the last sentence of your email body.
+8. ABSOLUTELY ZERO PLACEHOLDER TOKENS: NEVER output bracketed placeholders like [Your Name], [Name], [Candidate Name], [Link to Portfolio], [Your City], [Phone], [Company Name], [Role], [Date], etc. Always use the candidate's real details provided in this prompt or omit the mention cleanly.
+9. OUTPUT FORMAT: You MUST output the response EXACTLY in the following format so our system can parse it. If the exact company name, role, or subject was not provided, you MUST extract or infer them from the Job Description.
 ${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructions}` : ''}
 
 COMPANY: [Extracted Company Name or "Unknown Company"]
@@ -296,8 +329,8 @@ BODY:
     if (emailStartMatch) {
       draftText = draftText.substring(emailStartMatch.index + emailStartMatch[0].length);
     }
-    draftText = cleanDraftEmailText(draftText.trim(), profile);
-    draftText = stripSignOff(draftText);
+    draftText = cleanDraftEmailText(draftText.trim(), profile, extractedCompany, extractedRole);
+    draftText = stripSignOff(draftText, profile);
 
     res.json({ draft: draftText, company: extractedCompany, role: extractedRole, subject: extractedSubject });
   } catch (error) {
@@ -313,17 +346,18 @@ router.post('/send-email', requireAuth, async (req, res) => {
 
   try {
     const job = await Job.findOne({ id: jobId, userId: req.user.id });
-    const profile = await getProfile(req.user.id);
+    const profile = await getProfile(req.user.id, true);
     const user = await User.findById(req.user.id);
 
     const baseUrl = process.env.PUBLIC_URL;
+    const resumeLinkUrl = baseUrl ? `${baseUrl}/api/profile/resume-pdf?userId=${req.user.id}` : null;
 
     const trackClick = (url) => (baseUrl && url) ? `${baseUrl}/api/track-click/${jobId}?url=${encodeURIComponent(url)}` : (url || '');
     const linksHtml = buildSignatureLinks(profile, trackClick);
     const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${jobId}" width="1" height="1" style="display:none;" />` : '';
 
-    const cleanBody = stripSignOff(cleanDraftEmailText(body, profile));
-    const formattedDraft = formatEmailTextToHtml(cleanBody);
+    const cleanBody = stripSignOff(cleanDraftEmailText(body, profile, job?.company, job?.role), profile);
+    const formattedDraft = formatEmailTextToHtml(cleanBody, resumeLinkUrl);
 
     const htmlBody = `
       <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
@@ -351,9 +385,7 @@ router.post('/send-email', requireAuth, async (req, res) => {
       attachments: []
     };
 
-    if (profile.resumePdf) {
-      mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
-    }
+    await attachResumeToMailOptions(mailOptions, profile, req.user.id);
 
     const info = await sendEmailViaAPI(user, mailOptions);
     
@@ -380,7 +412,7 @@ router.post('/single-draft', requireAuth, async (req, res) => {
   const { company, role, jd, recipientEmail } = req.body;
 
   try {
-    const profile = await getProfile(req.user.id);
+    const profile = await getProfile(req.user.id, true);
     const user = await User.findById(req.user.id);
 
     const tone = profile.tone || 'Professional';
@@ -426,8 +458,9 @@ CRITICAL RULES FOR HIGH-CONVERTING COLD OUTREACH:
 5. CONCISE & SCANNABLE: Keep the entire body between 100 and 160 words total. Recruiter scanning time is 5 seconds.
 ${profile.enableFlex !== false ? '5. THE FLEX: ALWAYS include this exact postscript right before the end of your text: "P.S. I prioritize high-leverage automation—in fact, this entire outreach was discovered, tech-stack verified, and drafted by an autonomous multi-LLM pipeline I architected from scratch."' : ''}
 6. THE RESUME LINK: You MUST include the exact phrase "You can view my CV here." naturally towards the end of the email (before the postscript). DO NOT add any URLs, colons, or markdown links after this phrase. Just the exact phrase and a period. 
-7. NO SIGN-OFF: DO NOT include any sign-off whatsoever (no "Best regards", "Sincerely", or your name). The backend system will automatically append the signature.
-8. OUTPUT FORMAT: You MUST output the response EXACTLY in the following format so our system can parse it. If the exact company name, role, or subject was not provided, you MUST extract or infer them from the Job Description.
+7. STRICTLY ZERO SIGN-OFF OR CLOSING VALEDICTION: DO NOT include any sign-off whatsoever (NO "Best regards", "Sincerely", "Warm regards", "Cheers", "Thanks", "Respectfully", and DO NOT include your name or "[Your Name]" at the end). The backend dispatch system autonomously appends the candidate's verified signature block and portfolio links. End immediately on the last sentence of your email body.
+8. ABSOLUTELY ZERO PLACEHOLDER TOKENS: NEVER output bracketed placeholders like [Your Name], [Name], [Candidate Name], [Link to Portfolio], [Your City], [Phone], [Company Name], [Role], [Date], etc. Always use the candidate's real details provided in this prompt or omit the mention cleanly.
+9. OUTPUT FORMAT: You MUST output the response EXACTLY in the following format so our system can parse it. If the exact company name, role, or subject was not provided, you MUST extract or infer them from the Job Description.
 ${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructions}` : ''}
 
 COMPANY: [Extracted Company Name or "Unknown Company"]
@@ -461,7 +494,7 @@ BODY:
     if (emailStartMatch) {
       draftText = draftText.substring(emailStartMatch.index + emailStartMatch[0].length).trim();
     }
-    const cleanBody = stripSignOff(cleanDraftEmailText(draftText, profile));
+    const cleanBody = stripSignOff(cleanDraftEmailText(draftText, profile, extractedCompany, extractedRole), profile);
     const plainTextSignature = buildPlainTextSignature(profile);
     const fullPlainText = `${cleanBody}\n\n${plainTextSignature}`;
 
@@ -485,11 +518,12 @@ BODY:
     }
 
     const baseUrl = process.env.PUBLIC_URL;
+    const resumeLinkUrl = baseUrl ? `${baseUrl}/api/profile/resume-pdf?userId=${req.user.id}` : null;
     const jobId = Date.now().toString() + Math.random().toString().substring(2, 6);
     const trackClick = (url) => (baseUrl && url) ? `${baseUrl}/api/track-click/${jobId}?url=${encodeURIComponent(url)}` : (url || '');
     const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${jobId}" width="1" height="1" style="display:none;" />` : '';
 
-    const formattedDraft = formatEmailTextToHtml(cleanBody);
+    const formattedDraft = formatEmailTextToHtml(cleanBody, resumeLinkUrl);
     const linksHtml = buildSignatureLinks(profile, trackClick);
     const htmlBody = `
       <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
@@ -514,9 +548,7 @@ BODY:
       attachments: []
     };
 
-    if (profile.resumePdf) {
-      mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
-    }
+    await attachResumeToMailOptions(mailOptions, profile, req.user.id);
 
     await sendEmailViaAPI(user, mailOptions);
 
@@ -544,7 +576,7 @@ BODY:
 router.post('/test-email', requireAuth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
-    const profile = await getProfile(req.user.id);
+    const profile = await getProfile(req.user.id, true);
     const myEmail = user.email || process.env.EMAIL_USER;
     if (!myEmail) return res.status(500).json({ error: 'EMAIL_USER not configured in backend' });
 
@@ -569,8 +601,10 @@ INSTRUCTIONS FOR THE EMAIL DRAFT:
 3. TONE & STRUCTURE: Keep it concise, confident, and highly impressive. Do not use generic filler (e.g., "I hope this email finds you well"). Start with a strong hook, deliver the value proposition (the mapped skills), and end with a soft call to action.
 ${profile.enableFlex !== false ? '4. THE FLEX: ALWAYS include this exact postscript right before the sign-off: "P.S. I\'m highly passionate about automation and software engineering—in fact, I built the AI web-scraper and autonomous agent that found this job and drafted this email!"' : ''}
 5. THE RESUME LINK: You MUST include the exact phrase "You can view my CV here." somewhere naturally towards the end of the email (before the postscript). DO NOT add any URLs, colons, or markdown links after this phrase. Just the exact phrase and a period. 
-6. OUTPUT STRICTLY the final email content (body only, no signature, no name). No conversational filler, no internal thoughts, no analysis, and NO MARKDOWN BLOCKS (like \`\`\`email).
-7. CRITICAL: The very first word of your output MUST be "Dear", "Hi", or the start of the email body. NEVER write "I have crafted...", "Here is the email...", or any conversational intro. Any intro text will break our automated pipeline.
+6. STRICTLY NO SIGN-OFF: Output body only, absolutely NO closing valediction (NO "Best regards", "Sincerely", "Thanks", "Warm regards"), and NO candidate name or "[Your Name]" at the bottom.
+7. ZERO PLACEHOLDERS: NEVER use bracketed placeholder tokens like [Your Name], [Your City], [Link], etc.
+8. OUTPUT STRICTLY the final email content (body only, no signature, no name). No conversational filler, no internal thoughts, no analysis, and NO MARKDOWN BLOCKS (like \`\`\`email).
+9. CRITICAL: The very first word of your output MUST be "Dear", "Hi", or the start of the email body. NEVER write "I have crafted...", "Here is the email...", or any conversational intro. Any intro text will break our automated pipeline.
 ${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructions}` : ''}`;
 
     const response = await callAIWithRetry(prompt);
@@ -580,10 +614,12 @@ ${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructio
     if (emailStartMatch) {
       draftText = draftText.substring(emailStartMatch.index + emailStartMatch[0].length);
     }
-    const cleanBody = stripSignOff(cleanDraftEmailText(draftText.trim(), profile));
-    const formattedDraft = formatEmailTextToHtml(cleanBody);
+    const cleanBody = stripSignOff(cleanDraftEmailText(draftText.trim(), profile, company, role), profile);
 
     const baseUrl = process.env.PUBLIC_URL;
+    const resumeLinkUrl = baseUrl ? `${baseUrl}/api/profile/resume-pdf?userId=${req.user.id}` : null;
+    const formattedDraft = formatEmailTextToHtml(cleanBody, resumeLinkUrl);
+
     const testJobId = Date.now().toString();
     const trackClick = (url) => (baseUrl && url) ? `${baseUrl}/api/track-click/${testJobId}?url=${encodeURIComponent(url)}` : (url || '');
     const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${testJobId}" width="1" height="1" style="display:none;" />` : '';
@@ -614,9 +650,7 @@ ${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructio
       attachments: []
     };
 
-    if (profile.resumePdf) {
-      mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
-    }
+    await attachResumeToMailOptions(mailOptions, profile, req.user.id);
 
     await sendEmailViaAPI(user, mailOptions);
 
@@ -966,6 +1000,7 @@ CRITICAL FORMATTING & WRITING INSTRUCTIONS:
 - If listing points, use clean standard bullet symbols (• ) or dashes (- ). NEVER use * or ** for lists.
 - If the recruiter asks for work samples, live demos, portfolio, personal website, or code links, naturally include the candidate's portfolio (${profile.portfolio || ''}) or GitHub (${profile.github || ''}).
 - NEVER use placeholder brackets like [Your City, Country], [Link to Portfolio], [Your Name], etc. Use the candidate's real details provided above or omit placeholder text entirely.
+- STRICTLY NO SIGN-OFF OR SENDER NAME: Output strictly the reply message body. Do NOT include "Best regards", "Sincerely", "Thanks", "Warmly", or the candidate's name at the end. The backend system automatically attaches the signature.
 
 Draft 3 distinct options (Option 1: Warm & Enthusiastic, Option 2: Direct & Professional, Option 3: Confident & Concise).
 Separate each draft using the exact delimiter "===DRAFT===" on its own line.
@@ -990,7 +1025,7 @@ Do not include any conversational text, explanations, or markdown code fences. R
     if (draftOptions.length === 0 && rawText.length > 20) {
       draftOptions = [rawText];
     }
-    draftOptions = draftOptions.slice(0, 3).map(draft => cleanDraftEmailText(draft, profile));
+    draftOptions = draftOptions.slice(0, 3).map(draft => stripSignOff(cleanDraftEmailText(draft, profile), profile));
 
     res.json({ drafts: draftOptions });
   } catch (err) {
@@ -1005,7 +1040,7 @@ router.post('/inbox/send-reply', requireAuth, async (req, res) => {
     const user = await User.findById(req.user.id);
     const profile = await getProfile(req.user.id);
 
-    const cleanBody = stripSignOff(cleanDraftEmailText(body, profile));
+    const cleanBody = stripSignOff(cleanDraftEmailText(body, profile), profile);
     const formattedDraft = formatEmailTextToHtml(cleanBody);
     const linksHtml = buildSignatureLinks(profile);
     
