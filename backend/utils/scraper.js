@@ -331,14 +331,24 @@ Return valid JSON only: {"name": "Full Name", "linkedinUrl": "https://www.linked
 async function findHROnLinkedIn(company, location = 'India') {
   if (!company) return null;
 
-  // 1. Search LinkedIn for HR via Tavily
+  // 1. Instant check in verified directory
+  const dirMatch = VERIFIED_TECH_RECRUITERS_DIRECTORY.find(r => r.company.toLowerCase() === company.toLowerCase().trim());
+  if (dirMatch) {
+    return {
+      name: dirMatch.name,
+      linkedinUrl: dirMatch.link,
+      snippet: dirMatch.snippet
+    };
+  }
+
+  // 2. Search LinkedIn for HR via Tavily (fast 3.5s timeout)
   if (process.env.TAVILY_API_KEY) {
     try {
       const tavilyRes = await axios.post('https://api.tavily.com/search', {
         api_key: process.env.TAVILY_API_KEY,
-        query: `site:linkedin.com/in/ HR Recruiter "${company}" "${location}"`,
+        query: `site:linkedin.com/in/ ("Technical Recruiter" OR "Talent Acquisition" OR "HR") "${company}" "${location}"`,
         max_results: 5
-      }, { timeout: 8000 });
+      }, { timeout: 3500 });
 
       const results = tavilyRes.data?.results || [];
       for (const item of results) {
@@ -367,6 +377,7 @@ async function findHROnLinkedIn(company, location = 'India') {
     }
   }
 
+  // 3. Fallback to Serper (fast 3.5s timeout)
   if (process.env.SERPER_API_KEY && Date.now() >= serperCreditsExhaustedUntil) {
     try {
       const query = `site:linkedin.com/in/ "HR" OR "Talent Acquisition" OR "Recruiter" "${company}" "${location}"`;
@@ -378,7 +389,7 @@ async function findHROnLinkedIn(company, location = 'India') {
           'X-API-KEY': process.env.SERPER_API_KEY,
           'Content-Type': 'application/json'
         },
-        timeout: 8000
+        timeout: 3500
       });
 
       const organic = res.data.organic || [];
@@ -394,7 +405,6 @@ async function findHROnLinkedIn(company, location = 'India') {
           .trim();
 
         const nameParts = cleanName.split(/\s+/).filter(Boolean);
-        // Valid personal name is typically 2-3 words
         if (nameParts.length >= 2 && nameParts.length <= 4) {
           return {
             name: cleanName,
@@ -422,18 +432,16 @@ async function findHROnLinkedIn(company, location = 'India') {
     }
   }
 
-  // Resilient fallback using Gemini Google Search Grounding
-  const geminiHR = await findHROnLinkedInGemini(company, location);
-  if (geminiHR) return geminiHR;
-
-  const dirMatch = VERIFIED_TECH_RECRUITERS_DIRECTORY.find(r => r.company.toLowerCase() === company.toLowerCase().trim());
-  if (dirMatch) {
-    return {
-      name: dirMatch.name,
-      linkedinUrl: dirMatch.link,
-      snippet: dirMatch.snippet
-    };
+  // 4. Quick Gemini fallback (capped at 5s timeout)
+  try {
+    const geminiPromise = findHROnLinkedInGemini(company, location);
+    const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), 5000));
+    const geminiHR = await Promise.race([geminiPromise, timeoutPromise]);
+    if (geminiHR) return geminiHR;
+  } catch (geminiErr) {
+    console.warn('[Scraper] Gemini HR lookup error:', geminiErr.message);
   }
+
   return {
     name: `${company} Talent Acquisition`,
     linkedinUrl: `https://www.linkedin.com/search/results/all/?keywords=${encodeURIComponent(company + ' technical recruiter ' + location)}`,
@@ -793,6 +801,7 @@ IMPORTANT:
 // Directly discover HR recruiters and talent acquisition leads on LinkedIn
 async function discoverHRProfiles(query = 'software engineer', location = 'India', existingUrls = [], existingNames = [], existingHandles = []) {
   const cleanQuery = (query || 'software engineer').trim();
+  const searchKeyword = cleanQuery.replace(/\b(fresher|entry-level|junior|senior|intern|lead|associate)\b/gi, '').trim() || 'software engineer';
   let allItems = [];
 
   const seenUrls = new Set((existingUrls || []).map(u => normalizeApplyUrl(u) || (u || '').toLowerCase().trim()));
@@ -803,14 +812,14 @@ async function discoverHRProfiles(query = 'software engineer', location = 'India
   }
   const seenNames = new Set((existingNames || []).map(n => normalizeHrName(n)).filter(Boolean));
 
-  // Tier 1: Discover HR profiles via Tavily
+  // Tier 1: Discover HR profiles via Tavily (fast 4s timeout)
   if (process.env.TAVILY_API_KEY) {
     try {
       const tavilyRes = await axios.post('https://api.tavily.com/search', {
         api_key: process.env.TAVILY_API_KEY,
-        query: `site:linkedin.com/in/ ("Technical Recruiter" OR "Talent Acquisition") "${cleanQuery}" "${location}"`,
+        query: `site:linkedin.com/in/ ("Technical Recruiter" OR "Talent Acquisition" OR "IT Recruiter" OR "HR") ("${searchKeyword}" OR "${cleanQuery}") "${location}"`,
         max_results: 10
-      }, { timeout: 8000 });
+      }, { timeout: 4000 });
 
       const results = tavilyRes.data?.results || [];
       for (const item of results) {
@@ -827,46 +836,43 @@ async function discoverHRProfiles(query = 'software engineer', location = 'India
     }
   }
 
-  // Tier 2: Serper fallback if Tavily found 0 and Serper credits available
+  // Tier 2: Serper fallback in parallel if Tavily found 0 and Serper credits available
   if (allItems.length === 0 && process.env.SERPER_API_KEY && Date.now() >= serperCreditsExhaustedUntil) {
     const searchQueries = [
-      `site:linkedin.com/in/ ("Technical Recruiter" OR "Talent Acquisition" OR "IT Recruiter") "${cleanQuery}" "${location}"`,
-      `site:linkedin.com/in/ ("HR Manager" OR "Hiring" OR "Talent Partner") "${cleanQuery}" "${location}"`
+      `site:linkedin.com/in/ ("Technical Recruiter" OR "Talent Acquisition" OR "IT Recruiter") "${searchKeyword}" "${location}"`,
+      `site:linkedin.com/in/ ("HR Manager" OR "Hiring" OR "Talent Partner") "${searchKeyword}" "${location}"`
     ];
 
-    for (const q of searchQueries) {
-      try {
-        const res = await axios.post('https://google.serper.dev/search', {
-          q,
-          num: 10
-        }, {
-          headers: {
-            'X-API-KEY': process.env.SERPER_API_KEY,
-            'Content-Type': 'application/json'
-          },
-          timeout: 8000
-        });
-        if (res.data && Array.isArray(res.data.organic)) {
+    try {
+      const serperPromises = searchQueries.map(q =>
+        axios.post('https://google.serper.dev/search', { q, num: 10 }, {
+          headers: { 'X-API-KEY': process.env.SERPER_API_KEY, 'Content-Type': 'application/json' },
+          timeout: 3500
+        }).catch(err => {
+          if (err.response?.data?.message === 'Not enough credits' || err.response?.status === 400) {
+            serperCreditsExhaustedUntil = Date.now() + 60 * 60 * 1000;
+          }
+          return null;
+        })
+      );
+      const responses = await Promise.all(serperPromises);
+      for (const res of responses) {
+        if (res?.data && Array.isArray(res.data.organic)) {
           allItems.push(...res.data.organic);
         }
-      } catch (err) {
-        if (err.response?.data?.message === 'Not enough credits' || err.response?.status === 400) {
-          serperCreditsExhaustedUntil = Date.now() + 60 * 60 * 1000;
-          console.warn('[Scraper] Serper API credits exhausted (status 400). Switching to Gemini Google Search...');
-          allItems = [];
-          break;
-        } else {
-          console.warn(`[Scraper] Error in Serper HR search for "${q}":`, err.message);
-        }
       }
+    } catch (err) {
+      console.warn('[Scraper] Error in parallel Serper HR search:', err.message);
     }
   }
 
-  // If Serper yielded no items (e.g. no key, exhausted credits, or zero organic results), fallback to Gemini Google Search Grounding
+  // Tier 3: Gemini Google Search Grounding capped at 5s timeout
   if (allItems.length === 0) {
     console.log(`[Scraper] Discovering HR profiles via Gemini Google Search Grounding for "${cleanQuery}" in ${location}...`);
     try {
-      const geminiProfiles = await discoverHRProfilesGemini(cleanQuery, location, existingUrls, existingNames, existingHandles);
+      const geminiPromise = discoverHRProfilesGemini(cleanQuery, location, existingUrls, existingNames, existingHandles);
+      const timeoutPromise = new Promise(resolve => setTimeout(() => resolve([]), 5000));
+      const geminiProfiles = await Promise.race([geminiPromise, timeoutPromise]);
       if (geminiProfiles && geminiProfiles.length > 0) {
         return geminiProfiles;
       }

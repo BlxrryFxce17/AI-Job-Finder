@@ -1036,15 +1036,18 @@ router.post('/scrape-hr', requireAuth, async (req, res) => {
       Array.from(existingHandles)
     );
 
-    // Fallback search by company name if needed
-    if (hrProfiles.length < 5) {
+    // Fallback search by query/company name ONLY if 0 profiles found
+    if (hrProfiles.length === 0) {
       try {
-        const companyHr = await findHROnLinkedIn(query, location);
+        const companyHr = await Promise.race([
+          findHROnLinkedIn(query, location),
+          new Promise(resolve => setTimeout(() => resolve(null), 3000))
+        ]);
         if (companyHr && companyHr.name) {
           const normName = normalizeHrName(companyHr.name);
           const handle = extractLinkedInHandle(companyHr.linkedinUrl);
           if ((!normName || !existingNames.has(normName)) && (!handle || !existingHandles.has(handle))) {
-            hrProfiles.unshift({
+            hrProfiles.push({
               name: companyHr.name,
               role: 'Talent Acquisition / HR Recruiter',
               company: query,
@@ -1055,26 +1058,18 @@ router.post('/scrape-hr', requireAuth, async (req, res) => {
           }
         }
       } catch (compErr) {
-        console.error('[Scrape-HR] Company fallback HR error:', compErr.message);
+        console.warn('[Scrape-HR] Fast fallback HR error:', compErr.message);
       }
     }
 
-    const results = [];
-
-    // Save unique HR leads
+    // Select up to 10 unique candidates
+    const candidates = [];
     for (const hr of hrProfiles) {
-      if (req.destroyed || req.socket?.destroyed) {
-        console.log('[Scrape-HR] Request aborted by client. Halting HR lead processing.');
-        return;
-      }
-      if (results.length >= 10) break; // Deliver up to 10 quality unique leads per run
-
+      if (candidates.length >= 10) break;
       const normName = normalizeHrName(hr.name);
       if (!normName || existingNames.has(normName)) continue;
-
       const handle = extractLinkedInHandle(hr.link);
       if (handle && existingHandles.has(handle)) continue;
-
       const compKey = normalizeCompanyKey(hr.company);
       const compHrKey = `${compKey}__${normName}`;
       if (compKey && existingCompanyHr.has(compHrKey)) continue;
@@ -1082,64 +1077,75 @@ router.post('/scrape-hr', requireAuth, async (req, res) => {
       existingNames.add(normName);
       if (handle) existingHandles.add(handle);
       if (compKey) existingCompanyHr.add(compHrKey);
-
-      let discoveredEmail = '';
-      let deliverabilityScore = 0;
-      let deliverabilityStatus = 'unverified';
-      let deliverabilityReason = '';
-
-      const isGenuineCompany = hr.company && !isInvalidCompany(hr.company) && hr.company !== 'Direct Recruiter / Agency';
-      if (isGenuineCompany) {
-        try {
-          const domain = await resolveCompanyDomain(hr.company, hr.link);
-          if (domain && domain !== 'unknown.com') {
-            const emailPromise = discoverEmailForJob(
-              hr.company,
-              domain,
-              hr.snippet || '',
-              [],
-              callAIWithRetry,
-              hr.name,
-              hr.link,
-              hr.link
-            );
-            const timeoutPromise = new Promise(resolve => setTimeout(() => resolve({ email: null }), 8000));
-            const emailRes = await Promise.race([emailPromise, timeoutPromise]);
-            if (emailRes && emailRes.email && (emailRes.deliverabilityScore >= 65 || emailRes.verification?.canAutoSend)) {
-              discoveredEmail = emailRes.email;
-              deliverabilityScore = emailRes.deliverabilityScore || 80;
-              deliverabilityStatus = emailRes.deliverabilityStatus || 'deliverable';
-              deliverabilityReason = emailRes.deliverabilityReason || 'Verified corporate email';
-            }
-          }
-        } catch (emailErr) {
-          console.log('[Scrape-HR] Email discovery skipped for HR:', emailErr.message);
-        }
-      }
-
-      const newJob = new Job({
-        userId: req.user.id,
-        id: Date.now().toString() + Math.random().toString().substring(2, 6),
-        company: isGenuineCompany ? hr.company : 'Direct Recruiter / Agency',
-        role: hr.role || 'Technical Recruiter',
-        jd: hr.snippet || `Talent Acquisition & Hiring for ${query}${isGenuineCompany ? ' at ' + hr.company : ''}`,
-        status: 'HR_Found',
-        applyLink: hr.link || '',
-        location: hr.location || location,
-        source: 'LinkedIn',
-        experienceLevel: targetExperience || 'Mid',
-        emailRecipient: discoveredEmail,
-        deliverabilityScore: deliverabilityScore || (discoveredEmail ? 80 : 0),
-        deliverabilityStatus: deliverabilityStatus || (discoveredEmail ? 'deliverable' : 'unverified'),
-        deliverabilityReason: deliverabilityReason || '',
-        hrName: hr.name,
-        hrLinkedIn: hr.link || '',
-        publishedAt: new Date()
-      });
-
-      await newJob.save();
-      results.push(newJob);
+      candidates.push(hr);
     }
+
+    if (req.destroyed || req.socket?.destroyed) {
+      console.log('[Scrape-HR] Request aborted by client before lead dispatch.');
+      return;
+    }
+
+    // Process all candidates in parallel with 2.5s timeout per lead
+    const results = await Promise.all(
+      candidates.map(async (hr) => {
+        let discoveredEmail = '';
+        let deliverabilityScore = 0;
+        let deliverabilityStatus = 'unverified';
+        let deliverabilityReason = '';
+
+        const isGenuineCompany = hr.company && !isInvalidCompany(hr.company) && hr.company !== 'Direct Recruiter / Agency';
+        if (isGenuineCompany) {
+          try {
+            const domain = await resolveCompanyDomain(hr.company, hr.link);
+            if (domain && domain !== 'unknown.com') {
+              const emailPromise = discoverEmailForJob(
+                hr.company,
+                domain,
+                hr.snippet || '',
+                [],
+                callAIWithRetry,
+                hr.name,
+                hr.link,
+                hr.link
+              );
+              const timeoutPromise = new Promise(resolve => setTimeout(() => resolve({ email: null }), 2500));
+              const emailRes = await Promise.race([emailPromise, timeoutPromise]);
+              if (emailRes && emailRes.email && (emailRes.deliverabilityScore >= 65 || emailRes.verification?.canAutoSend)) {
+                discoveredEmail = emailRes.email;
+                deliverabilityScore = emailRes.deliverabilityScore || 80;
+                deliverabilityStatus = emailRes.deliverabilityStatus || 'deliverable';
+                deliverabilityReason = emailRes.deliverabilityReason || 'Verified corporate email';
+              }
+            }
+          } catch (emailErr) {
+            // Silently skip email resolution errors to keep lead ingestion fast
+          }
+        }
+
+        const newJob = new Job({
+          userId: req.user.id,
+          id: Date.now().toString() + Math.random().toString().substring(2, 6),
+          company: isGenuineCompany ? hr.company : 'Direct Recruiter / Agency',
+          role: hr.role || 'Technical Recruiter',
+          jd: hr.snippet || `Talent Acquisition & Hiring for ${query}${isGenuineCompany ? ' at ' + hr.company : ''}`,
+          status: 'HR_Found',
+          applyLink: hr.link || '',
+          location: hr.location || location,
+          source: 'LinkedIn',
+          experienceLevel: targetExperience || 'Mid',
+          emailRecipient: discoveredEmail,
+          deliverabilityScore: deliverabilityScore || (discoveredEmail ? 80 : 0),
+          deliverabilityStatus: deliverabilityStatus || (discoveredEmail ? 'deliverable' : 'unverified'),
+          deliverabilityReason: deliverabilityReason || '',
+          hrName: hr.name,
+          hrLinkedIn: hr.link || '',
+          publishedAt: new Date()
+        });
+
+        await newJob.save();
+        return newJob;
+      })
+    );
 
     console.log(`[Scrape-HR] Successfully discovered ${results.length} fresh unique HR leads!`);
     res.json({ success: true, count: results.length, jobs: results });
