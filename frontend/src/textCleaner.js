@@ -30,59 +30,122 @@ export function getEffectivePortfolio(profile) {
   return profile.github || '';
 }
 
-/**
- * Utility function to clean email drafts from raw markdown artifacts.
- * Strips raw bolding (**, __), standardizes bullet points, strips rogue asterisks,
- * and fills or removes bracket placeholders like [Your City, Country] or [Link to Portfolio].
- */
-export function cleanDraftText(text, profile = {}) {
+// Remove email sign-off and trailing names
+export function stripSignOff(text, profile = {}) {
+  if (!text || typeof text !== 'string') return '';
+  let cleaned = text.trim();
+
+  // 1. Remove closing valedictions (e.g. "Best regards,", "Sincerely,")
+  cleaned = cleaned.replace(
+    /(?:\r?\n\s*)+(?:Yours\s+(?:Sincerely|Faithfully|Truly)|Sincerely|Best\s+regards|Warm\s+regards|Kind\s+regards|With\s+(?:warm\s+|kind\s+)?regards|Regards|Best|Cheers|Warmly|Respectfully|Cordially|Many\s+thanks|With\s+thanks|Thank\s+you|Thanks|Talk\s+soon|Best\s+wishes)\b[,.\s!]*[\s\S]*$/i,
+    ''
+  ).trim();
+
+  // 2. Remove trailing name placeholders (e.g. "[Your Name]")
+  cleaned = cleaned.replace(
+    /(?:\r?\n\s*)+(?:\[(?:Your\s+|Candidate\s+|Applicant\s+|My\s+|Insert\s+)?(?:Full\s+|First\s+)?Name\]|(?:Your|Candidate|Applicant)\s+Name)[\s\S]*$/i,
+    ''
+  ).trim();
+
+  // 3. Remove candidate name if printed on its own trailing line
+  if (profile && profile.name && profile.name.trim().length >= 2) {
+    const escapedName = profile.name.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const trailingNameRegex = new RegExp(`(?:\\r?\\n\\s*)+(?:${escapedName})[,.\\s]*$`, 'i');
+    cleaned = cleaned.replace(trailingNameRegex, '').trim();
+  }
+
+  return cleaned;
+}
+
+// Clean draft text of markdown artifacts and placeholders
+export function cleanDraftText(text, profile = {}, options = {}) {
   if (!text) return '';
+  const { includeSignature = true, company = '', role = '' } = options;
   let cleaned = String(text);
 
-  // 1. Remove markdown bold **text** or __text__
+  // 1. Remove bold formatting (**text**)
   cleaned = cleaned.replace(/\*\*(.*?)\*\*/g, '$1');
   cleaned = cleaned.replace(/__(.*?)__/g, '$1');
 
-  // 2. Convert bullet points like '* ', '- ', '+ ' at start of line to standard bullet '• '
+  // 2. Normalize bullet points
   cleaned = cleaned.replace(/^([ \t]*)[*+-][ \t]+/gm, '$1• ');
 
-  // 3. Remove single italic asterisks or underscores around words
+  // 3. Remove italic markers
   cleaned = cleaned.replace(/(?<!\w)\*([^*\n]+)\*(?!\w)/g, '$1');
   cleaned = cleaned.replace(/(?<!\w)_([^_\n]+)_(?!\w)/g, '$1');
 
-  // 4. Strip any rogue double asterisks or stray asterisks
+  // 4. Remove stray asterisks
   cleaned = cleaned.replace(/\*\*/g, '');
   cleaned = cleaned.replace(/(^|[^\w])\*(?=[^\w]|$)/g, '$1');
 
-  // 5. Clean up bracket placeholders using profile if provided
+  // 5. Replace bracket placeholders with profile info
   const loc = (profile && profile.location) || 'India';
   const github = (profile && profile.github) || '';
   const linkedin = (profile && profile.linkedin) || '';
   const portfolio = getEffectivePortfolio(profile);
+  const candName = (profile && profile.name) || 'Akash V';
+  const phone = (profile && profile.phone) || '';
+  const title = (profile && profile.title) || '';
 
+  // Name
+  cleaned = cleaned.replace(/\[(?:Your\s+|Candidate\s+|Applicant\s+|My\s+|Insert\s+)?(?:Full\s+|First\s+)?Name\]/gi, candName);
+  cleaned = cleaned.replace(/\b\[Your\s+Name\]\b/gi, candName);
+
+  // Location
   cleaned = cleaned.replace(/\[(?:Your\s+)?(?:City|Location)(?:,\s*Country)?\]/gi, loc);
+
+  // Portfolio / Website
   if (portfolio) {
     cleaned = cleaned.replace(/\[(?:Link\s+to\s+)?(?:Portfolio|Website|Portfolio\s+Website)(?:\s+URL)?\]/gi, portfolio);
   } else {
-    cleaned = cleaned.replace(/\[(?:Link\s+to\s+)?(?:Portfolio|Website|Portfolio\s+Website)(?:\s+URL)?\]/gi, 'available upon request');
+    cleaned = cleaned.replace(/\[(?:Link\s+to\s+)?(?:Portfolio|Website|Portfolio\s+Website)(?:\s+URL)?\]/gi, '');
   }
+
+  // GitHub
   if (github) {
     cleaned = cleaned.replace(/\[(?:Link\s+to\s+)?GitHub\]/gi, github);
   } else {
-    cleaned = cleaned.replace(/\[(?:Link\s+to\s+)?GitHub\]/gi, 'available upon request');
+    cleaned = cleaned.replace(/\[(?:Link\s+to\s+)?GitHub\]/gi, '');
   }
-  cleaned = cleaned.replace(/\[(?:Your\s+)?Name\]/gi, (profile && profile.name) || 'Akash V');
-  cleaned = cleaned.replace(/\[(?:Your\s+)?Phone(?:\s+Number)?\]/gi, (profile && profile.phone) || '');
 
-  // 6. Clean up raw markdown links [Label](URL) so no bracketed markdown leaks into plain text or email
+  // LinkedIn
+  if (linkedin) {
+    cleaned = cleaned.replace(/\[(?:Link\s+to\s+)?LinkedIn\]/gi, linkedin);
+  } else {
+    cleaned = cleaned.replace(/\[(?:Link\s+to\s+)?LinkedIn\]/gi, '');
+  }
+
+  // Phone
+  if (phone) {
+    cleaned = cleaned.replace(/\[(?:Your\s+|My\s+)?Phone(?:\s+Number)?\]/gi, phone);
+  } else {
+    cleaned = cleaned.replace(/\[(?:Your\s+|My\s+)?Phone(?:\s+Number)?\]/gi, '');
+  }
+
+  // Title
+  if (title) {
+    cleaned = cleaned.replace(/\[(?:Your\s+|Current\s+)?(?:Job\s+Title|Title|Position)\]/gi, title);
+  }
+
+  // Company / Role
+  if (company && typeof company === 'string' && company.toLowerCase() !== 'unknown company') {
+    cleaned = cleaned.replace(/\[(?:Target\s+)?Company(?:\s+Name)?\]/gi, company);
+  }
+  if (role && typeof role === 'string' && role.toLowerCase() !== 'general position') {
+    cleaned = cleaned.replace(/\[(?:Target\s+)?(?:Job\s+Title|Role|Position)\]/gi, role);
+  }
+
+  // Other bracket placeholders
+  cleaned = cleaned.replace(/\[(?:Insert|Link\s+to)\s+[^\]]+\]/gi, '');
+
+  // 6. Convert markdown links [Label](URL) to plain text
   cleaned = cleaned.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (match, label, url) => {
     const trimmedLabel = label.trim();
     const cleanUrl = url.trim().replace(/\/$/, '');
     const userGithub = (profile && profile.github ? profile.github.trim().replace(/\/$/, '') : '').toLowerCase();
 
-    // Check if the URL is just the root github profile (e.g. https://github.com/BlxrryFxce17)
+    // If linking to candidate's github root profile, resolve project repo
     if (userGithub && cleanUrl.toLowerCase() === userGithub) {
-      // Check if label matches a project repo in profile, e.g. "AI Job Finder"
       const repos = (profile && profile.githubInsights && Array.isArray(profile.githubInsights.repos)) ? profile.githubInsights.repos : [];
       const matched = repos.find(r => 
         (r.name && r.name.toLowerCase().replace(/[-_]/g, ' ') === trimmedLabel.toLowerCase().replace(/[-_]/g, ' ')) ||
@@ -91,7 +154,6 @@ export function cleanDraftText(text, profile = {}) {
       if (matched && matched.url) {
         return `${trimmedLabel} (${matched.url})`;
       }
-      // If label looks like a project name, try slugifying to repo url
       if (/^[A-Za-z0-9\s_-]+$/.test(trimmedLabel) && trimmedLabel.length < 35) {
         const repoSlug = trimmedLabel.replace(/\s+/g, '-');
         return `${trimmedLabel} (${cleanUrl}/${repoSlug})`;
@@ -102,11 +164,14 @@ export function cleanDraftText(text, profile = {}) {
     return `${trimmedLabel} (${cleanUrl})`;
   });
 
-  // 7. Clean any stray brackets around words e.g. [AI Job Finder]
+  // 7. Remove brackets around words e.g. [AI Job Finder] -> AI Job Finder
   cleaned = cleaned.replace(/\[([A-Za-z0-9\s._-]+)\](?!\()/g, '$1');
 
-  // 8. Ensure signature is present and includes portfolio link
-  if (profile && (profile.name || profile.github || profile.linkedin || portfolio)) {
+  // 8. Strip trailing sign-off before signature check
+  cleaned = stripSignOff(cleaned, profile);
+
+  // 9. Append standard signature if requested
+  if (includeSignature && profile && (profile.name || profile.github || profile.linkedin || portfolio)) {
     if (!cleaned.includes('Yours Sincerely')) {
       const links = [];
       if (linkedin) links.push(`LinkedIn: ${linkedin}`);
@@ -125,5 +190,10 @@ export function cleanDraftText(text, profile = {}) {
   }
 
   return cleaned.trim();
+}
+
+// Clean follow-up draft and omit signature
+export function cleanFollowUpDraft(text, profile = {}, company = '', role = '') {
+  return cleanDraftText(text, profile, { includeSignature: false, company, role });
 }
 

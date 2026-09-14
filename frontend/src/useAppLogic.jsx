@@ -131,8 +131,28 @@ export function useAppLogic() {
     return localStorage.getItem('job_custom_location') || '';
   });
   const [fetchQuery, setFetchQuery] = useState('');
-  const [fetchQueries, setFetchQueries] = useState(['software developer']);
+  // Default to high-yield fresher roles and persist in localStorage
+  const [fetchQueries, setFetchQueries] = useState(() => {
+    try {
+      const saved = localStorage.getItem('job_fetch_queries');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (_) {}
+    return ['junior software developer', 'fresher software engineer', 'associate software engineer'];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('job_fetch_queries', JSON.stringify(fetchQueries));
+    } catch (_) {}
+  }, [fetchQueries]);
+
   const [fetching, setFetching] = useState(false);
+  const [fetchingHR, setFetchingHR] = useState(false);
+  const fetchAbortRef = useRef(null);
+  const hrAbortRef = useRef(null);
   const [useApify, setUseApify] = useState(false);
   const [appliedViewType, setAppliedViewType] = useState('All');
   const [showAddForm, setShowAddForm] = useState(false);
@@ -238,7 +258,6 @@ export function useAppLogic() {
       setProfile(p);
       if (p.experienceLevel && isJuniorQuery(p.experienceLevel)) {
         setExperienceFilter(prev => prev === 'All' ? 'Junior' : prev);
-        setFetchQueries(prev => (prev.length === 1 && prev[0] === 'software developer') ? ['junior software developer', 'fresher software engineer'] : prev);
       }
     } catch (err) { }
   };
@@ -693,11 +712,15 @@ export function useAppLogic() {
       notify('Please add at least one search query', 'error');
       return;
     }
+    const controller = new AbortController();
+    fetchAbortRef.current = controller;
     setFetching(true);
     try {
       const effectiveLocs = selectedLocations.length > 0 ? selectedLocations : ['All India'];
       const r = await apiFetch(`${API_BASE}/api/jobs/fetch-jobs`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           queries: fetchQueries,
           useApify,
@@ -709,8 +732,71 @@ export function useAppLogic() {
       const d = await r.json();
       notify(d.message || 'Jobs fetched');
       loadJobs();
-    } catch { notify('Failed to fetch jobs', 'error'); }
-    finally { setFetching(false); }
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        notify('Job search stopped', 'info');
+      } else {
+        notify('Failed to fetch jobs', 'error');
+      }
+    } finally {
+      setFetching(false);
+      fetchAbortRef.current = null;
+    }
+  };
+
+  const handleStopFetchJobs = () => {
+    if (fetchAbortRef.current) {
+      fetchAbortRef.current.abort();
+      fetchAbortRef.current = null;
+    }
+    setFetching(false);
+  };
+
+  const handleScrapeHR = async ({ query, locations, experience }) => {
+    const effectiveQuery = (query || 'technical recruiter').trim();
+    const effectiveLocations = (locations && locations.length > 0) ? locations : ['All India'];
+    const controller = new AbortController();
+    hrAbortRef.current = controller;
+    setFetchingHR(true);
+    try {
+      const r = await apiFetch(`${API_BASE}/api/jobs/scrape-hr`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          query: effectiveQuery,
+          experience: experience !== 'All' ? experience : '',
+          locations: effectiveLocations,
+          location: effectiveLocations.join(', ')
+        })
+      });
+      const result = await r.json();
+      if (result.success) {
+        const nonAll = effectiveLocations.filter(l => !['all', 'all india'].includes(l.toLowerCase()));
+        const locText = nonAll.length > 0 ? ` in ${nonAll.join(', ')}` : '';
+        notify(`Discovered ${result.count} new HR leads for "${effectiveQuery}"${locText}!`);
+        loadJobs();
+      } else {
+        notify(result.error || 'Failed to find HRs', 'error');
+      }
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        notify('HR discovery stopped', 'info');
+      } else {
+        notify('An error occurred while finding HRs', 'error');
+      }
+    } finally {
+      setFetchingHR(false);
+      hrAbortRef.current = null;
+    }
+  };
+
+  const handleStopFetchHR = () => {
+    if (hrAbortRef.current) {
+      hrAbortRef.current.abort();
+      hrAbortRef.current = null;
+    }
+    setFetchingHR(false);
   };
 
   const addFetchQuery = (e) => {
@@ -723,6 +809,27 @@ export function useAppLogic() {
 
   const removeFetchQuery = (q) => {
     setFetchQueries(fetchQueries.filter(item => item !== q));
+  };
+
+  const FRESHER_ROLE_PRESETS = [
+    { label: 'Junior Dev', role: 'junior software developer' },
+    { label: 'Fresher Eng', role: 'fresher software engineer' },
+    { label: 'Associate SE', role: 'associate software engineer' },
+    { label: 'Grad Trainee', role: 'graduate engineer trainee' },
+    { label: 'SDE 1', role: 'entry level software engineer' }
+  ];
+
+  const toggleFetchQuery = (role) => {
+    const trimmed = (role || '').trim();
+    if (!trimmed) return;
+    setFetchQueries(prev => {
+      const exists = prev.some(q => q.toLowerCase() === trimmed.toLowerCase());
+      if (exists) {
+        if (prev.length <= 1) return prev;
+        return prev.filter(q => q.toLowerCase() !== trimmed.toLowerCase());
+      }
+      return [...prev, trimmed];
+    });
   };
 
   const [currentPage, setCurrentPage] = useState(1);
@@ -889,8 +996,15 @@ export function useAppLogic() {
     extractWorkMode,
     parseRoleDisplay,
     handleFetchJobs,
+    handleStopFetchJobs,
+    fetchingHR,
+    setFetchingHR,
+    handleScrapeHR,
+    handleStopFetchHR,
     addFetchQuery,
     removeFetchQuery,
+    toggleFetchQuery,
+    FRESHER_ROLE_PRESETS,
     exportToCSV,
     useApify,
     setUseApify,

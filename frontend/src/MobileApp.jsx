@@ -1,7 +1,7 @@
 import React from 'react';
 import { NAV, API_BASE } from './useAppLogic.jsx';
 import GitHubPortfolioCard from './GitHubPortfolioCard';
-import { cleanDraftText } from './textCleaner';
+import { cleanDraftText, cleanFollowUpDraft, stripSignOff } from './textCleaner';
 
 function cleanEmailBody(body) {
   if (!body) return { clean: '', quoted: '' };
@@ -112,9 +112,13 @@ function MobileEmailMessageBody({ text, quotedText }) {
   );
 }
 
-function FollowUpRow({ job, f, API_BASE, token, setJobs, jobs, notify }) {
+function FollowUpRow({ job, f, API_BASE, token, setJobs, jobs, notify, profile }) {
   const [expanded, setExpanded] = React.useState(false);
   const [sending, setSending] = React.useState(false);
+
+  const displayDraft = React.useMemo(() => {
+    return cleanFollowUpDraft(f.draft, profile, job.company, job.role);
+  }, [f.draft, profile, job.company, job.role]);
 
   return (
     <div style={{
@@ -161,7 +165,7 @@ function FollowUpRow({ job, f, API_BASE, token, setJobs, jobs, notify }) {
         </div>
 
         <div style={{ fontSize: '13px', color: 'var(--text-3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {f.draft ? f.draft.replace(/\n/g, ' ') : 'No draft content'}
+          {displayDraft ? displayDraft.replace(/\n/g, ' ') : 'No draft content'}
         </div>
       </div>
 
@@ -174,7 +178,7 @@ function FollowUpRow({ job, f, API_BASE, token, setJobs, jobs, notify }) {
             whiteSpace: 'pre-wrap',
             color: 'var(--text-1)'
           }}>
-            {f.draft}
+            {displayDraft}
           </div>
           <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
             {f.sent ? (
@@ -285,6 +289,8 @@ export default function MobileApp(props) {
     handleFetchJobs,
     addFetchQuery,
     removeFetchQuery,
+    toggleFetchQuery,
+    FRESHER_ROLE_PRESETS,
     exportToCSV,
     useApify,
     setUseApify,
@@ -308,7 +314,11 @@ export default function MobileApp(props) {
     isSeniorJob,
     extractPackage,
     extractWorkMode,
-    parseRoleDisplay
+    parseRoleDisplay,
+    fetchingHR,
+    handleScrapeHR,
+    handleStopFetchJobs,
+    handleStopFetchHR
   } = props;
 
   const [isScrolled, setIsScrolled] = React.useState(false);
@@ -324,6 +334,7 @@ export default function MobileApp(props) {
   const [checkingAllScope, setCheckingAllScope] = React.useState(null);
 
   // HR Dashboard State for Mobile
+  const [hrQuery, setHrQuery] = React.useState('');
   const [hrFilter, setHrFilter] = React.useState('all');
   const [hrLocation, setHrLocation] = React.useState(() => locationFilter || 'All India');
   const [customHrLocation, setCustomHrLocation] = React.useState('');
@@ -1953,6 +1964,7 @@ export default function MobileApp(props) {
                     setJobs={setJobs}
                     jobs={jobs}
                     notify={notify}
+                    profile={profile}
                   />
                 ))}
 
@@ -2023,6 +2035,38 @@ export default function MobileApp(props) {
                     <input type="text" className="form-input" style={{ flex: 1 }} placeholder="Role..." value={fetchQuery} onChange={e => setFetchQuery(e.target.value)} />
                     <button type="submit" className="btn btn-primary">+</button>
                   </form>
+                  {/* Fresher Presets */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center', marginTop: '6px' }}>
+                    <span style={{ fontSize: '10px', color: 'var(--text-3)', fontWeight: 600 }}>⚡ Presets:</span>
+                    {(FRESHER_ROLE_PRESETS || [
+                      { label: 'Junior Dev', role: 'junior software developer' },
+                      { label: 'Fresher Eng', role: 'fresher software engineer' },
+                      { label: 'Associate SE', role: 'associate software engineer' },
+                      { label: 'Grad Trainee', role: 'graduate engineer trainee' },
+                      { label: 'SDE 1', role: 'entry level software engineer' }
+                    ]).map(preset => {
+                      const isActive = (fetchQueries || []).some(q => q.toLowerCase() === preset.role.toLowerCase());
+                      return (
+                        <button
+                          key={preset.role}
+                          type="button"
+                          onClick={() => toggleFetchQuery ? toggleFetchQuery(preset.role) : null}
+                          style={{
+                            background: isActive ? 'rgba(59, 130, 246, 0.18)' : 'rgba(255, 255, 255, 0.04)',
+                            color: isActive ? '#93c5fd' : 'var(--text-3)',
+                            border: isActive ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+                            borderRadius: '6px',
+                            padding: '2px 7px',
+                            fontSize: '10.5px',
+                            fontWeight: 600,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          {isActive ? '✓ ' : '+ '}{preset.label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
                 <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   {/* Active Location Chips on Mobile */}
@@ -2075,9 +2119,29 @@ export default function MobileApp(props) {
                       </div>
                     </div>
                   </div>
-                  <button className="btn btn-primary" onClick={handleFetchJobs} disabled={fetching || fetchQueries.length === 0}>
-                    {fetching ? <span className="spinner"></span> : experienceFilter !== 'All' ? `Auto-Scrape ${experienceFilter} Jobs ✨` : (selectedLocations && selectedLocations.length > 0 && !selectedLocations.includes('All India') ? `Auto-Scrape in ${selectedLocations.join(', ')} ✨` : 'Auto-Scrape Jobs ✨')}
-                  </button>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleFetchJobs} disabled={fetching || fetchQueries.length === 0}>
+                      {fetching ? <span className="spinner"></span> : experienceFilter !== 'All' ? `Auto-Scrape ${experienceFilter} Jobs ✨` : (selectedLocations && selectedLocations.length > 0 && !selectedLocations.includes('All India') ? `Auto-Scrape in ${selectedLocations.join(', ')} ✨` : 'Auto-Scrape Jobs ✨')}
+                    </button>
+                    {fetching && (
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={handleStopFetchJobs}
+                        style={{
+                          background: 'rgba(239, 68, 68, 0.2)',
+                          border: '1px solid rgba(239, 68, 68, 0.5)',
+                          color: '#f87171',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          padding: '0 12px'
+                        }}
+                        title="Stop Search"
+                      >
+                        ⏹️ Stop
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -2669,37 +2733,13 @@ export default function MobileApp(props) {
         {tab === 'hr_dashboard' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <form
-              onSubmit={async (e) => {
+              onSubmit={(e) => {
                 e.preventDefault();
-                if (fetching) return;
-                setFetching(true);
-                try {
-                  const effectiveQuery = (fetchQuery || fetchQueries[0] || 'software engineer').trim();
-                  const effectiveLocations = hrLocations.length > 0 ? hrLocations : ['All India'];
-                  const res = await props.apiFetch(`${API_BASE}/api/jobs/scrape-hr`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` },
-                    body: JSON.stringify({
-                      query: effectiveQuery,
-                      experience: experienceFilter !== 'All' ? experienceFilter : '',
-                      locations: effectiveLocations,
-                      location: effectiveLocations.join(', ')
-                    })
-                  });
-                  const result = await res.json();
-                  if (result.success) {
-                    const nonAll = effectiveLocations.filter(l => !['all', 'all india'].includes(l.toLowerCase()));
-                    const locText = nonAll.length > 0 ? ` in ${nonAll.join(', ')}` : '';
-                    notify(`Discovered ${result.count} new HR leads for "${effectiveQuery}"${locText}!`);
-                    loadJobs();
-                  } else {
-                    notify(result.error || 'Failed to find HRs', 'error');
-                  }
-                } catch (err) {
-                  notify('An error occurred while finding HRs', 'error');
-                } finally {
-                  setFetching(false);
-                }
+                handleScrapeHR({
+                  query: hrQuery.trim() || fetchQuery.trim() || fetchQueries[0] || 'software engineer',
+                  locations: hrLocations,
+                  experience: experienceFilter
+                });
               }}
               className="mobile-actions-panel"
               style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}
@@ -2722,8 +2762,8 @@ export default function MobileApp(props) {
                   className="form-input"
                   style={{ flex: 1 }}
                   placeholder="Role, Skill, or Company..."
-                  value={fetchQuery}
-                  onChange={e => setFetchQuery(e.target.value)}
+                  value={hrQuery}
+                  onChange={e => setHrQuery(e.target.value)}
                 />
                 <select
                   className="form-input"
@@ -2743,9 +2783,27 @@ export default function MobileApp(props) {
                   <option value="Chennai">📍 CHN</option>
                   <option value="Remote">🏠 Remote</option>
                 </select>
-                <button type="submit" className="btn btn-primary" disabled={fetching} style={{ padding: '6px 12px' }}>
-                  {fetching ? <span className="spinner"></span> : '🚀'}
+                <button type="submit" className="btn btn-primary" disabled={fetchingHR} style={{ padding: '6px 12px' }}>
+                  {fetchingHR ? <span className="spinner"></span> : '🚀'}
                 </button>
+                {fetchingHR && (
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={handleStopFetchHR}
+                    style={{
+                      background: 'rgba(239, 68, 68, 0.2)',
+                      border: '1px solid rgba(239, 68, 68, 0.5)',
+                      color: '#f87171',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      padding: '6px 10px'
+                    }}
+                    title="Stop HR Search"
+                  >
+                    ⏹️
+                  </button>
+                )}
               </div>
             </form>
 

@@ -1,7 +1,7 @@
 import React from 'react';
 import { NAV, API_BASE } from './useAppLogic.jsx';
 import GitHubPortfolioCard from './GitHubPortfolioCard';
-import { cleanDraftText } from './textCleaner';
+import { cleanDraftText, cleanFollowUpDraft, stripSignOff } from './textCleaner';
 
 function cleanEmailBody(body) {
   if (!body) return { clean: '', quoted: '' };
@@ -112,9 +112,13 @@ function EmailMessageBody({ text, quotedText }) {
   );
 }
 
-function FollowUpRow({ job, f, API_BASE, token, setJobs, jobs, notify }) {
+function FollowUpRow({ job, f, API_BASE, token, setJobs, jobs, notify, profile }) {
   const [expanded, setExpanded] = React.useState(false);
   const [sending, setSending] = React.useState(false);
+
+  const displayDraft = React.useMemo(() => {
+    return cleanFollowUpDraft(f.draft, profile, job.company, job.role);
+  }, [f.draft, profile, job.company, job.role]);
 
   return (
     <div style={{
@@ -143,7 +147,7 @@ function FollowUpRow({ job, f, API_BASE, token, setJobs, jobs, notify }) {
             padding: '4px 10px', borderRadius: '100px', fontSize: '11px', fontWeight: 600, flexShrink: 0
           }}>Day {f.day}</span>
           <div style={{ fontSize: '13px', color: 'var(--text-3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', opacity: 0.8 }}>
-            {f.draft ? f.draft.replace(/\n/g, ' ') : 'No draft content'}
+            {displayDraft ? displayDraft.replace(/\n/g, ' ') : 'No draft content'}
           </div>
         </div>
 
@@ -214,7 +218,7 @@ function FollowUpRow({ job, f, API_BASE, token, setJobs, jobs, notify }) {
           whiteSpace: 'pre-wrap',
           color: 'var(--text-1)'
         }}>
-          {f.draft}
+          {displayDraft}
           {f.sent && (
             <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
               <span style={{ fontSize: '12px', color: 'var(--text-3)' }}>
@@ -388,8 +392,14 @@ export default function DesktopApp(props) {
     handleProfileSave,
     handleResumeUpload,
     handleFetchJobs,
+    handleStopFetchJobs,
+    fetchingHR,
+    handleScrapeHR,
+    handleStopFetchHR,
     addFetchQuery,
     removeFetchQuery,
+    toggleFetchQuery,
+    FRESHER_ROLE_PRESETS,
     sourceFilter, setSourceFilter,
     experienceFilter, setExperienceFilter,
     locationFilter, setLocationFilter,
@@ -2652,6 +2662,7 @@ export default function DesktopApp(props) {
                     setJobs={setJobs}
                     jobs={jobs}
                     notify={notify}
+                    profile={profile}
                   />
                 ))}
 
@@ -2720,37 +2731,9 @@ export default function DesktopApp(props) {
                 </button>
 
                 <form
-                  onSubmit={async (e) => {
+                  onSubmit={(e) => {
                     e.preventDefault();
-                    if (fetching) return;
-                    setFetching(true);
-                    try {
-                      const effectiveQuery = hrQuery.trim() || fetchQuery.trim() || fetchQueries[0] || 'software engineer';
-                      const effectiveLocations = hrLocations.length > 0 ? hrLocations : ['All India'];
-                      const res = await fetch(`${API_BASE}/api/jobs/scrape-hr`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` },
-                        body: JSON.stringify({
-                          query: effectiveQuery,
-                          experience: experienceFilter !== 'All' ? experienceFilter : '',
-                          locations: effectiveLocations,
-                          location: effectiveLocations.join(', ')
-                        })
-                      });
-                      const result = await res.json();
-                      if (result.success) {
-                        const nonAll = effectiveLocations.filter(l => !['all', 'all india'].includes(l.toLowerCase()));
-                        const locText = nonAll.length > 0 ? ` in ${nonAll.join(', ')}` : '';
-                        notify(`Discovered ${result.count} new HR leads for "${effectiveQuery}"${locText}!`);
-                        loadJobs();
-                      } else {
-                        notify(result.error || 'Failed to find HRs', 'error');
-                      }
-                    } catch (err) {
-                      notify('An error occurred while finding HRs', 'error');
-                    } finally {
-                      setFetching(false);
-                    }
+                    handleScrapeHR({ query: hrQuery, locations: hrLocations, experience: experienceFilter });
                   }}
                   style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', position: 'relative', zIndex: 30 }}
                 >
@@ -2982,9 +2965,29 @@ export default function DesktopApp(props) {
                       )}
                     </div>
                   </div>
-                  <button type="submit" className="btn btn-primary" disabled={fetching}>
-                    {fetching ? <span className="spinner"></span> : 'Discover HRs 🚀'}
+                  <button type="submit" className="btn btn-primary" disabled={fetchingHR}>
+                    {fetchingHR ? <span className="spinner"></span> : 'Discover HRs 🚀'}
                   </button>
+                  {fetchingHR && (
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={handleStopFetchHR}
+                      style={{
+                        background: 'rgba(239, 68, 68, 0.2)',
+                        border: '1px solid rgba(239, 68, 68, 0.5)',
+                        color: '#f87171',
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}
+                      title="Stop HR Search"
+                    >
+                      ⏹️ Stop Search
+                    </button>
+                  )}
                 </form>
               </div>
             </div>
@@ -3571,6 +3574,52 @@ export default function DesktopApp(props) {
                       + Add
                     </button>
                   </form>
+
+                  {/* Fresher Presets */}
+                  <div style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    flexWrap: 'wrap',
+                    paddingLeft: '6px',
+                    borderLeft: '1px solid rgba(255, 255, 255, 0.08)'
+                  }}>
+                    <span style={{ fontSize: '10.5px', color: 'var(--text-3)', fontWeight: 600 }}>⚡ Presets:</span>
+                    {(FRESHER_ROLE_PRESETS || [
+                      { label: 'Junior Dev', role: 'junior software developer' },
+                      { label: 'Fresher Eng', role: 'fresher software engineer' },
+                      { label: 'Associate SE', role: 'associate software engineer' },
+                      { label: 'Grad Trainee', role: 'graduate engineer trainee' },
+                      { label: 'SDE 1', role: 'entry level software engineer' }
+                    ]).map(preset => {
+                      const isActive = (fetchQueries || []).some(q => q.toLowerCase() === preset.role.toLowerCase());
+                      return (
+                        <button
+                          key={preset.role}
+                          type="button"
+                          onClick={() => toggleFetchQuery ? toggleFetchQuery(preset.role) : null}
+                          style={{
+                            background: isActive ? 'rgba(59, 130, 246, 0.18)' : 'rgba(255, 255, 255, 0.04)',
+                            color: isActive ? '#93c5fd' : 'var(--text-3)',
+                            border: isActive ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+                            borderRadius: '6px',
+                            padding: '2px 7px',
+                            fontSize: '10.5px',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '3px',
+                            transition: 'all 0.15s ease'
+                          }}
+                          title={isActive ? `Click to remove "${preset.role}"` : `Click to add "${preset.role}"`}
+                        >
+                          <span>{isActive ? '✓' : '+'}</span>
+                          <span>{preset.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 {/* Deck 2: Target Locations (Multi-Select Pills & Popover) */}
@@ -3998,6 +4047,31 @@ export default function DesktopApp(props) {
                         </>
                       )}
                     </button>
+                    {fetching && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={handleStopFetchJobs}
+                        style={{
+                          padding: '8px 14px',
+                          fontSize: '13px',
+                          fontWeight: 700,
+                          borderRadius: '10px',
+                          background: 'rgba(239, 68, 68, 0.18)',
+                          border: '1px solid rgba(239, 68, 68, 0.45)',
+                          color: '#fca5a5',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          transition: 'all 0.2s ease'
+                        }}
+                        title="Cancel ongoing job search"
+                      >
+                        <span>⏹️</span>
+                        <span>Stop Search</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -4608,12 +4682,13 @@ export default function DesktopApp(props) {
                     >
                       🚀 Auto-Scrape Fresh Jobs
                     </button>
-                    {(search || filter !== 'all' || experienceFilter !== 'All' || (locationFilter && locationFilter !== 'All India')) && (
+                    {(search || statusFilter !== 'All' || sourceFilter !== 'All' || experienceFilter !== 'All' || (locationFilter && locationFilter !== 'All India')) && (
                       <button
                         className="btn btn-secondary"
                         onClick={() => {
                           setSearch('');
-                          setFilter('all');
+                          setStatusFilter('All');
+                          setSourceFilter('All');
                           setExperienceFilter('All');
                           setLocationFilter('All India');
                         }}
