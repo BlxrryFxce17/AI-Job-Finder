@@ -165,10 +165,11 @@ ${repoLines}
 Verified Core Languages: ${profile.githubInsights.topLanguages?.join(', ') || 'Various'}
 
 IMPORTANT LINK & CITATION RULES:
-- When citing a project marked [MATCHES JD STACK], reference the project name naturally (e.g. "${sampleRepoName}") alongside its verified repository URL "${sampleRepoUrl}".
-- NEVER use raw markdown brackets like "[${sampleRepoName}](${sampleRepoUrl})" in the email text.
-- NEVER link a project to the root profile URL ("https://github.com/${profile.githubInsights.username}"). ONLY cite the specific repository URL.
-- Limit project links to 1 or 2 max in the body so it looks natural, authentic, and maintains 100% email deliverability.`;
+- When citing a project, seamlessly embed it as a clean markdown link: [${sampleRepoName}](${sampleRepoUrl}) directly into the sentence describing the architecture.
+- NEVER write raw URLs like "${sampleRepoUrl}" or "https://github.com/..." directly in the text.
+- NEVER write awkward phrases like "You can inspect the architecture at https://...".
+- Seamlessly integrate it: e.g. "• **[${sampleRepoName}](${sampleRepoUrl})**: Engineered a [system] with [real mechanism], preventing [specific issue]."
+- Limit project links to 1 or 2 max in the body so it feels authentic and maintains 100% email deliverability.`;
 }
 
 
@@ -256,9 +257,9 @@ router.post('/generate-email', requireAuth, async (req, res) => {
     const targetCompany = company || 'the company';
     const targetRole = role || 'the open role';
 
-    const prompt = `You are an elite, highly persuasive software engineer ("${profile.name}") writing a cold email to the hiring manager at ${targetCompany} for the "${targetRole}" position. 
+    const prompt = `You are an elite software engineer ("${profile.name}") writing a sharp, compelling cold email to the technical hiring team at ${targetCompany} for the "${targetRole}" position. 
 Context: ${type}
-Tone: ${tone}
+Tone: Confident, crisp, intellectually rigorous engineer talking to another technical lead. (ZERO corporate sycophancy, zero generic cover-letter filler).
 Here is the official Job Description:
 """
 ${jd || 'Not provided'}
@@ -274,32 +275,44 @@ ${profile.github ? `Candidate GitHub: ${profile.github}` : ''}
 ${profile.linkedin ? `Candidate LinkedIn: ${profile.linkedin}` : ''}
 ${gitInsightText}
 
-CRITICAL RULES FOR HIGH-CONVERTING COLD OUTREACH:
-1. INTELLIGENT JD READING & SPECIAL INSTRUCTIONS:
-   - Read the Job Description thoroughly. If it contains specific application instructions, questions, required deliverables, or required tools (e.g. "include your query/results from our Finder tool", "mention your timezone", "answer why X"), you MUST directly and credibly address them in the email body or bullet points.
-   - If the Job Description is concise / short (such as a Hacker News "Who is hiring?" post, startup board snippet, or terse tech stack list like "Python/FastAPI, Go, OpenSearch/Elasticsearch, Docker"), extract the listed technologies and immediately map them to concrete engineering solutions from the candidate's projects.
-   - If the Job Description specifies an explicit email subject line (e.g. 'with subject "HN Software Engineer"'), extract it into the SUBJECT output field.
-   - When the candidate's verified GitHub projects or personal portfolio (${profile.portfolio || ''}) relate to the job's tech stack, cite the actual project name cleanly (e.g. "AI Job Finder" or "AI Job Finder (repo-url)"). NEVER output raw markdown brackets like "[Project](url)" and NEVER link a specific project to the root GitHub profile instead of the repository.
-2. ABSOLUTE UNIQUENESS & ZERO FAKE METRICS (ANTI-AI CLICHÉ):
-   - NEVER fabricate generic percentages like "reduced latency by ~20%", "improved throughput by 15%", or generic filler claims unless explicitly stated in the candidate's resume/README. Technical hiring managers instantly spot this as AI-generated slop.
-   - Ground technical claims in REAL engineering mechanisms: describe actual architectural decisions, state management, cache invalidation, retry algorithms with exponential backoff, schema design, concurrent worker pools, or streaming pipelines from the candidate's actual projects.
-   - NEVER reuse repetitive boilerplate bullet headers like "- **Backend & Search Optimization**:" or "- **System Reliability & Automation**:".
-   - DYNAMICALLY INVENT 2-3 unique, punchy category titles that mirror the exact domain of ${targetCompany} and the JD (e.g. for audio: "- **Low-Latency Audio Streaming**:", for fintech: "- **Idempotent Transaction Processing**:", for dev tools: "- **AST Parsing & CLI Ergonomics**:", for web/mobile: "- **Optimistic State & Fast Render Paths**:").
-3. NO APOLOGETIC "SKILL TRANSLATION" LANGUAGE: NEVER write phrases like "my skills in X translate to learning Y" or "I know TypeScript so I can pick up C#". Instead, frame capabilities around core engineering principles: strongly typed architectures, OOP design patterns, dependency injection, relational schema design, query optimization, and resilient API construction.
-4. CRISP BULLETED STRUCTURE (NO WALL OF TEXT):
-   - Start with a compelling, role-tailored 1-2 sentence hook referencing ${targetCompany}'s actual engineering mission or product challenge. Avoid boring boilerplate like "I am writing to express interest in the...".
-   - Provide 2-3 distinct, punchy bullet points with bold custom category titles highlighting genuine architectural substance and project proof.
-   - End with a clean 1-sentence wrap-up inviting a conversation.
-5. CONCISE & SCANNABLE: Keep the entire body between 100 and 160 words total. Recruiter scanning time is 5 seconds.
-${profile.enableFlex !== false ? '5. THE FLEX: ALWAYS include this exact postscript right before the end of your text: "P.S. I prioritize high-leverage automation—in fact, this entire outreach was discovered, tech-stack verified, and drafted by an autonomous multi-LLM pipeline I architected from scratch."' : ''}
-6. THE RESUME LINK: You MUST include the exact phrase "You can view my CV here." naturally towards the end of the email (before the postscript). DO NOT add any URLs, colons, or markdown links after this phrase. Just the exact phrase and a period.
-7. STRICTLY ZERO SIGN-OFF OR CLOSING VALEDICTION: DO NOT include any sign-off whatsoever (NO "Best regards", "Sincerely", "Warm regards", "Cheers", "Thanks", "Respectfully", and DO NOT include your name or "[Your Name]" at the end). The backend dispatch system autonomously appends the candidate's verified signature block and portfolio links. End immediately on the last sentence of your email body.
-8. ABSOLUTELY ZERO PLACEHOLDER TOKENS: NEVER output bracketed placeholders like [Your Name], [Name], [Candidate Name], [Link to Portfolio], [Your City], [Phone], [Company Name], [Role], [Date], etc. Always use the candidate's real details provided in this prompt or omit the mention cleanly.
-9. OUTPUT FORMAT: You MUST output the response EXACTLY in the following format so our system can parse it. If the exact company name, role, or subject was not provided, you MUST extract or infer them from the Job Description.
-${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructions}` : ''}
+CRITICAL RULES FOR HIGH-CONVERTING, IMPRESSIVE ENGINEERING OUTREACH:
+1. THE OPENING HOOK (ZERO FLATTERY, HIGH TECHNICAL RELEVANCE):
+   - NEVER open with empty corporate praise like "Your mission to simplify ecosystems...", "I was excited to see...", or "I am writing to express interest in...". Tech leads delete these instantly.
+   - Start immediately with a sharp, technically grounded 1-2 sentence hook. State the open role and directly reference the core engineering challenge or tech stack from the Job Description.
+   - Example opening: "Hi team, I noticed your opening for ${targetRole} working with [specific technology/stack from JD]. As a developer focused on [candidate's core specialty, e.g. resilient full-stack systems / distributed backends], I wanted to share how my recent architectural work maps directly to what you're scaling."
 
-COMPANY: [Extracted Company Name or "Unknown Company"]
-ROLE: [Extracted Job Title or "General Position"]
+2. TANGIBLE TECHNICAL PROOF & CLEAN PROJECT CITATIONS:
+   - Provide 2-3 crisp, high-impact bullet points. Each bullet must highlight a REAL architectural decision, mechanism, or tradeoff from the candidate's actual projects or skills.
+   - CLEAN REPO CITATIONS:
+     - When referencing a project from the candidate's verified GitHub, cite it cleanly as a markdown link: [ProjectName](repo_url).
+     - NEVER write raw URLs like "https://github.com/..." directly in the text.
+     - NEVER write awkward phrases like "You can inspect the architecture at https://...".
+     - Seamlessly embed it: e.g. "• **[ProjectName](repo_url)**: Engineered a [system description] with [real mechanism], preventing [specific race condition or bottleneck]."
+   - ABSOLUTE BAN ON FAKE METRICS & AI CLICHÉS:
+     - NEVER fabricate generic percentages like "reduced latency by ~20%", "improved throughput by 15%", or generic filler claims. Technical hiring managers instantly spot this as AI-generated slop.
+     - Ground technical claims in REAL engineering mechanisms: optimistic state updates, schema validation (Zod/Pydantic), connection pooling, idempotent API handlers, exponential backoff with jitter, retry queues, Redis caching layers, concurrent state synchronization, background worker pools.
+
+3. AUTHENTIC, CONFIDENT HUMAN VOICE:
+   - Avoid stiff, robotic category headers with colons like "• Resilient API Orchestration:" or "• Query Optimization & Latency:".
+   - Instead, make the bullet titles natural and project-centric:
+     e.g. "• **[Fabrica](url)**: Built a B2B platform..." or "• **Autonomous Resiliency**: Architected an autonomous multi-LLM pipeline..."
+   - Frame capabilities around core engineering principles: strongly typed architectures, OOP/modular design, dependency injection, relational schema design, query optimization, and resilient API construction.
+
+4. CRISP LENGTH & CLOSING:
+   - Total email body between 110 and 160 words total. Hiring managers spend 5 seconds scanning.
+   - End with a sharp, 1-sentence wrap-up: "I've attached my CV for further technical context and would love to chat through how I can contribute to ${targetCompany}'s engineering goals."
+   - Followed naturally by: "You can view my CV here."
+   ${profile.enableFlex !== false ? '- ALWAYS include this exact postscript right before the end: "P.S. I prioritize high-leverage automation—in fact, this entire outreach was discovered, tech-stack verified, and drafted by an autonomous multi-LLM pipeline I architected from scratch."' : ''}
+
+5. STRICTLY ZERO SIGN-OFF OR CLOSING VALEDICTION:
+   - DO NOT include any sign-off whatsoever (NO "Best regards", "Sincerely", "Warm regards", "Cheers", "Thanks", "Respectfully", and DO NOT include your name or "[Your Name]" at the end). The backend dispatch system autonomously appends the candidate's verified signature block and portfolio links. End immediately on the last sentence of your email body.
+
+6. ABSOLUTELY ZERO PLACEHOLDER TOKENS:
+   - NEVER output bracketed placeholders like [Your Name], [Name], [Candidate Name], [Link to Portfolio], [Your City], [Phone], [Company Name], [Role], [Date], etc. Always use the candidate's real details provided in this prompt or omit the mention cleanly.
+
+7. OUTPUT FORMAT:
+COMPANY: [Extracted Company Name or "${targetCompany}"]
+ROLE: [Extracted Job Title or "${targetRole}"]
 SUBJECT: [Exact subject requested in JD if any, e.g. "HN Software Engineer", or default "Application for [Role] - ${profile.name}"]
 BODY:
 [If company is unknown/generic, start with: Dear Hiring Manager,]
@@ -329,7 +342,7 @@ BODY:
     if (emailStartMatch) {
       draftText = draftText.substring(emailStartMatch.index + emailStartMatch[0].length);
     }
-    draftText = cleanDraftEmailText(draftText.trim(), profile, extractedCompany, extractedRole);
+    draftText = cleanDraftEmailText(draftText.trim(), profile, extractedCompany, extractedRole, { preserveMarkdownLinks: true });
     draftText = stripSignOff(draftText, profile);
 
     res.json({ draft: draftText, company: extractedCompany, role: extractedRole, subject: extractedSubject });
@@ -356,8 +369,8 @@ router.post('/send-email', requireAuth, async (req, res) => {
     const linksHtml = buildSignatureLinks(profile, trackClick);
     const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${jobId}" width="1" height="1" style="display:none;" />` : '';
 
-    const cleanBody = stripSignOff(cleanDraftEmailText(body, profile, job?.company, job?.role), profile);
-    const formattedDraft = formatEmailTextToHtml(cleanBody, resumeLinkUrl);
+    const cleanBodyHtml = stripSignOff(cleanDraftEmailText(body, profile, job?.company, job?.role, { preserveMarkdownLinks: true }), profile);
+    const formattedDraft = formatEmailTextToHtml(cleanBodyHtml, resumeLinkUrl);
 
     const htmlBody = `
       <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
@@ -373,8 +386,9 @@ router.post('/send-email', requireAuth, async (req, res) => {
       </div>
     `;
 
+    const cleanBodyPlain = stripSignOff(cleanDraftEmailText(body, profile, job?.company, job?.role, { preserveMarkdownLinks: false }), profile);
     const plainTextSignature = buildPlainTextSignature(profile);
-    const fullPlainText = `${cleanBody}\n\n${plainTextSignature}`;
+    const fullPlainText = `${cleanBodyPlain}\n\n${plainTextSignature}`;
 
     const mailOptions = {
       from: user.email || process.env.EMAIL_USER,
@@ -424,9 +438,9 @@ router.post('/single-draft', requireAuth, async (req, res) => {
     const targetCompany = company || 'the company';
     const targetRole = role || 'the open role';
 
-    const prompt = `You are an elite, highly persuasive software engineer ("${profile.name}") writing a cold email to the hiring manager at ${targetCompany} for the "${targetRole}" position. 
+    const prompt = `You are an elite software engineer ("${profile.name}") writing a sharp, compelling cold email to the technical hiring team at ${targetCompany} for the "${targetRole}" position. 
 Context: Cold Outreach / Networking
-Tone: ${tone}
+Tone: Confident, crisp, intellectually rigorous engineer talking to another technical lead. (ZERO corporate sycophancy, zero generic cover-letter filler).
 Here is the official Job Description:
 """
 ${jd}
@@ -439,32 +453,44 @@ ${skillsText}
 ${achText}
 ${gitInsightText}
 
-CRITICAL RULES FOR HIGH-CONVERTING COLD OUTREACH:
-1. INTELLIGENT JD READING & SPECIAL INSTRUCTIONS:
-   - Read the Job Description thoroughly. If it contains specific application instructions, questions, required deliverables, or required tools (e.g. "include your query/results from our Finder tool", "mention your timezone", "answer why X"), you MUST directly and credibly address them in the email body or bullet points.
-   - If the Job Description is concise / short (such as a Hacker News "Who is hiring?" post, startup board snippet, or terse tech stack list like "Python/FastAPI, Go, OpenSearch/Elasticsearch, Docker"), extract the listed technologies and immediately map them to concrete engineering solutions from the candidate's projects.
-   - If the Job Description specifies an explicit email subject line (e.g. 'with subject "HN Software Engineer"'), extract it into the SUBJECT output field.
-   - When the candidate's verified GitHub projects relate to the job's tech stack, cite the actual project name cleanly (e.g. "AI Job Finder" or "AI Job Finder (repo-url)"). NEVER output raw markdown brackets like "[Project](url)" and NEVER link a specific project to the root GitHub profile instead of the repository.
-2. ABSOLUTE UNIQUENESS & ZERO FAKE METRICS (ANTI-AI CLICHÉ):
-   - NEVER fabricate generic percentages like "reduced latency by ~20%", "improved throughput by 15%", or generic filler claims unless explicitly stated in the candidate's resume/README. Technical hiring managers instantly spot this as AI-generated slop.
-   - Ground technical claims in REAL engineering mechanisms: describe actual architectural decisions, state management, cache invalidation, retry algorithms with exponential backoff, schema design, concurrent worker pools, or streaming pipelines from the candidate's actual projects.
-   - NEVER reuse repetitive boilerplate bullet headers like "- **Backend & Search Optimization**:" or "- **System Reliability & Automation**:".
-   - DYNAMICALLY INVENT 2-3 unique, punchy category titles that mirror the exact domain of ${targetCompany} and the JD (e.g. for audio: "- **Low-Latency Audio Streaming**:", for fintech: "- **Idempotent Transaction Processing**:", for dev tools: "- **AST Parsing & CLI Ergonomics**:", for web/mobile: "- **Optimistic State & Fast Render Paths**:").
-3. NO APOLOGETIC "SKILL TRANSLATION" LANGUAGE: NEVER write phrases like "my skills in X translate to learning Y" or "I know TypeScript so I can pick up C#". Instead, frame capabilities around core engineering principles: strongly typed architectures, OOP design patterns, dependency injection, relational schema design, query optimization, and resilient API construction.
-4. CRISP BULLETED STRUCTURE (NO WALL OF TEXT):
-   - Start with a compelling, role-tailored 1-2 sentence hook referencing ${targetCompany}'s actual engineering mission or product challenge. Avoid boring boilerplate like "I am writing to express interest in the...".
-   - Provide 2-3 distinct, punchy bullet points with bold custom category titles highlighting genuine architectural substance and project proof.
-   - End with a clean 1-sentence wrap-up inviting a conversation.
-5. CONCISE & SCANNABLE: Keep the entire body between 100 and 160 words total. Recruiter scanning time is 5 seconds.
-${profile.enableFlex !== false ? '5. THE FLEX: ALWAYS include this exact postscript right before the end of your text: "P.S. I prioritize high-leverage automation—in fact, this entire outreach was discovered, tech-stack verified, and drafted by an autonomous multi-LLM pipeline I architected from scratch."' : ''}
-6. THE RESUME LINK: You MUST include the exact phrase "You can view my CV here." naturally towards the end of the email (before the postscript). DO NOT add any URLs, colons, or markdown links after this phrase. Just the exact phrase and a period. 
-7. STRICTLY ZERO SIGN-OFF OR CLOSING VALEDICTION: DO NOT include any sign-off whatsoever (NO "Best regards", "Sincerely", "Warm regards", "Cheers", "Thanks", "Respectfully", and DO NOT include your name or "[Your Name]" at the end). The backend dispatch system autonomously appends the candidate's verified signature block and portfolio links. End immediately on the last sentence of your email body.
-8. ABSOLUTELY ZERO PLACEHOLDER TOKENS: NEVER output bracketed placeholders like [Your Name], [Name], [Candidate Name], [Link to Portfolio], [Your City], [Phone], [Company Name], [Role], [Date], etc. Always use the candidate's real details provided in this prompt or omit the mention cleanly.
-9. OUTPUT FORMAT: You MUST output the response EXACTLY in the following format so our system can parse it. If the exact company name, role, or subject was not provided, you MUST extract or infer them from the Job Description.
-${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructions}` : ''}
+CRITICAL RULES FOR HIGH-CONVERTING, IMPRESSIVE ENGINEERING OUTREACH:
+1. THE OPENING HOOK (ZERO FLATTERY, HIGH TECHNICAL RELEVANCE):
+   - NEVER open with empty corporate praise like "Your mission to simplify ecosystems...", "I was excited to see...", or "I am writing to express interest in...". Tech leads delete these instantly.
+   - Start immediately with a sharp, technically grounded 1-2 sentence hook. State the open role and directly reference the core engineering challenge or tech stack from the Job Description.
+   - Example opening: "Hi team, I noticed your opening for ${targetRole} working with [specific technology/stack from JD]. As a developer focused on [candidate's core specialty, e.g. resilient full-stack systems / distributed backends], I wanted to share how my recent architectural work maps directly to what you're scaling."
 
-COMPANY: [Extracted Company Name or "Unknown Company"]
-ROLE: [Extracted Job Title or "General Position"]
+2. TANGIBLE TECHNICAL PROOF & CLEAN PROJECT CITATIONS:
+   - Provide 2-3 crisp, high-impact bullet points. Each bullet must highlight a REAL architectural decision, mechanism, or tradeoff from the candidate's actual projects or skills.
+   - CLEAN REPO CITATIONS:
+     - When referencing a project from the candidate's verified GitHub, cite it cleanly as a markdown link: [ProjectName](repo_url).
+     - NEVER write raw URLs like "https://github.com/..." directly in the text.
+     - NEVER write awkward phrases like "You can inspect the architecture at https://...".
+     - Seamlessly embed it: e.g. "• **[ProjectName](repo_url)**: Engineered a [system description] with [real mechanism], preventing [specific race condition or bottleneck]."
+   - ABSOLUTE BAN ON FAKE METRICS & AI CLICHÉS:
+     - NEVER fabricate generic percentages like "reduced latency by ~20%", "improved throughput by 15%", or generic filler claims. Technical hiring managers instantly spot this as AI-generated slop.
+     - Ground technical claims in REAL engineering mechanisms: optimistic state updates, schema validation (Zod/Pydantic), connection pooling, idempotent API handlers, exponential backoff with jitter, retry queues, Redis caching layers, concurrent state synchronization, background worker pools.
+
+3. AUTHENTIC, CONFIDENT HUMAN VOICE:
+   - Avoid stiff, robotic category headers with colons like "• Resilient API Orchestration:" or "• Query Optimization & Latency:".
+   - Instead, make the bullet titles natural and project-centric:
+     e.g. "• **[Fabrica](url)**: Built a B2B platform..." or "• **Autonomous Resiliency**: Architected an autonomous multi-LLM pipeline..."
+   - Frame capabilities around core engineering principles: strongly typed architectures, OOP/modular design, dependency injection, relational schema design, query optimization, and resilient API construction.
+
+4. CRISP LENGTH & CLOSING:
+   - Total email body between 110 and 160 words total. Hiring managers spend 5 seconds scanning.
+   - End with a sharp, 1-sentence wrap-up: "I've attached my CV for further technical context and would love to chat through how I can contribute to ${targetCompany}'s engineering goals."
+   - Followed naturally by: "You can view my CV here."
+   ${profile.enableFlex !== false ? '- ALWAYS include this exact postscript right before the end: "P.S. I prioritize high-leverage automation—in fact, this entire outreach was discovered, tech-stack verified, and drafted by an autonomous multi-LLM pipeline I architected from scratch."' : ''}
+
+5. STRICTLY ZERO SIGN-OFF OR CLOSING VALEDICTION:
+   - DO NOT include any sign-off whatsoever (NO "Best regards", "Sincerely", "Warm regards", "Cheers", "Thanks", "Respectfully", and DO NOT include your name or "[Your Name]" at the end). The backend dispatch system autonomously appends the candidate's verified signature block and portfolio links. End immediately on the last sentence of your email body.
+
+6. ABSOLUTELY ZERO PLACEHOLDER TOKENS:
+   - NEVER output bracketed placeholders like [Your Name], [Name], [Candidate Name], [Link to Portfolio], [Your City], [Phone], [Company Name], [Role], [Date], etc. Always use the candidate's real details provided in this prompt or omit the mention cleanly.
+
+7. OUTPUT FORMAT:
+COMPANY: [Extracted Company Name or "${targetCompany}"]
+ROLE: [Extracted Job Title or "${targetRole}"]
 SUBJECT: [Exact subject requested in JD if any, e.g. "HN Software Engineer", or default "Application for [Role] - ${profile.name}"]
 BODY:
 [If company is unknown/generic, start with: Dear Hiring Manager,]
@@ -494,9 +520,10 @@ BODY:
     if (emailStartMatch) {
       draftText = draftText.substring(emailStartMatch.index + emailStartMatch[0].length).trim();
     }
-    const cleanBody = stripSignOff(cleanDraftEmailText(draftText, profile, extractedCompany, extractedRole), profile);
+    const cleanBodyPlain = stripSignOff(cleanDraftEmailText(draftText, profile, extractedCompany, extractedRole, { preserveMarkdownLinks: false }), profile);
     const plainTextSignature = buildPlainTextSignature(profile);
-    const fullPlainText = `${cleanBody}\n\n${plainTextSignature}`;
+    const fullPlainText = `${cleanBodyPlain}\n\n${plainTextSignature}`;
+    const cleanBodyHtml = stripSignOff(cleanDraftEmailText(draftText, profile, extractedCompany, extractedRole, { preserveMarkdownLinks: true }), profile);
 
     let finalRecipientEmail = (recipientEmail || '').trim();
     if (!finalRecipientEmail && jd) {
@@ -523,7 +550,7 @@ BODY:
     const trackClick = (url) => (baseUrl && url) ? `${baseUrl}/api/track-click/${jobId}?url=${encodeURIComponent(url)}` : (url || '');
     const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${jobId}" width="1" height="1" style="display:none;" />` : '';
 
-    const formattedDraft = formatEmailTextToHtml(cleanBody, resumeLinkUrl);
+    const formattedDraft = formatEmailTextToHtml(cleanBodyHtml, resumeLinkUrl);
     const linksHtml = buildSignatureLinks(profile, trackClick);
     const htmlBody = `
       <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
@@ -614,11 +641,12 @@ ${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructio
     if (emailStartMatch) {
       draftText = draftText.substring(emailStartMatch.index + emailStartMatch[0].length);
     }
-    const cleanBody = stripSignOff(cleanDraftEmailText(draftText.trim(), profile, company, role), profile);
+    const cleanBodyPlain = stripSignOff(cleanDraftEmailText(draftText.trim(), profile, company, role, { preserveMarkdownLinks: false }), profile);
+    const cleanBodyHtml = stripSignOff(cleanDraftEmailText(draftText.trim(), profile, company, role, { preserveMarkdownLinks: true }), profile);
 
     const baseUrl = process.env.PUBLIC_URL;
     const resumeLinkUrl = baseUrl ? `${baseUrl}/api/profile/resume-pdf?userId=${req.user.id}` : null;
-    const formattedDraft = formatEmailTextToHtml(cleanBody, resumeLinkUrl);
+    const formattedDraft = formatEmailTextToHtml(cleanBodyHtml, resumeLinkUrl);
 
     const testJobId = Date.now().toString();
     const trackClick = (url) => (baseUrl && url) ? `${baseUrl}/api/track-click/${testJobId}?url=${encodeURIComponent(url)}` : (url || '');
@@ -639,7 +667,7 @@ ${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructio
       </div>
     `;
 
-    const fullPlainText = `${cleanBody}\n\n${buildPlainTextSignature(profile)}`;
+    const fullPlainText = `${cleanBodyPlain}\n\n${buildPlainTextSignature(profile)}`;
 
     const mailOptions = {
       from: myEmail,

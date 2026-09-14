@@ -964,15 +964,23 @@ function formatEmailTextToHtml(rawText, resumeLinkUrl = null) {
   // 6. Convert markdown links [text](url) to styled HTML links
   text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (match, label, url) => {
     let targetUrl = url.trim();
-    // If url is root GitHub profile (e.g. https://github.com/BlxrryFxce17), resolve to repo URL
+    // If url is root GitHub profile, resolve to project repo
     if (/^https?:\/\/(www\.)?github\.com\/[^/]+\/?$/i.test(targetUrl)) {
       const slug = label.trim().replace(/\s+/g, '-');
       targetUrl = `${targetUrl.replace(/\/$/, '')}/${slug}`;
     }
-    return `<a href="${targetUrl}" target="_blank" style="color: #0284c7; text-decoration: underline; font-weight: 500;">${label}</a>`;
+    return `<a href="${targetUrl}" target="_blank" style="color: #0284c7; text-decoration: underline; font-weight: 600;">${label}</a>`;
   });
 
-  // 7. Clean up any remaining unmatched square brackets e.g. [AI Job Finder]
+  // 6b. Convert bare GitHub repository URLs (e.g. at https://github.com/user/repo) into clean styled links
+  text = text.replace(/(at\s+|view\s+|on\s+)?(https?:\/\/(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+))(?![^<]*<\/a>)/gi, (match, prefix, url, owner, repo) => {
+    const cleanRepo = repo.replace(/[.,;!?)]+$/, '');
+    const cleanUrl = url.replace(/[.,;!?)]+$/, '');
+    const p = prefix || '';
+    return `${p}<a href="${cleanUrl}" target="_blank" style="color: #0284c7; text-decoration: underline; font-weight: 600;">${cleanRepo} (GitHub)</a>`;
+  });
+
+  // 7. Clean up any remaining unmatched square brackets
   text = text.replace(/\[([A-Za-z0-9\s._-]+)\]/g, '$1');
 
   // 8. Handle CV / Resume link text
@@ -991,7 +999,7 @@ function formatEmailTextToHtml(rawText, resumeLinkUrl = null) {
   return html;
 }
 
-function cleanDraftEmailText(text, profile = {}, company = '', role = '') {
+function cleanDraftEmailText(text, profile = {}, company = '', role = '', options = {}) {
   if (!text) return '';
   let cleaned = String(text);
 
@@ -1019,7 +1027,7 @@ function cleanDraftEmailText(text, profile = {}, company = '', role = '') {
   const phone = (profile && profile.phone) || '';
   const title = (profile && profile.title) || '';
 
-  // Name placeholders: replace [Your Name], [Name], [Candidate Name], etc.
+  // Name placeholders
   cleaned = cleaned.replace(/\[(?:Your\s+|Candidate\s+|Applicant\s+|My\s+|Insert\s+)?(?:Full\s+|First\s+)?Name\]/gi, candName);
   cleaned = cleaned.replace(/\b\[Your\s+Name\]\b/gi, candName);
 
@@ -1067,36 +1075,34 @@ function cleanDraftEmailText(text, profile = {}, company = '', role = '') {
     cleaned = cleaned.replace(/\[(?:Target\s+)?(?:Job\s+Title|Role|Position)\]/gi, role);
   }
 
-  // Strip any remaining generic bracket placeholders like [Insert ...] or [Link to ...]
+  // Strip generic bracket placeholders
   cleaned = cleaned.replace(/\[(?:Insert|Link\s+to)\s+[^\]]+\]/gi, '');
 
-  // 6. Clean up raw markdown links [Label](URL) so no bracketed markdown leaks into plain text or email
-  cleaned = cleaned.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (match, label, url) => {
-    const trimmedLabel = label.trim();
-    const cleanUrl = url.trim().replace(/\/$/, '');
-    const userGithub = (profile && profile.github ? profile.github.trim().replace(/\/$/, '') : '').toLowerCase();
-
-    // Check if the URL is just the root github profile (e.g. https://github.com/BlxrryFxce17)
-    if (userGithub && cleanUrl.toLowerCase() === userGithub) {
-      // Check if label matches a project repo in profile, e.g. "AI Job Finder"
-      const repos = (profile && profile.githubInsights && Array.isArray(profile.githubInsights.repos)) ? profile.githubInsights.repos : [];
-      const matched = repos.find(r => 
-        (r.name && r.name.toLowerCase().replace(/[-_]/g, ' ') === trimmedLabel.toLowerCase().replace(/[-_]/g, ' ')) ||
-        (r.name && trimmedLabel.toLowerCase().includes(r.name.toLowerCase().replace(/[-_]/g, ' ')))
-      );
-      if (matched && matched.url) {
-        return `${trimmedLabel} (${matched.url})`;
+  // 6. Handle markdown links
+  if (options.preserveMarkdownLinks) {
+    // Convert bare GitHub URLs to clean markdown links
+    cleaned = cleaned.replace(/(?<!\]\()https?:\/\/(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)(?![^)]*\))/gi, (match, owner, repo) => {
+      const cleanRepo = repo.replace(/[.,;!?)]+$/, '');
+      return `[${cleanRepo}](https://github.com/${owner}/${cleanRepo})`;
+    });
+  } else {
+    // Convert markdown links [Label](URL) to plain text with clean github.com/owner/repo
+    cleaned = cleaned.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (match, label, url) => {
+      const trimmedLabel = label.trim();
+      const cleanUrl = url.trim().replace(/\/$/, '');
+      const ghRepoMatch = cleanUrl.match(/^https?:\/\/(?:www\.)?github\.com\/([^/]+)\/([^/]+)\/?$/i);
+      if (ghRepoMatch) {
+        return `${trimmedLabel} (github.com/${ghRepoMatch[1]}/${ghRepoMatch[2]})`;
       }
-      // If label looks like a project name, try slugifying to repo url
-      if (/^[A-Za-z0-9\s_-]+$/.test(trimmedLabel) && trimmedLabel.length < 35) {
-        const repoSlug = trimmedLabel.replace(/\s+/g, '-');
-        return `${trimmedLabel} (${cleanUrl}/${repoSlug})`;
-      }
-      return trimmedLabel;
-    }
+      return `${trimmedLabel} (${cleanUrl})`;
+    });
 
-    return `${trimmedLabel} (${cleanUrl})`;
-  });
+    // Clean up any bare GitHub URLs for plain text
+    cleaned = cleaned.replace(/https?:\/\/(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)/gi, (match, owner, repo) => {
+      const cleanRepo = repo.replace(/[.,;!?)]+$/, '');
+      return `${cleanRepo} (github.com/${owner}/${cleanRepo})`;
+    });
+  }
 
   // 7. Clean any stray brackets around words e.g. [AI Job Finder] -> AI Job Finder
   cleaned = cleaned.replace(/\[([A-Za-z0-9\s._-]+)\](?!\()/g, '$1');

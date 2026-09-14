@@ -60,7 +60,7 @@ export function stripSignOff(text, profile = {}) {
 // Clean draft text of markdown artifacts and placeholders
 export function cleanDraftText(text, profile = {}, options = {}) {
   if (!text) return '';
-  const { includeSignature = true, company = '', role = '' } = options;
+  const { includeSignature = true, company = '', role = '', preserveMarkdownLinks = false } = options;
   let cleaned = String(text);
 
   // 1. Remove bold formatting (**text**)
@@ -138,31 +138,31 @@ export function cleanDraftText(text, profile = {}, options = {}) {
   // Other bracket placeholders
   cleaned = cleaned.replace(/\[(?:Insert|Link\s+to)\s+[^\]]+\]/gi, '');
 
-  // 6. Convert markdown links [Label](URL) to plain text
-  cleaned = cleaned.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (match, label, url) => {
-    const trimmedLabel = label.trim();
-    const cleanUrl = url.trim().replace(/\/$/, '');
-    const userGithub = (profile && profile.github ? profile.github.trim().replace(/\/$/, '') : '').toLowerCase();
-
-    // If linking to candidate's github root profile, resolve project repo
-    if (userGithub && cleanUrl.toLowerCase() === userGithub) {
-      const repos = (profile && profile.githubInsights && Array.isArray(profile.githubInsights.repos)) ? profile.githubInsights.repos : [];
-      const matched = repos.find(r => 
-        (r.name && r.name.toLowerCase().replace(/[-_]/g, ' ') === trimmedLabel.toLowerCase().replace(/[-_]/g, ' ')) ||
-        (r.name && trimmedLabel.toLowerCase().includes(r.name.toLowerCase().replace(/[-_]/g, ' ')))
-      );
-      if (matched && matched.url) {
-        return `${trimmedLabel} (${matched.url})`;
+  // 6. Handle markdown and bare links
+  if (preserveMarkdownLinks) {
+    // Clean any bare GitHub URLs to markdown links so modal and HTML renderers format them cleanly
+    cleaned = cleaned.replace(/(?<!\]\()https?:\/\/(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)(?![^)]*\))/gi, (match, owner, repo) => {
+      const cleanRepo = repo.replace(/[.,;!?)]+$/, '');
+      return `[${cleanRepo}](https://github.com/${owner}/${cleanRepo})`;
+    });
+  } else {
+    // Convert markdown links [Label](URL) to plain text
+    cleaned = cleaned.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (match, label, url) => {
+      const trimmedLabel = label.trim();
+      const cleanUrl = url.trim().replace(/\/$/, '');
+      const ghRepoMatch = cleanUrl.match(/^https?:\/\/(?:www\.)?github\.com\/([^/]+)\/([^/]+)\/?$/i);
+      if (ghRepoMatch) {
+        return `${trimmedLabel} (github.com/${ghRepoMatch[1]}/${ghRepoMatch[2]})`;
       }
-      if (/^[A-Za-z0-9\s_-]+$/.test(trimmedLabel) && trimmedLabel.length < 35) {
-        const repoSlug = trimmedLabel.replace(/\s+/g, '-');
-        return `${trimmedLabel} (${cleanUrl}/${repoSlug})`;
-      }
-      return trimmedLabel;
-    }
+      return `${trimmedLabel} (${cleanUrl})`;
+    });
 
-    return `${trimmedLabel} (${cleanUrl})`;
-  });
+    // Clean any remaining bare GitHub URLs for plain text display
+    cleaned = cleaned.replace(/https?:\/\/(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)/gi, (match, owner, repo) => {
+      const cleanRepo = repo.replace(/[.,;!?)]+$/, '');
+      return `${cleanRepo} (github.com/${owner}/${cleanRepo})`;
+    });
+  }
 
   // 7. Remove brackets around words e.g. [AI Job Finder] -> AI Job Finder
   cleaned = cleaned.replace(/\[([A-Za-z0-9\s._-]+)\](?!\()/g, '$1');
