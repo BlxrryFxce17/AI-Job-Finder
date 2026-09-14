@@ -5421,13 +5421,25 @@ export default function DesktopApp(props) {
               </div>
               {(() => {
                 if (!selectedMail.emailDraft) return 'No draft saved for this job.';
-                const cleanedText = cleanDraftText(selectedMail.emailDraft, props.profile);
-                const parts = cleanedText.split(/(https?:\/\/[^\s)]+)/g);
+                const cleanedText = cleanDraftText(selectedMail.emailDraft, props.profile, { preserveMarkdownLinks: true });
+                const parts = cleanedText.split(/(\[[^\]]+\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s)]+)/g);
                 return parts.map((part, idx) => {
-                  if (/^https?:\/\//i.test(part)) {
+                  if (!part) return null;
+                  const mdMatch = part.match(/^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/);
+                  if (mdMatch) {
                     return (
-                      <a key={idx} href={part} target="_blank" rel="noopener noreferrer" style={{ color: '#38bdf8', textDecoration: 'underline', fontWeight: 500 }}>
-                        {part}
+                      <a key={idx} href={mdMatch[2]} target="_blank" rel="noopener noreferrer" style={{ color: '#38bdf8', textDecoration: 'underline', fontWeight: 600 }}>
+                        {mdMatch[1]}
+                      </a>
+                    );
+                  }
+                  if (/^https?:\/\//i.test(part)) {
+                    const cleanUrl = part.replace(/[.,;!?)]+$/, '');
+                    const ghMatch = cleanUrl.match(/^https?:\/\/(?:www\.)?github\.com\/([^/]+)\/([^/]+)\/?$/i);
+                    const label = ghMatch ? `${ghMatch[2]} (GitHub ↗)` : cleanUrl.replace(/^https?:\/\/(www\.)?/, '');
+                    return (
+                      <a key={idx} href={cleanUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#38bdf8', textDecoration: 'underline', fontWeight: 600 }}>
+                        {label}
                       </a>
                     );
                   }
