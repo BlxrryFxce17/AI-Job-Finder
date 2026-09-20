@@ -421,6 +421,11 @@ router.post('/bulk-delete', requireAuth, handleBulkDeleteJobs);
 router.delete('/bulk-delete', requireAuth, handleBulkDeleteJobs);
 
 router.post('/fetch-jobs', requireAuth, async (req, res) => {
+  let clientAborted = false;
+  res.on('close', () => {
+    if (!res.writableFinished) clientAborted = true;
+  });
+
   let queries = req.body.queries || [];
   const useApify = req.body.useApify || false;
   const targetExperience = req.body.experience || ''; // 'Junior', 'Mid', 'Senior', or 'All'
@@ -484,13 +489,13 @@ router.post('/fetch-jobs', requireAuth, async (req, res) => {
     try {
       for (const what of searchQueries) {
         if (totalAdded >= 20) break;
-        if (req.destroyed || req.socket?.destroyed) {
+        if (clientAborted || res.writableEnded) {
           console.log('[Fetch-Jobs] Request aborted by client. Halting scrape.');
           return;
         }
         for (const loc of targetLocations) {
           if (totalAdded >= 20) break;
-          if (req.destroyed || req.socket?.destroyed) {
+          if (clientAborted || res.writableEnded) {
             console.log('[Fetch-Jobs] Request aborted by client. Halting scrape.');
             return;
           }
@@ -993,6 +998,11 @@ router.get('/check-bounces', requireAuth, async (req, res) => {
 });
 
 router.post('/scrape-hr', requireAuth, async (req, res) => {
+  let clientAborted = false;
+  res.on('close', () => {
+    if (!res.writableFinished) clientAborted = true;
+  });
+
   const query = (req.body.query || 'software engineer').trim();
   const rawLoc = req.body.locations || req.body.location || 'India';
   const location = (Array.isArray(rawLoc) ? rawLoc.join(', ') : String(rawLoc)).trim();
@@ -1086,7 +1096,7 @@ router.post('/scrape-hr', requireAuth, async (req, res) => {
       candidates.push(hr);
     }
 
-    if (req.destroyed || req.socket?.destroyed) {
+    if (clientAborted || res.writableEnded) {
       console.log('[Scrape-HR] Request aborted by client before lead dispatch.');
       return;
     }
