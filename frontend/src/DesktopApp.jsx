@@ -2,6 +2,7 @@ import React from 'react';
 import { NAV, API_BASE } from './useAppLogic.jsx';
 import GitHubPortfolioCard from './GitHubPortfolioCard';
 import { cleanDraftText, cleanFollowUpDraft, stripSignOff } from './textCleaner';
+import AiUsageDashboard from './components/AiUsageDashboard';
 
 function cleanEmailBody(body) {
   if (!body) return { clean: '', quoted: '' };
@@ -381,6 +382,9 @@ export default function DesktopApp(props) {
     itemsPerPage, setItemsPerPage,
     theme, setTheme,
     notify,
+    apiFetch,
+    hasProfileInfoChanges,
+    hasAiSettingsChanges,
     loadJobs,
     loadProfile,
     toggleSelectJob,
@@ -4196,8 +4200,21 @@ export default function DesktopApp(props) {
                       </select>
                     </div>
 
-                    <button type="submit" className="btn btn-primary" style={{ alignSelf: 'flex-start', marginTop: '8px', padding: '9px 22px', fontSize: '13px', fontWeight: 600 }} disabled={savingProfile}>
-                      {savingProfile ? <span className="spinner"></span> : '💾 Save Profile Information'}
+                    <button
+                      type="submit"
+                      className="btn btn-primary"
+                      style={{
+                        alignSelf: 'flex-start',
+                        marginTop: '8px',
+                        padding: '9px 22px',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        cursor: (!hasProfileInfoChanges || savingProfile) ? 'not-allowed' : 'pointer',
+                        opacity: (!hasProfileInfoChanges || savingProfile) ? 0.6 : 1
+                      }}
+                      disabled={!hasProfileInfoChanges || savingProfile}
+                    >
+                      {savingProfile ? <span className="spinner"></span> : hasProfileInfoChanges ? '💾 Save Profile Information' : '✓ Profile Up to Date'}
                     </button>
                   </form>
                 </div>
@@ -4284,7 +4301,14 @@ export default function DesktopApp(props) {
 
               {/* RIGHT COLUMN: Full GitHub Portfolio & Deep Architecture Knowledge */}
               <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <GitHubPortfolioCard profile={profile} syncingGithub={syncingGithub} syncGithub={syncGithub} />
+                <GitHubPortfolioCard 
+                  profile={profile} 
+                  setProfile={setProfile}
+                  apiFetch={apiFetch}
+                  notify={notify}
+                  syncingGithub={syncingGithub} 
+                  syncGithub={syncGithub} 
+                />
               </div>
 
             </div>
@@ -4292,7 +4316,9 @@ export default function DesktopApp(props) {
           </div>
         ) : tab === 'ai_settings' ? (
           <div style={{ padding: '30px', flex: 1, overflowY: 'auto' }}>
-            <h2 style={{ fontSize: '24px', fontWeight: 600, marginBottom: '24px', color: 'var(--text-1)' }}>AI Prompt Settings</h2>
+            <AiUsageDashboard token={props.token || localStorage.getItem('token')} apiFetch={props.apiFetch} />
+
+            <h2 style={{ fontSize: '20px', fontWeight: 600, marginBottom: '20px', color: 'var(--text-1)' }}>AI Prompt & Behavior Settings</h2>
 
             <div style={{ background: 'var(--surface-2)', padding: '24px', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
               <form onSubmit={handleProfileSave} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -4327,8 +4353,18 @@ export default function DesktopApp(props) {
                   />
                 </div>
 
-                <button type="submit" className="btn btn-primary" style={{ alignSelf: 'flex-start', padding: '10px 24px' }} disabled={savingProfile}>
-                  {savingProfile ? <span className="spinner"></span> : 'Save AI Settings'}
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  style={{
+                    alignSelf: 'flex-start',
+                    padding: '10px 24px',
+                    cursor: (!hasAiSettingsChanges || savingProfile) ? 'not-allowed' : 'pointer',
+                    opacity: (!hasAiSettingsChanges || savingProfile) ? 0.6 : 1
+                  }}
+                  disabled={!hasAiSettingsChanges || savingProfile}
+                >
+                  {savingProfile ? <span className="spinner"></span> : hasAiSettingsChanges ? 'Save AI Settings' : '✓ Settings Up to Date'}
                 </button>
               </form>
             </div>

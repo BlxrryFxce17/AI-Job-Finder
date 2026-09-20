@@ -24,6 +24,7 @@ const jobRoutes = require('./routes/jobRoutes');
 const emailRoutes = require('./routes/emailRoutes');
 const trackingRoutes = require('./routes/trackingRoutes');
 const followupRoutes = require('./routes/followupRoutes');
+const aiRoutes = require('./routes/aiRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -69,6 +70,7 @@ app.use('/api/jobs', jobRoutes);
 app.use('/api', emailRoutes); // discover-email, generate-email, send-email, single-draft, test-email
 app.use('/api', trackingRoutes); // track-open, track-click
 app.use('/api', followupRoutes); // send-followup, check-followups
+app.use('/api/ai', aiRoutes); // usage, credits, quotas, metrics
 
 // Keep-Alive Ping Endpoint
 app.get('/api/ping', (req, res) => {

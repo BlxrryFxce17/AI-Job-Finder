@@ -2,6 +2,7 @@ import React from 'react';
 import { NAV, API_BASE } from './useAppLogic.jsx';
 import GitHubPortfolioCard from './GitHubPortfolioCard';
 import { cleanDraftText, cleanFollowUpDraft, stripSignOff } from './textCleaner';
+import AiUsageDashboard from './components/AiUsageDashboard';
 
 function cleanEmailBody(body) {
   if (!body) return { clean: '', quoted: '' };
@@ -277,6 +278,9 @@ export default function MobileApp(props) {
     totalPages,
     theme, setTheme,
     notify,
+    apiFetch,
+    hasProfileInfoChanges,
+    hasAiSettingsChanges,
     loadJobs,
     loadProfile,
     toggleSelectJob,
@@ -2460,14 +2464,30 @@ export default function MobileApp(props) {
                 <option value="Short & Punchy">Short & Punchy</option>
               </select>
 
-              <button type="submit" className="btn btn-primary" style={{ marginTop: '12px' }} disabled={savingProfile}>
-                {savingProfile ? <span className="spinner"></span> : 'Save Changes'}
+              <button
+                type="submit"
+                className="btn btn-primary"
+                style={{
+                  marginTop: '12px',
+                  cursor: (!hasProfileInfoChanges || savingProfile) ? 'not-allowed' : 'pointer',
+                  opacity: (!hasProfileInfoChanges || savingProfile) ? 0.6 : 1
+                }}
+                disabled={!hasProfileInfoChanges || savingProfile}
+              >
+                {savingProfile ? <span className="spinner"></span> : hasProfileInfoChanges ? 'Save Changes' : '✓ No Changes'}
               </button>
             </form>
 
             {/* Technical Portfolio & Repositories Card */}
             <div style={{ marginTop: '20px' }}>
-              <GitHubPortfolioCard profile={profile} syncingGithub={syncingGithub} syncGithub={syncGithub} />
+              <GitHubPortfolioCard 
+                profile={profile} 
+                setProfile={setProfile}
+                apiFetch={apiFetch}
+                notify={notify}
+                syncingGithub={syncingGithub} 
+                syncGithub={syncGithub} 
+              />
             </div>
 
             {/* 4. Email Connection */}
@@ -2490,6 +2510,7 @@ export default function MobileApp(props) {
 
         {tab === 'ai_settings' && (
           <div className="mobile-form-section">
+            <AiUsageDashboard token={props.token || localStorage.getItem('token')} apiFetch={props.apiFetch} />
             <h2 className="mobile-section-title">AI Prompt Settings</h2>
 
             <form onSubmit={handleProfileSave} className="mobile-form">
@@ -2523,8 +2544,19 @@ export default function MobileApp(props) {
                 />
               </div>
 
-              <button type="submit" className="btn btn-primary" style={{ marginTop: '20px', width: '100%', padding: '14px' }} disabled={savingProfile}>
-                {savingProfile ? <span className="spinner"></span> : 'Save AI Settings'}
+              <button
+                type="submit"
+                className="btn btn-primary"
+                style={{
+                  marginTop: '20px',
+                  width: '100%',
+                  padding: '14px',
+                  cursor: (!hasAiSettingsChanges || savingProfile) ? 'not-allowed' : 'pointer',
+                  opacity: (!hasAiSettingsChanges || savingProfile) ? 0.6 : 1
+                }}
+                disabled={!hasAiSettingsChanges || savingProfile}
+              >
+                {savingProfile ? <span className="spinner"></span> : hasAiSettingsChanges ? 'Save AI Settings' : '✓ No Changes'}
               </button>
             </form>
           </div>
@@ -2975,7 +3007,24 @@ export default function MobileApp(props) {
                               placeholder="hr@company.com"
                               autoFocus
                             />
-                            <button className="btn btn-primary" style={{ padding: '3px 8px', fontSize: '10px' }} onClick={() => handleSaveInlineEmail(job.id)}>Save</button>
+                            {(() => {
+                              const hasEmailChange = editEmailVal.trim() !== (job.emailRecipient || '').trim() && editEmailVal.trim().length > 0;
+                              return (
+                                <button
+                                  className="btn btn-primary"
+                                  style={{
+                                    padding: '3px 8px',
+                                    fontSize: '10px',
+                                    cursor: hasEmailChange ? 'pointer' : 'not-allowed',
+                                    opacity: hasEmailChange ? 1 : 0.5
+                                  }}
+                                  disabled={!hasEmailChange}
+                                  onClick={() => handleSaveInlineEmail(job.id)}
+                                >
+                                  Save
+                                </button>
+                              );
+                            })()}
                             <button className="btn btn-ghost" style={{ padding: '3px 6px', fontSize: '10px' }} onClick={() => setEditingEmailId(null)}>✕</button>
                           </div>
                         ) : (

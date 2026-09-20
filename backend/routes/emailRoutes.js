@@ -127,49 +127,78 @@ function buildGitInsightText(profile, jd, role, company) {
     if (!r.fork) relevance += 2;
     if (r.description && r.description.length > 20) relevance += 2;
 
-    return { ...r, name, url: repoUrl, relevance, matchedKeywords };
+    // User confirmed / pinned repo priority
+    const isUserConfirmed = Array.isArray(profile.selectedRepoNames) && profile.selectedRepoNames.includes(name);
+    if (isUserConfirmed) {
+      relevance += 50; // Priority for user's confirmed repos
+    }
+
+    return { ...r, name, url: repoUrl, relevance, matchedKeywords, isUserConfirmed };
   });
 
   // 3. Sort by relevance, pick top matches
   scoredRepos.sort((a, b) => b.relevance - a.relevance);
 
-  const highlyRelevant = scoredRepos.filter(r => r.relevance >= 10).slice(0, 5);
-  const fallback = scoredRepos.filter(r => r.relevance < 10 && r.readmeSnippet).slice(0, 2);
-  const selectedRepos = [...highlyRelevant, ...fallback].slice(0, 6);
-  const finalRepos = selectedRepos.length > 0 ? selectedRepos : scoredRepos.slice(0, 5);
+  // 3. Prioritize user pinned repos first, sorted by relevance to JD keywords
+  const userPinnedRepos = scoredRepos.filter(r => r.isUserConfirmed);
+  const otherScoredRepos = scoredRepos.filter(r => !r.isUserConfirmed);
+
+  // Provide all user pinned repos (up to 12) + top matching unpinned repos
+  const finalRepos = userPinnedRepos.length > 0
+    ? [...userPinnedRepos, ...otherScoredRepos.slice(0, 3)].slice(0, 12)
+    : scoredRepos.slice(0, 6);
 
   // 4. Build rich context — deeper README for highly relevant repos
   const repoLines = finalRepos.map(r => {
     const matchInfo = r.matchedKeywords && r.matchedKeywords.length > 0
       ? ` [MATCHES JD STACK: ${r.matchedKeywords.slice(0, 5).join(', ')}]`
       : '';
+    const pinnedInfo = r.isUserConfirmed ? ' [USER CONFIRMED FOR EMAIL LINKS]' : '';
     const readmeDepth = r.relevance >= 10 ? 400 : 180;
     const archSnippet = r.readmeSnippet
       ? `\n    Architecture Notes: ${r.readmeSnippet.slice(0, readmeDepth).replace(/\n/g, ' ').trim()}${r.readmeSnippet.length > readmeDepth ? '...' : ''}`
       : '';
-    return `- Project "${r.name}" (Repo URL: ${r.url}, Language: ${r.language || 'Multi-stack'}${r.stars > 0 ? `, ★${r.stars}` : ''}): ${r.description || 'Production software system'}${matchInfo}${archSnippet}`;
+    return `- Project "${r.name}" (Repo URL: ${r.url}, Language: ${r.language || 'Multi-stack'}${r.stars > 0 ? `, ★${r.stars}` : ''}): ${r.description || 'Production software system'}${pinnedInfo}${matchInfo}${archSnippet}`;
   }).join('\n');
 
   const matchSummary = jdKeywords.length > 0
     ? `\nJD Tech Stack Detected: [${jdKeywords.slice(0, 12).join(', ')}] — repos below were auto-matched to this stack.`
     : '';
 
-  console.log(`[GitHub Match] JD keywords: [${jdKeywords.join(', ')}] → matched ${highlyRelevant.length} repos (${finalRepos.map(r => r.name).join(', ')})`);
+  console.log(`[GitHub Match] JD keywords: [${jdKeywords.join(', ')}] → matched ${finalRepos.length} repos (${finalRepos.map(r => r.name).join(', ')})`);
 
   const sampleRepo = finalRepos[0];
   const sampleRepoUrl = sampleRepo ? sampleRepo.url : (profile.github ? `${profile.github.replace(/\/$/, '')}/AI-Job-Finder` : 'https://github.com');
   const sampleRepoName = sampleRepo ? sampleRepo.name : 'AI Job Finder';
+
+  // Configured link count from profile
+  const maxLinks = typeof profile.githubRepoLinkCount === 'number' ? profile.githubRepoLinkCount : 2;
+
+  let linkInstruction = '';
+  if (maxLinks === 0) {
+    linkInstruction = `- USER PREFERENCE CONFIGURED: ZERO REPO LINKS. DO NOT include any repository links or URLs in the email body. Only cite candidate architectural experience by project name without hyperlinks.`;
+  } else if (maxLinks === 1) {
+    linkInstruction = `- USER PREFERENCE CONFIGURED: EXACTLY 1 REPO LINK PER EMAIL.
+- Prioritize projects marked [USER CONFIRMED FOR EMAIL LINKS]. Select the single best-matching project that aligns most closely with this target company's JD requirements.
+- Seamlessly embed ONLY that 1 project link as clean markdown: [ProjectName](RepoUrl) directly into the sentence describing the architecture.
+- NEVER write raw URLs like "${sampleRepoUrl}" or "https://github.com/..." directly in the text.
+- Do NOT include more than 1 link.`;
+  } else {
+    linkInstruction = `- USER PREFERENCE CONFIGURED: UP TO ${maxLinks} REPO LINKS PER EMAIL.
+- The candidate has prioritized repositories marked [USER CONFIRMED FOR EMAIL LINKS]. From these confirmed projects, dynamically select up to ${maxLinks} projects that have the strongest technical alignment with this specific role and tech stack.
+- When citing projects, seamlessly embed up to ${maxLinks} clean markdown links: [ProjectName](RepoUrl) directly into the sentences describing their architecture.
+- NEVER write raw URLs like "${sampleRepoUrl}" or "https://github.com/..." directly in the text.
+- NEVER write awkward phrases like "You can inspect the architecture at https://...".
+- Seamlessly integrate them: e.g. "• **[ProjectName](RepoUrl)**: Engineered a [system] with [real mechanism], preventing [specific issue]."
+- Limit project links strictly to ${maxLinks} max in the body so the email remains authentic, focused, and maintains 100% email deliverability.`;
+  }
 
   return `\n── VERIFIED GITHUB PORTFOLIO (@${profile.githubInsights.username}) ──${matchSummary}
 ${repoLines}
 Verified Core Languages: ${profile.githubInsights.topLanguages?.join(', ') || 'Various'}
 
 IMPORTANT LINK & CITATION RULES:
-- When citing a project, seamlessly embed it as a clean markdown link: [${sampleRepoName}](${sampleRepoUrl}) directly into the sentence describing the architecture.
-- NEVER write raw URLs like "${sampleRepoUrl}" or "https://github.com/..." directly in the text.
-- NEVER write awkward phrases like "You can inspect the architecture at https://...".
-- Seamlessly integrate it: e.g. "• **[${sampleRepoName}](${sampleRepoUrl})**: Engineered a [system] with [real mechanism], preventing [specific issue]."
-- Limit project links to 1 or 2 max in the body so it feels authentic and maintains 100% email deliverability.`;
+${linkInstruction}`;
 }
 
 

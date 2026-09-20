@@ -1,7 +1,7 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 const { GoogleGenAI } = require('@google/genai');
-const { callAIWithRetry } = require('./ai');
+const { callAIWithRetry, recordApiUsage } = require('./ai');
 const { isSeniorRole, detectExperienceLevel, shouldExcludeSenior } = require('./jobFilter');
 
 // Track Serper quota cooldown
@@ -105,6 +105,7 @@ async function scrapeJobsFree(query, location = 'India', excludeCompanies = []) 
         query: `site:linkedin.com/jobs/view "${query}" "${location}"`,
         max_results: 10
       }, { timeout: 8000 });
+      recordApiUsage({ service: 'Tavily', action: 'Job Search', creditsUsed: 1, status: 'success' });
 
       const results = tavilyRes.data?.results || [];
       for (const res of results) {
@@ -329,6 +330,7 @@ async function findHROnLinkedIn(company, location = 'India') {
         query: `site:linkedin.com/in/ ("Technical Recruiter" OR "Talent Acquisition" OR "HR") "${company}" "${cleanLoc}"`,
         max_results: 5
       }, { timeout: 8000 });
+      recordApiUsage({ service: 'Tavily', action: 'HR Discovery', creditsUsed: 1, status: 'success' });
 
       const results = tavilyRes.data?.results || [];
       for (const item of results) {
@@ -905,6 +907,7 @@ async function discoverHRProfiles(query = 'software engineer', location = 'India
         query: `site:linkedin.com/in/ ("Technical Recruiter" OR "Talent Acquisition" OR "IT Recruiter" OR "HR") ("${searchKeyword}" OR "${cleanQuery}") "${cleanLoc}"`,
         max_results: 10
       }, { timeout: 10000 });
+      recordApiUsage({ service: 'Tavily', action: 'HR Discovery', creditsUsed: 1, status: 'success' });
 
       const results = tavilyRes.data?.results || [];
       for (const item of results) {

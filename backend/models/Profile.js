@@ -19,6 +19,8 @@ const profileSchema = new mongoose.Schema({
   enableAutoFollowUp: { type: Boolean, default: true },
   aiInstructions: { type: String, default: '' },
   resumeFilename: { type: String, default: '' },
+  githubRepoLinkCount: { type: Number, default: 2 },
+  selectedRepoNames: [{ type: String }],
   githubInsights: {
     username: { type: String, default: '' },
     avatarUrl: { type: String, default: '' },

@@ -164,7 +164,24 @@ export function useAppLogic() {
   
   // Profile State
   const [profile, setProfile] = useState({ name: 'Loading...', title: '', phone: '', linkedin: '', github: '', portfolio: '', resumeFilename: '', emailUser: '' });
+  const [originalProfile, setOriginalProfile] = useState(null);
   const [savingProfile, setSavingProfile] = useState(false);
+
+  // Mismatch detection between frontend and DB
+  const hasProfileInfoChanges = React.useMemo(() => {
+    if (!originalProfile) return false;
+    const fields = ['name', 'title', 'phone', 'linkedin', 'portfolio', 'github', 'experienceLevel', 'tone'];
+    return fields.some(f => (profile[f] || '').trim() !== (originalProfile[f] || '').trim());
+  }, [profile, originalProfile]);
+
+  const hasAiSettingsChanges = React.useMemo(() => {
+    if (!originalProfile) return false;
+    const currFlex = profile.enableFlex !== false;
+    const origFlex = originalProfile.enableFlex !== false;
+    const currInst = (profile.aiInstructions || '').trim();
+    const origInst = (originalProfile.aiInstructions || '').trim();
+    return currFlex !== origFlex || currInst !== origInst;
+  }, [profile, originalProfile]);
   
   // Batch Selection
   const [selectedJobs, setSelectedJobs] = useState([]);
@@ -206,6 +223,7 @@ export function useAppLogic() {
     setToken(null);
     setJobs([]);
     setProfile({ name: 'Loading...', title: '', phone: '', linkedin: '', github: '', portfolio: '', resumeFilename: '', emailUser: '' });
+    setOriginalProfile(null);
   };
 
 
@@ -256,6 +274,7 @@ export function useAppLogic() {
       const r = await apiFetch(`${API_BASE}/api/profile`);
       const p = await r.json();
       setProfile(p);
+      setOriginalProfile(p);
       if (p.experienceLevel && isJuniorQuery(p.experienceLevel)) {
         setExperienceFilter(prev => prev === 'All' ? 'Junior' : prev);
       }
@@ -465,7 +484,7 @@ export function useAppLogic() {
   };
 
   const handleProfileSave = async (e) => {
-    e.preventDefault();
+    if (e?.preventDefault) e.preventDefault();
     setSavingProfile(true);
     try {
       const r = await apiFetch(`${API_BASE}/api/profile`, {
@@ -474,6 +493,7 @@ export function useAppLogic() {
       });
       const p = await r.json();
       setProfile(p);
+      setOriginalProfile(p);
       notify('Profile saved successfully');
     } catch { notify('Failed to save profile', 'error'); }
     finally { setSavingProfile(false); }
@@ -501,7 +521,9 @@ export function useAppLogic() {
       });
       const data = await res.json();
       if (data.success) {
-        setProfile(prev => ({ ...prev, ...data.profile, githubToken: targetToken || prev.githubToken }));
+        const nextProfile = { ...profile, ...data.profile, githubToken: targetToken || profile.githubToken };
+        setProfile(nextProfile);
+        setOriginalProfile(nextProfile);
         if (data.warning) {
           notify(data.warning, 'info');
         } else {
@@ -529,6 +551,7 @@ export function useAppLogic() {
       const data = await r.json();
       if (data.success) {
         setProfile(data.profile);
+        setOriginalProfile(data.profile);
         notify('Resume parsed and saved!');
       } else {
         notify('Failed to parse resume', 'error');
@@ -978,6 +1001,10 @@ export function useAppLogic() {
     theme, setTheme,
     
     notify,
+    apiFetch,
+    hasProfileInfoChanges,
+    hasAiSettingsChanges,
+    originalProfile,
     loadJobs,
     loadProfile,
     toggleSelectJob,

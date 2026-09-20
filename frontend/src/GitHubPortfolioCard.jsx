@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import { API_BASE } from './useAppLogic';
 
 // GitHub-accurate language colors
 const LANG_COLORS = {
@@ -30,7 +31,7 @@ function getRelativeTime(dateStr) {
   return `${years}y ago`;
 }
 
-export default function GitHubPortfolioCard({ profile, syncingGithub, syncGithub }) {
+export default function GitHubPortfolioCard({ profile, setProfile, apiFetch, notify, syncingGithub, syncGithub }) {
   const [searchRepo, setSearchRepo] = useState('');
   const [selectedLang, setSelectedLang] = useState('ALL');
   const [sortBy, setSortBy] = useState('relevance');
@@ -40,6 +41,82 @@ export default function GitHubPortfolioCard({ profile, syncingGithub, syncGithub
   const [showAllRepos, setShowAllRepos] = useState(false);
   const [showTokenSettings, setShowTokenSettings] = useState(false);
   const [tokenInput, setTokenInput] = useState(profile?.githubToken || '');
+
+  // ── Repository Link Limit & Pinning Configuration ──────
+  const [repoLinkCount, setRepoLinkCount] = useState(
+    typeof profile?.githubRepoLinkCount === 'number' ? profile.githubRepoLinkCount : 2
+  );
+  const [selectedReposForLinks, setSelectedReposForLinks] = useState(
+    Array.isArray(profile?.selectedRepoNames) ? profile.selectedRepoNames : []
+  );
+  const [isSavingRepoSettings, setIsSavingRepoSettings] = useState(false);
+  const [confirmedNotice, setConfirmedNotice] = useState(null);
+
+  useEffect(() => {
+    if (profile) {
+      if (typeof profile.githubRepoLinkCount === 'number') {
+        setRepoLinkCount(profile.githubRepoLinkCount);
+      }
+      if (Array.isArray(profile.selectedRepoNames)) {
+        setSelectedReposForLinks(profile.selectedRepoNames);
+      }
+    }
+  }, [profile?.githubRepoLinkCount, profile?.selectedRepoNames]);
+
+  const savedCount = typeof profile?.githubRepoLinkCount === 'number' ? profile.githubRepoLinkCount : 2;
+  const savedSelected = Array.isArray(profile?.selectedRepoNames) ? profile.selectedRepoNames : [];
+  const hasUnsavedChanges =
+    repoLinkCount !== savedCount ||
+    JSON.stringify([...selectedReposForLinks].sort()) !== JSON.stringify([...savedSelected].sort());
+
+  const handleConfirmRepoLinks = async (overrideCount, overrideList) => {
+    const countToSave = typeof overrideCount === 'number' ? overrideCount : repoLinkCount;
+    const listToSave = Array.isArray(overrideList) ? overrideList : selectedReposForLinks;
+
+    setIsSavingRepoSettings(true);
+    try {
+      const fetcher = apiFetch || fetch;
+      const res = await fetcher(`${API_BASE}/api/profile`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...profile,
+          githubRepoLinkCount: countToSave,
+          selectedRepoNames: listToSave
+        })
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        if (setProfile) setProfile(updated);
+        setConfirmedNotice(`Confirmed: AI will use up to ${countToSave} repository link${countToSave === 1 ? '' : 's'} in emails.`);
+        if (notify) {
+          notify(`Confirmed: Using up to ${countToSave} repo link${countToSave === 1 ? '' : 's'} for emails.`, 'success');
+        }
+        setTimeout(() => setConfirmedNotice(null), 4000);
+      } else {
+        if (notify) notify('Failed to save repository link settings.', 'error');
+      }
+    } catch (err) {
+      console.error('Error saving repo link settings:', err);
+      if (notify) notify('Failed to save repository link settings.', 'error');
+    } finally {
+      setIsSavingRepoSettings(false);
+    }
+  };
+
+  const handleToggleRepoSelection = (repoName) => {
+    const isSelected = selectedReposForLinks.includes(repoName);
+    let updated;
+    if (isSelected) {
+      updated = selectedReposForLinks.filter(n => n !== repoName);
+    } else {
+      updated = [...selectedReposForLinks, repoName];
+      if (repoLinkCount < updated.length && repoLinkCount < 4) {
+        setRepoLinkCount(Math.min(updated.length, 4));
+      }
+    }
+    setSelectedReposForLinks(updated);
+  };
 
   const insights = profile?.githubInsights;
 
@@ -91,23 +168,34 @@ export default function GitHubPortfolioCard({ profile, syncingGithub, syncGithub
           }}
         />
 
-        <button
-          type="button"
-          onClick={() => {
-            syncGithub(profile.github, tokenInput);
-            setShowTokenSettings(false);
-          }}
-          disabled={syncingGithub}
-          style={{
-            padding: '8px 16px', fontSize: '12px', fontWeight: 600,
-            background: 'linear-gradient(135deg, #0284c7, #38bdf8)',
-            color: '#fff', border: 'none', borderRadius: '8px',
-            cursor: syncingGithub ? 'wait' : 'pointer',
-            boxShadow: '0 2px 10px rgba(2, 132, 199, 0.3)'
-          }}
-        >
-          {syncingGithub ? 'Saving & Syncing...' : 'Save & Sync'}
-        </button>
+        {(() => {
+          const hasTokenChange = tokenInput.trim() !== (profile?.githubToken || '').trim();
+          return (
+            <button
+              type="button"
+              onClick={() => {
+                syncGithub(profile.github, tokenInput);
+                setShowTokenSettings(false);
+              }}
+              disabled={syncingGithub || !hasTokenChange}
+              style={{
+                padding: '8px 16px', fontSize: '12px', fontWeight: 600,
+                background: hasTokenChange
+                  ? 'linear-gradient(135deg, #0284c7, #38bdf8)'
+                  : 'rgba(255, 255, 255, 0.05)',
+                color: hasTokenChange ? '#fff' : '#64748b',
+                border: hasTokenChange ? 'none' : '1px solid rgba(255, 255, 255, 0.1)',
+                borderRadius: '8px',
+                cursor: (syncingGithub || !hasTokenChange) ? 'not-allowed' : 'pointer',
+                opacity: hasTokenChange ? 1 : 0.5,
+                boxShadow: hasTokenChange ? '0 2px 10px rgba(2, 132, 199, 0.3)' : 'none',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              {syncingGithub ? 'Saving & Syncing...' : hasTokenChange ? 'Save & Sync' : 'No Changes'}
+            </button>
+          );
+        })()}
 
         {profile?.githubToken && (
           <button
@@ -299,11 +387,6 @@ export default function GitHubPortfolioCard({ profile, syncingGithub, syncGithub
   }
 
   // ── Main View ────────────────────────────────────────────
-  const totalPublicCount = insights.publicRepos || insights.repos.length;
-  const readmeCount = insights.repos.filter(r => !!r.readmeSnippet).length;
-  const totalStars = insights.totalStars || 0;
-  const totalForks = insights.repos.reduce((s, r) => s + (r.forks || 0), 0);
-
   return (
     <div style={{
       background: 'linear-gradient(180deg, rgba(15, 23, 42, 0.9) 0%, rgba(15, 23, 42, 0.97) 100%)',
@@ -414,37 +497,6 @@ export default function GitHubPortfolioCard({ profile, syncingGithub, syncGithub
         </div>
 
         {showTokenSettings && renderTokenSettings()}
-
-        {/* ── Stats Mini-Dashboard ──────────────────────── */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
-          gap: '10px',
-          marginTop: '16px'
-        }}>
-          {[
-            { icon: '📦', label: 'Repos', value: totalPublicCount, color: '#38bdf8' },
-            { icon: '📖', label: 'READMEs', value: readmeCount, color: '#a78bfa' },
-            { icon: '⭐', label: 'Stars', value: totalStars, color: '#fbbf24' },
-            { icon: '🍴', label: 'Forks', value: totalForks, color: '#34d399' }
-          ].map((stat, i) => (
-            <div key={i} style={{
-              background: 'rgba(0, 0, 0, 0.25)',
-              border: '1px solid rgba(255, 255, 255, 0.06)',
-              borderRadius: '10px',
-              padding: '10px 12px',
-              textAlign: 'center'
-            }}>
-              <div style={{ fontSize: '14px', marginBottom: '2px' }}>{stat.icon}</div>
-              <div style={{ fontSize: '18px', fontWeight: 800, color: stat.color, letterSpacing: '-0.03em' }}>
-                {stat.value}
-              </div>
-              <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                {stat.label}
-              </div>
-            </div>
-          ))}
-        </div>
       </div>
 
       {/* ── Language Distribution Bar ──────────────────────── */}
@@ -508,6 +560,276 @@ export default function GitHubPortfolioCard({ profile, syncingGithub, syncGithub
           </div>
         </div>
       )}
+
+      {/* ── Cold Email Repository Link Settings ────────────── */}
+      <div style={{
+        margin: '0 24px 16px',
+        padding: '16px 18px',
+        background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.85) 0%, rgba(30, 41, 59, 0.65) 100%)',
+        border: hasUnsavedChanges
+          ? '1px solid rgba(245, 158, 11, 0.4)'
+          : '1px solid rgba(56, 189, 248, 0.25)',
+        borderRadius: '12px',
+        boxShadow: '0 4px 20px rgba(0, 0, 0, 0.25)',
+        position: 'relative'
+      }}>
+        {/* Top Header Row */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '10px',
+          marginBottom: '10px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '16px' }}>🔗</span>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '13px', fontWeight: 700, color: '#f8fafc', letterSpacing: '-0.01em' }}>
+                  Cold Email Repository Link Settings
+                </span>
+                {hasUnsavedChanges ? (
+                  <span style={{
+                    fontSize: '10px', fontWeight: 700,
+                    background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24',
+                    border: '1px solid rgba(245, 158, 11, 0.35)',
+                    padding: '2px 8px', borderRadius: '10px'
+                  }}>
+                    ● Unsaved Changes (Click Confirm below)
+                  </span>
+                ) : (
+                  <span style={{
+                    fontSize: '10px', fontWeight: 700,
+                    background: 'rgba(16, 185, 129, 0.15)', color: '#34d399',
+                    border: '1px solid rgba(16, 185, 129, 0.35)',
+                    padding: '2px 8px', borderRadius: '10px'
+                  }}>
+                    ✓ Confirmed & Active: Up to {repoLinkCount} Link{repoLinkCount === 1 ? '' : 's'}
+                  </span>
+                )}
+              </div>
+              <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#94a3b8' }}>
+                Configure and confirm how many GitHub project links AI embeds in drafted cold emails. (2 links is recommended).
+              </p>
+            </div>
+          </div>
+
+          {/* Confirm Action Button */}
+          <button
+            type="button"
+            onClick={() => handleConfirmRepoLinks()}
+            disabled={!hasUnsavedChanges || isSavingRepoSettings}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '7px 15px',
+              borderRadius: '8px',
+              fontSize: '12px',
+              fontWeight: 700,
+              cursor: (!hasUnsavedChanges || isSavingRepoSettings) ? 'not-allowed' : 'pointer',
+              background: hasUnsavedChanges
+                ? 'linear-gradient(135deg, #0284c7 0%, #2563eb 100%)'
+                : 'rgba(255, 255, 255, 0.04)',
+              color: hasUnsavedChanges ? '#ffffff' : '#64748b',
+              border: hasUnsavedChanges
+                ? '1px solid #38bdf8'
+                : '1px solid rgba(255, 255, 255, 0.08)',
+              boxShadow: hasUnsavedChanges ? '0 0 16px rgba(2, 132, 199, 0.45)' : 'none',
+              opacity: hasUnsavedChanges ? 1 : 0.6,
+              transition: 'all 0.2s ease'
+            }}
+          >
+            {isSavingRepoSettings ? (
+              <>
+                <span className="spinner" style={{ width: '12px', height: '12px' }} />
+                <span>Saving...</span>
+              </>
+            ) : hasUnsavedChanges ? (
+              <>
+                <span>✓</span>
+                <span>Confirm: Use {repoLinkCount} {repoLinkCount === 1 ? 'Repo' : 'Repos'} for Links</span>
+              </>
+            ) : (
+              <>
+                <span>✓</span>
+                <span>Confirmed (No Changes)</span>
+              </>
+            )}
+          </button>
+        </div>
+
+        {/* Count Selector Options */}
+        <div style={{
+          display: 'flex',
+          gap: '8px',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          marginTop: '10px',
+          paddingTop: '10px',
+          borderTop: '1px solid rgba(255, 255, 255, 0.06)'
+        }}>
+          <span style={{ fontSize: '11px', fontWeight: 600, color: '#cbd5e1', marginRight: '4px' }}>
+            Repo Links Limit:
+          </span>
+          {[
+            { count: 0, label: '0 (None / Text Only)', hint: 'Zero hyperlinks, project names as plain text' },
+            { count: 1, label: '1 Repo', hint: '1 top match' },
+            { count: 2, label: '2 Repos (Recommended)', hint: 'Ideal balance & deliverability' },
+            { count: 3, label: '3 Repos', hint: 'Multi-stack showcases' },
+            { count: 4, label: '4 Repos', hint: 'Maximum technical proof' }
+          ].map((item) => {
+            const isSelected = repoLinkCount === item.count;
+            return (
+              <button
+                key={item.count}
+                type="button"
+                onClick={() => setRepoLinkCount(item.count)}
+                title={item.hint}
+                style={{
+                  fontSize: '11px',
+                  fontWeight: isSelected ? 700 : 500,
+                  padding: '5px 12px',
+                  borderRadius: '7px',
+                  cursor: 'pointer',
+                  background: isSelected
+                    ? 'rgba(56, 189, 248, 0.2)'
+                    : 'rgba(255, 255, 255, 0.04)',
+                  color: isSelected ? '#38bdf8' : '#94a3b8',
+                  border: isSelected
+                    ? '1px solid rgba(56, 189, 248, 0.6)'
+                    : '1px solid rgba(255, 255, 255, 0.08)',
+                  transition: 'all 0.15s ease',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+              >
+                {isSelected && <span style={{ color: '#38bdf8' }}>●</span>}
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Dynamic Context & Pinned Repos Guidance */}
+        <div style={{ marginTop: '10px', fontSize: '11px', color: '#94a3b8', lineHeight: 1.5 }}>
+          {repoLinkCount === 0 ? (
+            <div style={{
+              background: 'rgba(239, 68, 68, 0.08)',
+              border: '1px solid rgba(239, 68, 68, 0.2)',
+              borderRadius: '8px',
+              padding: '6px 12px',
+              color: '#fca5a5',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}>
+              <span>🛡️</span>
+              <span><strong>Hyperlinks disabled:</strong> The AI drafter will mention relevant project names as plain text without adding markdown links, keeping cold email spam filters at minimal sensitivity.</span>
+            </div>
+          ) : (
+            <div style={{
+              background: 'rgba(0, 0, 0, 0.25)',
+              border: '1px solid rgba(255, 255, 255, 0.05)',
+              borderRadius: '8px',
+              padding: '8px 12px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
+                <span style={{ color: '#cbd5e1' }}>
+                  {selectedReposForLinks.length > 0 ? (
+                    <>
+                      📌 <strong>{selectedReposForLinks.length}</strong> pinned priority pool (AI matches & embeds the <strong>best {repoLinkCount} fit{repoLinkCount === 1 ? '' : 's'}</strong> for each specific job):
+                    </>
+                  ) : (
+                    <>
+                      ⚡ <strong>Automatic AI Selection:</strong> AI will choose the top {repoLinkCount} best matching repo link{repoLinkCount === 1 ? '' : 's'} for each job description.
+                    </>
+                  )}
+                </span>
+                <span style={{ fontSize: '10px', color: '#64748b' }}>
+                  Tip: Click "★ Link in Emails" on any repo below to prioritize it
+                </span>
+              </div>
+
+              {selectedReposForLinks.length > 0 && (
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '6px' }}>
+                  {selectedReposForLinks.map((name) => (
+                    <span
+                      key={name}
+                      style={{
+                        fontSize: '10px',
+                        fontWeight: 600,
+                        background: 'rgba(56, 189, 248, 0.15)',
+                        border: '1px solid rgba(56, 189, 248, 0.35)',
+                        color: '#7dd3fc',
+                        padding: '2px 8px',
+                        borderRadius: '6px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '5px'
+                      }}
+                    >
+                      <span>📌 {name}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleRepoSelection(name)}
+                        title="Unpin this repo"
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#94a3b8',
+                          cursor: 'pointer',
+                          fontSize: '10px',
+                          padding: 0,
+                          lineHeight: 1
+                        }}
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedReposForLinks([])}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#f87171',
+                      cursor: 'pointer',
+                      fontSize: '10px',
+                      padding: '2px 6px'
+                    }}
+                  >
+                    Clear All Pinned
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Confirmation Success Alert */}
+        {confirmedNotice && (
+          <div style={{
+            marginTop: '10px',
+            background: 'rgba(16, 185, 129, 0.15)',
+            border: '1px solid rgba(16, 185, 129, 0.4)',
+            color: '#6ee7b7',
+            padding: '7px 12px',
+            borderRadius: '8px',
+            fontSize: '11px',
+            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}>
+            <span>✓</span>
+            <span>{confirmedNotice}</span>
+          </div>
+        )}
+      </div>
 
       {/* ── Search & Sort Bar ──────────────────────────────── */}
       <div style={{
@@ -600,6 +922,7 @@ export default function GitHubPortfolioCard({ profile, syncingGithub, syncGithub
               const isExpanded = !!expandedReadme[r.name];
               const hasReadme = !!r.readmeSnippet;
               const isHovered = hoveredRepo === r.name;
+              const isSelectedForLink = selectedReposForLinks.includes(r.name);
               const langColor = LANG_COLORS[r.language] || LANG_COLORS.Code;
 
               return (
@@ -608,10 +931,12 @@ export default function GitHubPortfolioCard({ profile, syncingGithub, syncGithub
                   onMouseEnter={() => setHoveredRepo(r.name)}
                   onMouseLeave={() => setHoveredRepo(null)}
                   style={{
-                    background: isHovered
+                    background: isSelectedForLink
+                      ? 'rgba(56, 189, 248, 0.05)'
+                      : isHovered
                       ? 'rgba(255, 255, 255, 0.04)'
                       : 'rgba(0, 0, 0, 0.2)',
-                    border: `1px solid ${isHovered ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255, 255, 255, 0.05)'}`,
+                    border: `1px solid ${isSelectedForLink ? 'rgba(56, 189, 248, 0.35)' : isHovered ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255, 255, 255, 0.05)'}`,
                     borderRadius: '12px',
                     padding: '14px 16px',
                     transition: 'all 0.2s ease',
@@ -621,10 +946,10 @@ export default function GitHubPortfolioCard({ profile, syncingGithub, syncGithub
                 >
                   {/* Left accent line */}
                   <div style={{
-                    position: 'absolute', left: 0, top: 0, bottom: 0, width: '3px',
-                    background: langColor, borderRadius: '3px 0 0 3px',
-                    opacity: isHovered ? 1 : 0.5,
-                    transition: 'opacity 0.2s ease'
+                    position: 'absolute', left: 0, top: 0, bottom: 0, width: isSelectedForLink ? '4px' : '3px',
+                    background: isSelectedForLink ? '#38bdf8' : langColor, borderRadius: '3px 0 0 3px',
+                    opacity: isHovered || isSelectedForLink ? 1 : 0.5,
+                    transition: 'all 0.2s ease'
                   }} />
 
                   {/* Top row: name + badges */}
@@ -648,6 +973,32 @@ export default function GitHubPortfolioCard({ profile, syncingGithub, syncGithub
                           border: '1px solid rgba(16, 185, 129, 0.2)'
                         }}>README</span>
                       )}
+                      {/* Cold Email Link Pin Toggle */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleToggleRepoSelection(r.name);
+                        }}
+                        title={isSelectedForLink ? 'Click to unpin from cold email links' : 'Click to prioritize this repository link in cold emails'}
+                        style={{
+                          background: isSelectedForLink ? 'rgba(56, 189, 248, 0.2)' : 'rgba(255, 255, 255, 0.04)',
+                          border: isSelectedForLink ? '1px solid rgba(56, 189, 248, 0.5)' : '1px solid rgba(255, 255, 255, 0.08)',
+                          color: isSelectedForLink ? '#38bdf8' : '#94a3b8',
+                          padding: '2px 8px',
+                          borderRadius: '5px',
+                          fontSize: '10px',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        <span>{isSelectedForLink ? '★' : '☆'}</span>
+                        <span>{isSelectedForLink ? 'Linked for Emails' : 'Link in Emails'}</span>
+                      </button>
                     </div>
 
                     <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexShrink: 0 }}>
