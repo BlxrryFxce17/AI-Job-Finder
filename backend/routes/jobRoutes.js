@@ -459,9 +459,9 @@ router.post('/fetch-jobs', requireAuth, async (req, res) => {
   }
   const searchQueries = Array.from(new Set(searchQueriesList));
 
-  // Pre-load existing jobs to prevent duplicates
+  // Pre-load existing active jobs to prevent duplicates
   const allExistingJobs = await Job.find(
-    { userId: req.user.id },
+    { userId: req.user.id, isDeleted: { $ne: true } },
     { company: 1, role: 1, applyLink: 1, id: 1, hrLinkedIn: 1, hrName: 1 }
   ).lean();
 
@@ -483,11 +483,13 @@ router.post('/fetch-jobs', requireAuth, async (req, res) => {
   if (process.env.ADZUNA_APP_ID && process.env.ADZUNA_APP_KEY) {
     try {
       for (const what of searchQueries) {
+        if (totalAdded >= 20) break;
         if (req.destroyed || req.socket?.destroyed) {
           console.log('[Fetch-Jobs] Request aborted by client. Halting scrape.');
           return;
         }
         for (const loc of targetLocations) {
+          if (totalAdded >= 20) break;
           if (req.destroyed || req.socket?.destroyed) {
             console.log('[Fetch-Jobs] Request aborted by client. Halting scrape.');
             return;
@@ -702,11 +704,13 @@ router.post('/fetch-jobs', requireAuth, async (req, res) => {
     }
   }
 
-  // Fetch jobs via JSearch (RapidAPI Google for Jobs: LinkedIn, Indeed, Naukri, Glassdoor)
-  if (process.env.RAPIDAPI_KEY) {
+  // Fetch jobs via JSearch (RapidAPI Google for Jobs) only if Adzuna didn't yield enough jobs
+  if (process.env.RAPIDAPI_KEY && totalAdded < 10) {
     try {
-      for (const what of searchQueries.slice(0, 3)) {
+      for (const what of searchQueries.slice(0, 2)) {
+        if (totalAdded >= 15) break;
         for (const loc of targetLocations.slice(0, 2)) {
+          if (totalAdded >= 15) break;
           const locStr = (loc && loc.toLowerCase() !== 'all india' && loc.toLowerCase() !== 'all') ? ` in ${loc}` : ' in India';
           const queryStr = `${what}${locStr}`;
 
@@ -720,7 +724,7 @@ router.post('/fetch-jobs', requireAuth, async (req, res) => {
               'x-rapidapi-host': 'jsearch.p.rapidapi.com',
               'x-rapidapi-key': process.env.RAPIDAPI_KEY
             },
-            timeout: 10000
+            timeout: 8000
           });
 
           const apiJobs = jsearchRes.data?.data?.jobs || [];
@@ -802,11 +806,13 @@ router.post('/fetch-jobs', requireAuth, async (req, res) => {
     }
   }
 
-  // Fallback search if no jobs found
-  if (totalAdded === 0 && process.env.SERPER_API_KEY) {
+  // Fallback search only if no jobs found from primary sources
+  if (totalAdded === 0 && (process.env.TAVILY_API_KEY || process.env.SERPER_API_KEY)) {
     try {
-      for (const what of searchQueries) {
-        for (const loc of targetLocations) {
+      for (const what of searchQueries.slice(0, 2)) {
+        if (totalAdded >= 10) break;
+        for (const loc of targetLocations.slice(0, 1)) {
+          if (totalAdded >= 10) break;
           const freeJobs = await scrapeJobsFree(what, loc, Array.from(existingCompanyRoles));
           for (const fj of freeJobs) {
             const compKey = normalizeCompanyKey(fj.company);
@@ -843,8 +849,8 @@ router.post('/fetch-jobs', requireAuth, async (req, res) => {
           }
         }
       }
-    } catch (serperErr) {
-      console.warn('[Fetch-Jobs] Serper fallback job search error:', serperErr.message);
+    } catch (fallbackErr) {
+      console.warn('[Fetch-Jobs] Fallback job search error:', fallbackErr.message);
     }
   }
 
@@ -993,9 +999,9 @@ router.post('/scrape-hr', requireAuth, async (req, res) => {
   const targetExperience = req.body.experience || '';
 
   try {
-    // Pre-load past HR leads to prevent duplicates
+    // Pre-load past active HR leads to prevent duplicates (exclude deleted)
     const allUserJobs = await Job.find(
-      { userId: req.user.id },
+      { userId: req.user.id, isDeleted: { $ne: true } },
       { hrLinkedIn: 1, hrName: 1, company: 1, applyLink: 1, status: 1 }
     ).lean();
 
@@ -1041,7 +1047,7 @@ router.post('/scrape-hr', requireAuth, async (req, res) => {
       try {
         const companyHr = await Promise.race([
           findHROnLinkedIn(query, location),
-          new Promise(resolve => setTimeout(() => resolve(null), 3000))
+          new Promise(resolve => setTimeout(() => resolve(null), 8000))
         ]);
         if (companyHr && companyHr.name) {
           const normName = normalizeHrName(companyHr.name);
