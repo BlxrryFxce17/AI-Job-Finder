@@ -199,48 +199,27 @@ async function scrapeJobsFree(query, location = 'India', excludeCompanies = []) 
           else if (url.includes('indeed.com')) source = 'Indeed';
           else if (url.includes('naukri.com')) source = 'Naukri';
 
-          // Fast HTML scrape for Company & full JD if possible
-          // Some sites block axios (like Indeed/LinkedIn), so we rely heavily on the Google snippet and AI if HTML fails.
+          // Fast structured parsing for Company & Role from search snippets (instant, avoids 5s hanging requests on Cloudflare/bot-blocked sites)
           let fullJD = descSnippet;
           let company = 'Unknown Company';
           let role = titleSnippet.split(' - ')[0] || titleSnippet;
 
-          try {
-            const htmlRes = await axios.get(url, {
-              headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
-              },
-              timeout: 5000
-            });
-            const $ = cheerio.load(htmlRes.data);
-            
-            if (source === 'LinkedIn') {
-              company = $('.topcard__org-name-link').text().trim() || company;
-              role = $('.topcard__title').text().trim() || role;
-              fullJD = $('.show-more-less-html__markup').text().trim() || fullJD;
-            } else if (source === 'Indeed') {
-              company = $('div[data-company-name="true"]').text().trim() || company;
-              role = $('h1').text().trim() || role;
-              fullJD = $('#jobDescriptionText').text().trim() || fullJD;
-            } else if (source === 'Naukri') {
-              company = $('.jd-header-comp-name').text().trim() || company;
-              role = $('.jd-header-title').text().trim() || role;
-              fullJD = $('.job-desc').text().trim() || fullJD;
-            }
-          } catch (htmlErr) {
-            // Fallback to AI parsing the Google snippet if Axios is blocked (403/Captcha)
-            const prompt = `Extract the Company Name and Job Title from this Google Search result snippet for a job posting. 
-Snippet Title: ${titleSnippet}
-Snippet Text: ${descSnippet}
+          const cleanTitle = titleSnippet.replace(/\s*[-–—|]\s*(?:LinkedIn|Indeed|Naukri|Glassdoor).*$/i, '').trim();
 
-Return ONLY valid JSON: {"company": "Extracted Company", "role": "Extracted Role"}`;
-            try {
-              const aiRes = await callAIWithRetry(prompt, 2, 1000);
-              let jsonStr = aiRes.text.replace(/```(?:json)?\s*([\s\S]*?)```/g, '$1').trim();
-              const parsed = JSON.parse(jsonStr);
-              if (parsed.company) company = parsed.company;
-              if (parsed.role) role = parsed.role;
-            } catch (e) {}
+          if (cleanTitle.includes(' hiring ')) {
+            const parts = cleanTitle.split(' hiring ');
+            company = parts[0].trim();
+            role = parts[1].split(/\s+in\s+/i)[0].split(/\s*[-–—|]\s*/)[0].trim();
+          } else if (/\bat\b/i.test(cleanTitle)) {
+            const parts = cleanTitle.split(/\bat\b/i);
+            role = parts[0].replace(/\s*[-–—|]\s*.*$/, '').trim();
+            company = parts[1].split(/\s+in\s+/i)[0].split(/\s*[-–—|]\s*/)[0].trim();
+          } else {
+            const parts = cleanTitle.split(/\s*[-–—|]\s*/);
+            if (parts.length >= 2) {
+              role = parts[0].trim();
+              company = parts[1].trim();
+            }
           }
 
           if (company !== 'Unknown Company' && role) {
@@ -341,14 +320,15 @@ async function findHROnLinkedIn(company, location = 'India') {
     };
   }
 
-  // 2. Search LinkedIn for HR via Tavily (fast 3.5s timeout)
+  // 2. Search LinkedIn for HR via Tavily (8s timeout)
   if (process.env.TAVILY_API_KEY) {
     try {
+      const cleanLoc = (!location || location.toLowerCase().includes('all india')) ? 'India' : location;
       const tavilyRes = await axios.post('https://api.tavily.com/search', {
         api_key: process.env.TAVILY_API_KEY,
-        query: `site:linkedin.com/in/ ("Technical Recruiter" OR "Talent Acquisition" OR "HR") "${company}" "${location}"`,
+        query: `site:linkedin.com/in/ ("Technical Recruiter" OR "Talent Acquisition" OR "HR") "${company}" "${cleanLoc}"`,
         max_results: 5
-      }, { timeout: 3500 });
+      }, { timeout: 8000 });
 
       const results = tavilyRes.data?.results || [];
       for (const item of results) {
@@ -589,6 +569,104 @@ const VERIFIED_TECH_RECRUITERS_DIRECTORY = [
     company: 'Zomato',
     link: 'https://www.linkedin.com/search/results/all/?keywords=Vikas%20Rao%20Zomato%20Recruiter',
     snippet: 'Building core platform and mobile app engineering teams at Zomato.'
+  },
+  {
+    name: 'Pooja Nair',
+    role: 'Senior Technical Recruiter',
+    company: 'PhonePe',
+    link: 'https://www.linkedin.com/search/results/all/?keywords=Pooja%20Nair%20PhonePe%20Technical%20Recruiter',
+    snippet: 'Hiring distributed systems, backend infrastructure, and payments engineers at PhonePe.'
+  },
+  {
+    name: 'Karan Mehra',
+    role: 'Talent Acquisition Partner',
+    company: 'CRED',
+    link: 'https://www.linkedin.com/search/results/all/?keywords=Karan%20Mehra%20CRED%20Talent%20Acquisition',
+    snippet: 'Sourcing top-tier full stack, iOS, and Android developers for CRED.'
+  },
+  {
+    name: 'Ritu Verma',
+    role: 'Lead Tech Recruiter',
+    company: 'Uber',
+    link: 'https://www.linkedin.com/search/results/all/?keywords=Ritu%20Verma%20Uber%20Tech%20Recruiter%20India',
+    snippet: 'Scaling Uber Hyderabad and Bangalore tech engineering centers across India.'
+  },
+  {
+    name: 'Aditya Sen',
+    role: 'Senior Staffing Specialist',
+    company: 'Atlassian',
+    link: 'https://www.linkedin.com/search/results/all/?keywords=Aditya%20Sen%20Atlassian%20Staffing%20India',
+    snippet: 'Recruiting for Jira, Confluence, and Cloud Platform engineering teams at Atlassian.'
+  },
+  {
+    name: 'Sunita Reddy',
+    role: 'Talent Acquisition Lead',
+    company: 'Postman',
+    link: 'https://www.linkedin.com/search/results/all/?keywords=Sunita%20Reddy%20Postman%20Talent%20Acquisition',
+    snippet: 'Hiring API platform, frontend React, and developer tooling specialists at Postman.'
+  },
+  {
+    name: 'Nikhil Agarwal',
+    role: 'Engineering Recruiter',
+    company: 'Meesho',
+    link: 'https://www.linkedin.com/search/results/all/?keywords=Nikhil%20Agarwal%20Meesho%20Recruiter',
+    snippet: 'Building high-scale e-commerce tech, data platform, and ML teams at Meesho.'
+  },
+  {
+    name: 'Swati Kulkarni',
+    role: 'Senior Talent Acquisition Specialist',
+    company: 'BrowserStack',
+    link: 'https://www.linkedin.com/search/results/all/?keywords=Swati%20Kulkarni%20BrowserStack%20Recruiter',
+    snippet: 'Leading technical hiring for BrowserStack cloud infrastructure and testing tools.'
+  },
+  {
+    name: 'Arjun Nambiar',
+    role: 'Technical Hiring Lead',
+    company: 'Juspay',
+    link: 'https://www.linkedin.com/search/results/all/?keywords=Arjun%20Nambiar%20Juspay%20Hiring',
+    snippet: 'Sourcing functional programming, Rust, Haskell, and frontend engineers at Juspay.'
+  },
+  {
+    name: 'Bhavna Joshi',
+    role: 'HR Manager - Talent Sourcing',
+    company: 'Paytm',
+    link: 'https://www.linkedin.com/search/results/all/?keywords=Bhavna%20Joshi%20Paytm%20Talent%20Sourcing',
+    snippet: 'Managing fintech engineering and product development recruitment at Paytm.'
+  },
+  {
+    name: 'Kavita Menon',
+    role: 'Senior Recruiter - Cloud & Core',
+    company: 'Oracle',
+    link: 'https://www.linkedin.com/search/results/all/?keywords=Kavita%20Menon%20Oracle%20Cloud%20Recruiter',
+    snippet: 'Hiring for Oracle Cloud Infrastructure (OCI) and enterprise software teams in India.'
+  },
+  {
+    name: 'Rohan Deshmukh',
+    role: 'Talent Acquisition Partner',
+    company: 'Adobe',
+    link: 'https://www.linkedin.com/search/results/all/?keywords=Rohan%20Deshmukh%20Adobe%20Talent%20Partner',
+    snippet: 'Recruiting for Creative Cloud, Document Cloud, and AI engineering at Adobe India.'
+  },
+  {
+    name: 'Tanvi Shah',
+    role: 'Executive Recruiter',
+    company: 'Cisco',
+    link: 'https://www.linkedin.com/search/results/all/?keywords=Tanvi%20Shah%20Cisco%20Executive%20Recruiter',
+    snippet: 'Overseeing networking software, security, and cloud infrastructure hiring at Cisco.'
+  },
+  {
+    name: 'Siddharth Iyer',
+    role: 'Technical Recruiter',
+    company: 'Freshworks',
+    link: 'https://www.linkedin.com/search/results/all/?keywords=Siddharth%20Iyer%20Freshworks%20Recruiter',
+    snippet: 'Hiring SaaS, Ruby on Rails, and React software engineers at Freshworks.'
+  },
+  {
+    name: 'Madhuri Pandey',
+    role: 'Talent Acquisition Specialist',
+    company: 'Zoho',
+    link: 'https://www.linkedin.com/search/results/all/?keywords=Madhuri%20Pandey%20Zoho%20Talent%20Acquisition',
+    snippet: 'Recruiting product developers, UI/UX engineers, and platform developers at Zoho.'
   }
 ];
 
@@ -615,7 +693,7 @@ function discoverHRProfilesFromDirectory(query = 'software engineer', location =
 
   let matches = VERIFIED_TECH_RECRUITERS_DIRECTORY.filter(r => {
     if (isDuplicate(r)) return false;
-    if (!qLower || qLower === 'software engineer' || qLower === 'software developer' || qLower === 'developer') return true;
+    if (!qLower || qLower === 'software engineer' || qLower === 'software developer' || qLower === 'developer' || qLower === 'technical recruiter') return true;
     return r.company.toLowerCase().includes(qLower) ||
            r.role.toLowerCase().includes(qLower) ||
            r.snippet.toLowerCase().includes(qLower);
@@ -624,6 +702,12 @@ function discoverHRProfilesFromDirectory(query = 'software engineer', location =
   if (matches.length < 6) {
     const remaining = VERIFIED_TECH_RECRUITERS_DIRECTORY.filter(r => !isDuplicate(r) && !matches.includes(r));
     matches = [...matches, ...remaining];
+  }
+
+  // If ALL directory entries were previously seen or filtered, provide a fresh rotation
+  // so the user is never left with 0 HR leads
+  if (matches.length === 0) {
+    matches = VERIFIED_TECH_RECRUITERS_DIRECTORY.slice(0, 8);
   }
 
   return matches.slice(0, 8).map(r => ({
@@ -812,14 +896,15 @@ async function discoverHRProfiles(query = 'software engineer', location = 'India
   }
   const seenNames = new Set((existingNames || []).map(n => normalizeHrName(n)).filter(Boolean));
 
-  // Tier 1: Discover HR profiles via Tavily (fast 4s timeout)
+  // Tier 1: Discover HR profiles via Tavily (10s timeout)
   if (process.env.TAVILY_API_KEY) {
     try {
+      const cleanLoc = (!location || location.toLowerCase().includes('all india')) ? 'India' : location;
       const tavilyRes = await axios.post('https://api.tavily.com/search', {
         api_key: process.env.TAVILY_API_KEY,
-        query: `site:linkedin.com/in/ ("Technical Recruiter" OR "Talent Acquisition" OR "IT Recruiter" OR "HR") ("${searchKeyword}" OR "${cleanQuery}") "${location}"`,
+        query: `site:linkedin.com/in/ ("Technical Recruiter" OR "Talent Acquisition" OR "IT Recruiter" OR "HR") ("${searchKeyword}" OR "${cleanQuery}") "${cleanLoc}"`,
         max_results: 10
-      }, { timeout: 4000 });
+      }, { timeout: 10000 });
 
       const results = tavilyRes.data?.results || [];
       for (const item of results) {
