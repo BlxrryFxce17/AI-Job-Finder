@@ -25,13 +25,25 @@ const emailRoutes = require('./routes/emailRoutes');
 const trackingRoutes = require('./routes/trackingRoutes');
 const followupRoutes = require('./routes/followupRoutes');
 const aiRoutes = require('./routes/aiRoutes');
+const extensionRoutes = require('./routes/extensionRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Security & Middleware
+// Security & Middleware (Permits Web App & Chrome Extension)
 app.use(cors({
-  origin: [process.env.PUBLIC_URL, process.env.FRONTEND_URL, 'http://localhost:5173'].filter(Boolean)
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (origin.startsWith('chrome-extension://') || origin.startsWith('moz-extension://')) {
+      return callback(null, true);
+    }
+    const allowed = [process.env.PUBLIC_URL, process.env.FRONTEND_URL, 'http://localhost:5173', 'http://127.0.0.1:5173'].filter(Boolean);
+    if (allowed.length === 0 || allowed.includes(origin) || origin.startsWith('http://localhost:')) {
+      return callback(null, true);
+    }
+    return callback(null, true);
+  },
+  credentials: true
 }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
@@ -71,6 +83,7 @@ app.use('/api', emailRoutes); // discover-email, generate-email, send-email, sin
 app.use('/api', trackingRoutes); // track-open, track-click
 app.use('/api', followupRoutes); // send-followup, check-followups
 app.use('/api/ai', aiRoutes); // usage, credits, quotas, metrics
+app.use('/api/extension', extensionRoutes); // Extension profile, AI question answer, log job
 
 // Keep-Alive Ping Endpoint
 app.get('/api/ping', (req, res) => {

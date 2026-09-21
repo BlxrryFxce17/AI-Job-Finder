@@ -81,7 +81,10 @@ const updateProfileHandler = async (req, res) => {
     const allowedFields = [
       'name', 'title', 'phone', 'linkedin', 'github', 'portfolio', 
       'githubToken', 'tone', 'experienceLevel', 'enableFlex', 
-      'enableAutoFollowUp', 'aiInstructions', 'githubRepoLinkCount', 'selectedRepoNames'
+      'enableAutoFollowUp', 'aiInstructions', 'githubRepoLinkCount', 'selectedRepoNames',
+      'skills', 'workExperience', 'education', 'fatherName', 'preferredName',
+      'addressLine1', 'city', 'state', 'postalCode', 'country',
+      'authorizedToWork', 'requireSponsorship', 'formerEmployee', 'resumeFilename'
     ];
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) {
@@ -138,11 +141,53 @@ router.post('/resume', requireAuth, upload.single('resume'), async (req, res) =>
         ? `\n\nEmbedded Hyperlinks in Resume PDF:\n${embeddedLinks.join('\n')}`
         : '';
 
-      const prompt = `Extract the core skills (max 10), top 3 achievements, experience level (e.g., Junior, Mid, Senior), full name, current professional title (e.g., Software Engineer), phone number, LinkedIn URL, GitHub URL, and personal portfolio / website / blog URL from this resume text and embedded links (if present). 
-Return ONLY a valid JSON object with the following structure:
-{"skills": ["skill1", "skill2"], "achievements": ["achievement1", "achievement2"], "experienceLevel": "Senior", "name": "John Doe", "title": "Developer", "phone": "1234567890", "linkedin": "url", "github": "url", "portfolio": "url or empty string"}
+      const prompt = `Extract all relevant professional details from this resume text and embedded links (if present):
+1. Core skills (array of strings, e.g. ["React", "Node.js", "Python", "Docker"])
+2. Top 3 achievements (array of strings)
+3. Experience level (Junior, Mid, Senior, Lead)
+4. Full name
+5. Current professional title (e.g., Software Engineer, Full Stack Developer)
+6. Phone number (clean format)
+7. LinkedIn URL, GitHub URL, and personal portfolio / website / blog URL
+8. Work experience list: array of objects with { "company": "Company Name", "title": "Job Title", "location": "City, Country or Remote", "startDate": "e.g. Jan 2022", "endDate": "e.g. Present", "isCurrent": true/false, "description": "Key bullet points or responsibilities" }
+9. Education list: array of objects with { "institution": "University/College Name", "degree": "Degree (e.g. B.Tech, B.S., M.S.)", "fieldOfStudy": "Field/Major (e.g. Computer Science)", "startYear": "e.g. 2018", "endYear": "e.g. 2022", "grade": "e.g. 8.5 CGPA or GPA" }
+
+Return ONLY a valid JSON object matching this schema:
+{
+  "skills": ["skill1", "skill2"],
+  "achievements": ["achievement1"],
+  "experienceLevel": "Senior",
+  "name": "John Doe",
+  "title": "Developer",
+  "phone": "1234567890",
+  "linkedin": "url",
+  "github": "url",
+  "portfolio": "url",
+  "workExperience": [
+    {
+      "company": "Acme Corp",
+      "title": "Software Engineer",
+      "location": "Bangalore, India",
+      "startDate": "2022",
+      "endDate": "Present",
+      "isCurrent": true,
+      "description": "Engineered web applications..."
+    }
+  ],
+  "education": [
+    {
+      "institution": "Tech University",
+      "degree": "Bachelor of Technology",
+      "fieldOfStudy": "Computer Science",
+      "startYear": "2018",
+      "endYear": "2022",
+      "grade": "8.5 CGPA"
+    }
+  ]
+}
+
 Resume text:
-${data.text.substring(0, 4000)}${linksContext}
+${data.text.substring(0, 5000)}${linksContext}
 `;
       const response = await callAIWithRetry(prompt, 3, 2000);
       let jsonStr = response.text;
@@ -153,6 +198,12 @@ ${data.text.substring(0, 4000)}${linksContext}
       profile.skills = parsedData.skills || [];
       profile.achievements = parsedData.achievements || [];
       profile.experienceLevel = parsedData.experienceLevel || '';
+      if (Array.isArray(parsedData.workExperience) && parsedData.workExperience.length > 0) {
+        profile.workExperience = parsedData.workExperience;
+      }
+      if (Array.isArray(parsedData.education) && parsedData.education.length > 0) {
+        profile.education = parsedData.education;
+      }
 
       if (parsedData.name) profile.name = parsedData.name;
       if (parsedData.title) profile.title = parsedData.title;
