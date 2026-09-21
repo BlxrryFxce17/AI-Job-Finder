@@ -474,31 +474,25 @@ router.post('/generate-answer', requireAuth, async (req, res) => {
       .map(r => `- ${r.name} (${r.language || 'Code'}): ${r.description || 'Production software system'}`)
       .join('\n');
 
-    const prompt = `You are a software engineer applying for a position at ${company || 'the target company'}${role ? ` as a ${role}` : ''}.
-Write a natural, direct, and compelling response to this job application screening question:
+    const prompt = `You are ${profile.name}, applying to ${company || 'a company'}${role ? ` for ${role}` : ''}.
+Answer this screening question directly. Write in first person.
 
-QUESTION:
-"${question}"
+QUESTION: "${question}"
 
-JOB CONTEXT:
-Role: ${role || 'Software Engineer'}
-Company: ${company || 'Target Employer'}
-Job Description Snippet: ${jobDescription ? jobDescription.slice(0, 800) : 'Software Engineering Opening'}
+JOB CONTEXT: ${role || 'Software Engineer'} at ${company || 'target company'}. ${jobDescription ? jobDescription.slice(0, 600) : ''}
 
-CANDIDATE BACKGROUND:
-Name: ${profile.name}
-Specialization / Title: ${profile.title || 'Full Stack Engineer'}
-Experience Level: ${profile.experienceLevel || 'Mid-level'}
-Core Skills: ${topSkills || 'JavaScript, Python, React, Node.js, SQL, REST APIs'}
-Verified Technical Projects:
-${userRepos || '- Modern Web Applications & Automation Systems'}
+YOUR REAL BACKGROUND:
+- Title: ${profile.title || 'Full Stack Engineer'}
+- Skills: ${topSkills || 'JavaScript, React, Node.js, Python'}
+- Projects: ${userRepos || 'web apps and automation systems'}
 
 RULES:
-- Sound authentic, confident, and professional.
-- Address the question directly in the very first sentence. NO conversational filler (e.g. do NOT say "Here is an answer", "Certainly", or "As a developer...").
-- Reference 1 or 2 relevant candidate skills or real projects if applicable.
-- Keep the length appropriate: 1 concise paragraph (60-120 words) for short questions, or 2 paragraphs max for deeper behavioral questions.
-- Write in first person ("I").`;
+- Start with the answer. No filler ("Certainly", "As a developer", "Here is").
+- Keep it SHORT: 2-4 sentences for simple questions, max 1 short paragraph for behavioral ones.
+- Sound like a real human, not AI. Casual professional tone.
+- Reference 1-2 real projects or skills when relevant.
+- NO bullet points. NO "I'm passionate about" or "I thrive in" or similar cliches.
+- If asked about a bug or technical scenario, give a specific realistic example.`;
 
     const answer = await callAIWithRetry(prompt, 3, 2000, {
       action: 'Extension Question Answer',
