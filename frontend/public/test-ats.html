@@ -1,0 +1,1642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Workday Mock Job Application — Senior Software Engineer</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    body {
+      background-color: #f3f4f6;
+      color: #1f2937;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Workday Style Top Navigation */
+    .wd-navbar {
+      background: #ffffff;
+      border-bottom: 1px solid #e5e7eb;
+      padding: 14px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .wd-logo-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .wd-logo {
+      width: 32px;
+      height: 32px;
+      background: #0051c7;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #ffffff;
+      font-weight: 800;
+      font-size: 16px;
+    }
+
+    .wd-brand-text {
+      font-size: 18px;
+      font-weight: 700;
+      color: #111827;
+    }
+
+    .wd-badge {
+      background: #e0f2fe;
+      color: #0369a1;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    /* Progress Stepper */
+    .wd-stepper {
+      background: #ffffff;
+      border-bottom: 1px solid #e5e7eb;
+      padding: 14px 28px;
+      display: flex;
+      align-items: center;
+      gap: 28px;
+      font-size: 13.5px;
+    }
+
+    .wd-step {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #6b7280;
+      font-weight: 500;
+      cursor: pointer;
+      user-select: none;
+      transition: all 0.15s ease;
+    }
+
+    .wd-step:hover {
+      color: #111827;
+    }
+
+    .wd-step.active {
+      color: #0051c7;
+      font-weight: 700;
+    }
+
+    .wd-step-num {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: #e5e7eb;
+      color: #4b5563;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11.5px;
+      font-weight: 700;
+      transition: all 0.15s ease;
+    }
+
+    .wd-step.active .wd-step-num {
+      background: #0051c7;
+      color: #ffffff;
+    }
+
+    .wd-step.completed .wd-step-num {
+      background: #059669;
+      color: #ffffff;
+    }
+
+    /* Container */
+    .wd-container {
+      max-width: 840px;
+      width: 100%;
+      margin: 28px auto;
+      background: #ffffff;
+      border-radius: 8px;
+      border: 1px solid #e5e7eb;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+      padding: 36px 44px;
+    }
+
+    .wd-header-box {
+      margin-bottom: 24px;
+      border-bottom: 1px solid #e5e7eb;
+      padding-bottom: 16px;
+    }
+
+    .wd-job-title {
+      font-size: 22px;
+      font-weight: 700;
+      color: #111827;
+      margin-bottom: 4px;
+    }
+
+    .wd-job-meta {
+      font-size: 13px;
+      color: #6b7280;
+    }
+
+    .wd-section-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #1f2937;
+      margin: 24px 0 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid #f3f4f6;
+      padding-bottom: 6px;
+    }
+
+    /* Form Layout */
+    .wd-grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .wd-grid-3 {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .wd-form-group {
+      margin-bottom: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .wd-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: #374151;
+    }
+
+    .wd-req {
+      color: #dc2626;
+      margin-left: 2px;
+    }
+
+    .wd-input, .wd-select, .wd-textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 14px;
+      color: #111827;
+      background: #ffffff;
+      outline: none;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .wd-input:focus, .wd-select:focus, .wd-textarea:focus {
+      border-color: #0051c7;
+      box-shadow: 0 0 0 3px rgba(0, 81, 199, 0.15);
+    }
+
+    /* Radios */
+    .wd-radio-group {
+      display: flex;
+      gap: 24px;
+      margin-top: 4px;
+    }
+
+    .wd-radio-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13.5px;
+      cursor: pointer;
+      color: #374151;
+    }
+
+    .wd-radio-label input[type="radio"],
+    .wd-radio-label input[type="checkbox"] {
+      cursor: pointer;
+      width: 16px;
+      height: 16px;
+    }
+
+    /* Bottom Button Bar */
+    .wd-action-bar {
+      margin-top: 36px;
+      padding-top: 20px;
+      border-top: 1px solid #e5e7eb;
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .wd-btn {
+      padding: 10px 24px;
+      font-size: 14px;
+      font-weight: 600;
+      border-radius: 6px;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: all 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .wd-btn-secondary {
+      background: #ffffff;
+      border-color: #d1d5db;
+      color: #374151;
+    }
+
+    .wd-btn-secondary:hover {
+      background: #f9fafb;
+    }
+
+    .wd-btn-primary {
+      background: #0051c7;
+      color: #ffffff;
+    }
+
+    .wd-btn-primary:hover {
+      background: #003e99;
+    }
+
+    /* Callout Banner */
+    .wd-helper-banner {
+      background: #f0fdf4;
+      border: 1px solid #bbf7d0;
+      border-radius: 6px;
+      padding: 12px 16px;
+      margin-bottom: 24px;
+      font-size: 13px;
+      color: #166534;
+      line-height: 1.5;
+    }
+
+    /* Review Cards */
+    .wd-review-card {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin-bottom: 16px;
+    }
+
+    .wd-review-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      border-bottom: 1px solid #e2e8f0;
+      padding-bottom: 8px;
+    }
+
+    .wd-review-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #1e293b;
+    }
+
+    .wd-review-edit {
+      font-size: 12px;
+      color: #0051c7;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+
+    .wd-review-grid {
+      display: grid;
+      grid-template-columns: 140px 1fr;
+      gap: 8px 16px;
+      font-size: 13px;
+    }
+
+    .wd-review-label {
+      color: #64748b;
+      font-weight: 500;
+    }
+
+    .wd-review-value {
+      color: #0f172a;
+      font-weight: 600;
+      word-break: break-all;
+    }
+
+    /* Success Screen */
+    .wd-success-box {
+      text-align: center;
+      padding: 48px 24px;
+    }
+
+    .wd-success-icon {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: #dcfce7;
+      color: #15803d;
+      font-size: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 16px;
+    }
+
+    /* Workday Style Skills Pill Selector */
+    .wd-pill-box {
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      padding: 8px 10px;
+      background: #ffffff;
+      min-height: 48px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      position: relative;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .wd-pill-box:focus-within {
+      border-color: #0051c7;
+      box-shadow: 0 0 0 3px rgba(0, 81, 199, 0.15);
+    }
+    .wd-skill-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #e0f2fe;
+      color: #0369a1;
+      font-size: 12.5px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 16px;
+      border: 1px solid #bae6fd;
+      animation: fadeIn 0.15s ease-in-out;
+    }
+    .wd-pill-del {
+      background: none;
+      border: none;
+      color: #0284c7;
+      font-size: 14px;
+      cursor: pointer;
+      padding: 0;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .wd-pill-del:hover {
+      color: #ef4444;
+    }
+    .wd-pill-input-wrap {
+      flex: 1;
+      min-width: 160px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      position: relative;
+    }
+    .wd-pill-input {
+      width: 100%;
+      border: none;
+      outline: none;
+      font-size: 13.5px;
+      color: #111827;
+      background: transparent;
+      padding: 4px 6px;
+    }
+    .wd-pill-add-btn {
+      background: #f1f5f9;
+      border: 1px solid #cbd5e1;
+      color: #334155;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 5px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.12s ease;
+    }
+    .wd-pill-add-btn:hover {
+      background: #0051c7;
+      color: #ffffff;
+      border-color: #0051c7;
+    }
+    .wd-pill-dropdown {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      width: 220px;
+      background: #ffffff;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
+      z-index: 50;
+      max-height: 160px;
+      overflow-y: auto;
+      display: none;
+    }
+    .wd-pill-dropdown.open {
+      display: block;
+    }
+    .wd-pill-option {
+      padding: 7px 12px;
+      font-size: 12.5px;
+      color: #374151;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .wd-pill-option:hover, .wd-pill-option.active {
+      background: #f0fdf4;
+      color: #166534;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Workday Top Bar -->
+  <header class="wd-navbar">
+    <div class="wd-logo-group">
+      <div class="wd-logo">W</div>
+      <span class="wd-brand-text">Acme Global Careers</span>
+      <span class="wd-badge">Workday Test Bed</span>
+    </div>
+    <div style="font-size: 13px; color: #4b5563;">
+      Signed in as <strong>candidate@test.com</strong>
+    </div>
+  </header>
+
+  <!-- Progress Stepper (Interactive) -->
+  <div class="wd-stepper">
+    <div class="wd-step active" id="step-btn-1" onclick="goToStep(1)">
+      <span class="wd-step-num">1</span>
+      <span>My Information</span>
+    </div>
+    <div class="wd-step" id="step-btn-2" onclick="goToStep(2)">
+      <span class="wd-step-num">2</span>
+      <span>My Experience</span>
+    </div>
+    <div class="wd-step" id="step-btn-3" onclick="goToStep(3)">
+      <span class="wd-step-num">3</span>
+      <span>Application Questions</span>
+    </div>
+    <div class="wd-step" id="step-btn-4" onclick="goToStep(4)">
+      <span class="wd-step-num">4</span>
+      <span>Review &amp; Submit</span>
+    </div>
+  </div>
+
+  <!-- Main Container -->
+  <main class="wd-container">
+    <div class="wd-header-box">
+      <h1 class="wd-job-title">Senior Full Stack Engineer — Cloud Platform</h1>
+      <div class="wd-job-meta">Job ID: R-104928 | Bangalore, India / Remote | Acme Corporation</div>
+    </div>
+
+    <div class="wd-helper-banner">
+      ✨ <strong>Workday 4-Step Test Bed:</strong> Experience all 4 steps of a modern ATS flow. Open the <strong>AI Job Copilot</strong> dock tab on the right to test sequential autofill, CV attachment, structured experience extraction, and 1-click step continuation!
+    </div>
+
+    <form id="wd-application-form" onsubmit="event.preventDefault();">
+
+      <!-- ==========================================
+           STEP 1: MY INFORMATION
+           ========================================== -->
+      <div id="step-1-page" class="wd-step-page">
+        <!-- Resume / CV Upload Section -->
+        <div class="wd-section-title">Resume / CV Attachment</div>
+        <div class="wd-form-group" data-automation-id="file-upload-dropzone">
+          <label class="wd-label" for="resumeUpload">Attach Resume / CV <span class="wd-req">*</span></label>
+          <div style="border: 2px dashed #94a3b8; border-radius: 8px; padding: 22px; text-align: center; background: #f8fafc; cursor: pointer; transition: all 0.2s;" onclick="document.getElementById('resumeUpload').click()" id="wd-dropzone-box">
+            <div style="font-size: 32px; margin-bottom: 6px;">📄</div>
+            <div style="font-size: 13.5px; font-weight: 600; color: #1e293b;" id="wd-dropzone-filename">Drop your resume here, or <span style="color: #0051c7; text-decoration: underline;">Browse</span></div>
+            <div style="font-size: 11px; color: #64748b; margin-top: 4px;">Supports PDF, DOCX, TXT up to 5MB • Automatically attached by AI Job Copilot</div>
+            <input 
+              type="file" 
+              id="resumeUpload" 
+              name="resume" 
+              data-automation-id="file-upload-input" 
+              accept=".pdf,.docx,.txt" 
+              style="display: none;" 
+              onchange="handleResumeFileChange(this)" 
+            />
+          </div>
+        </div>
+
+        <!-- Legal Name Section -->
+        <div class="wd-section-title">Legal Name</div>
+        <div class="wd-grid-2">
+          <div class="wd-form-group">
+            <label class="wd-label" for="firstName">First Name <span class="wd-req">*</span></label>
+            <input 
+              type="text" 
+              id="firstName" 
+              name="legalNameSection_firstName" 
+              data-automation-id="legalNameSection_firstName" 
+              class="wd-input" 
+              placeholder="Enter your legal first name" 
+              required
+            />
+          </div>
+          <div class="wd-form-group">
+            <label class="wd-label" for="lastName">Last Name <span class="wd-req">*</span></label>
+            <input 
+              type="text" 
+              id="lastName" 
+              name="legalNameSection_lastName" 
+              data-automation-id="legalNameSection_lastName" 
+              class="wd-input" 
+              placeholder="Enter your legal last name" 
+              required
+            />
+          </div>
+        </div>
+
+        <!-- Father's Name (Common in Indian ATS) -->
+        <div class="wd-form-group">
+          <label class="wd-label" for="fatherName">Father's Name <span class="wd-req">*</span></label>
+          <input 
+            type="text" 
+            id="fatherName" 
+            name="legalNameSection_fatherName" 
+            data-automation-id="legalNameSection_fatherName" 
+            class="wd-input" 
+            placeholder="Father's full name"
+          />
+        </div>
+
+        <!-- Contact Information -->
+        <div class="wd-section-title">Contact Information</div>
+        <div class="wd-grid-2">
+          <div class="wd-form-group">
+            <label class="wd-label" for="email">Email Address <span class="wd-req">*</span></label>
+            <input 
+              type="email" 
+              id="email" 
+              name="email" 
+              data-automation-id="email" 
+              class="wd-input" 
+              placeholder="name@example.com" 
+              required
+            />
+          </div>
+          <div class="wd-form-group">
+            <label class="wd-label" for="phoneNumber">Phone Number <span class="wd-req">*</span></label>
+            <input 
+              type="tel" 
+              id="phoneNumber" 
+              name="phone-number" 
+              data-automation-id="phone-number" 
+              class="wd-input" 
+              placeholder="10-digit mobile number" 
+              required
+            />
+          </div>
+        </div>
+
+        <!-- Address Section -->
+        <div class="wd-section-title">Address</div>
+        <div class="wd-form-group">
+          <label class="wd-label" for="addressLine1">Address Line 1 <span class="wd-req">*</span></label>
+          <input 
+            type="text" 
+            id="addressLine1" 
+            name="addressSection_addressLine1" 
+            data-automation-id="addressSection_addressLine1" 
+            class="wd-input" 
+            placeholder="Street address, building, suite" 
+            required
+          />
+        </div>
+
+        <div class="wd-grid-2">
+          <div class="wd-form-group">
+            <label class="wd-label" for="city">City <span class="wd-req">*</span></label>
+            <input 
+              type="text" 
+              id="city" 
+              name="addressSection_city" 
+              data-automation-id="addressSection_city" 
+              class="wd-input" 
+              placeholder="City" 
+              required
+            />
+          </div>
+          <div class="wd-form-group">
+            <label class="wd-label" for="state">State / Province <span class="wd-req">*</span></label>
+            <input 
+              type="text" 
+              id="state" 
+              name="addressSection_countryRegion" 
+              data-automation-id="addressSection_countryRegion" 
+              class="wd-input" 
+              placeholder="State / Region" 
+              required
+            />
+          </div>
+        </div>
+
+        <div class="wd-grid-2">
+          <div class="wd-form-group">
+            <label class="wd-label" for="postalCode">Postal Code <span class="wd-req">*</span></label>
+            <input 
+              type="text" 
+              id="postalCode" 
+              name="addressSection_postalCode" 
+              data-automation-id="addressSection_postalCode" 
+              class="wd-input" 
+              placeholder="PIN / Zip Code" 
+              required
+            />
+          </div>
+          <div class="wd-form-group">
+            <label class="wd-label" for="country">Country <span class="wd-req">*</span></label>
+            <select id="country" name="country" class="wd-select">
+              <option value="India" selected>India</option>
+              <option value="United States">United States</option>
+              <option value="United Kingdom">United Kingdom</option>
+              <option value="Canada">Canada</option>
+              <option value="Germany">Germany</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Websites & Profiles -->
+        <div class="wd-section-title">Websites &amp; Profiles</div>
+        <div class="wd-grid-2">
+          <div class="wd-form-group">
+            <label class="wd-label" for="linkedinUrl">LinkedIn Profile</label>
+            <input 
+              type="url" 
+              id="linkedinUrl" 
+              name="linkedinQuestion" 
+              data-automation-id="linkedinQuestion" 
+              class="wd-input" 
+              placeholder="https://linkedin.com/in/username" 
+            />
+          </div>
+          <div class="wd-form-group">
+            <label class="wd-label" for="portfolioUrl">Portfolio / Website</label>
+            <input 
+              type="url" 
+              id="portfolioUrl" 
+              name="website-url" 
+              data-automation-id="website-url" 
+              class="wd-input" 
+              placeholder="https://yourportfolio.com" 
+            />
+          </div>
+        </div>
+
+        <!-- Step 1 Actions -->
+        <div class="wd-action-bar">
+          <button type="button" class="wd-btn wd-btn-secondary">Save for Later</button>
+          <button 
+            type="button" 
+            id="btnStep1Next" 
+            data-automation-id="bottom-navigation-next-button" 
+            class="wd-btn wd-btn-primary" 
+            onclick="goToStep(2)"
+          >
+            <span>Save and Continue</span>
+            <span>→</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- ==========================================
+           STEP 2: MY EXPERIENCE & EDUCATION
+           ========================================== -->
+      <div id="step-2-page" class="wd-step-page" style="display: none;">
+        <!-- Work Experience Section -->
+        <div class="wd-section-title">Work Experience (Most Recent Role)</div>
+        <div class="wd-grid-2">
+          <div class="wd-form-group">
+            <label class="wd-label" for="workCompany">Company / Employer <span class="wd-req">*</span></label>
+            <input 
+              type="text" 
+              id="workCompany" 
+              name="workhistory_company" 
+              data-automation-id="workhistory_company" 
+              class="wd-input" 
+              placeholder="e.g. Acme Cloud Technologies" 
+              required
+            />
+          </div>
+          <div class="wd-form-group">
+            <label class="wd-label" for="workTitle">Job Title / Role <span class="wd-req">*</span></label>
+            <input 
+              type="text" 
+              id="workTitle" 
+              name="workhistory_title" 
+              data-automation-id="workhistory_title" 
+              class="wd-input" 
+              placeholder="e.g. Full Stack Engineer" 
+              required
+            />
+          </div>
+        </div>
+
+        <div class="wd-grid-3">
+          <div class="wd-form-group">
+            <label class="wd-label" for="workLocation">Job Location</label>
+            <input 
+              type="text" 
+              id="workLocation" 
+              name="workhistory_location" 
+              data-automation-id="workhistory_location" 
+              class="wd-input" 
+              placeholder="e.g. Bangalore, India" 
+            />
+          </div>
+          <div class="wd-form-group">
+            <label class="wd-label" for="workStartDate">Start Date</label>
+            <input 
+              type="text" 
+              id="workStartDate" 
+              name="workhistory_startDate" 
+              data-automation-id="workhistory_startDate" 
+              class="wd-input" 
+              placeholder="e.g. Aug 2022" 
+            />
+          </div>
+          <div class="wd-form-group">
+            <label class="wd-label" for="workEndDate">End Date</label>
+            <input 
+              type="text" 
+              id="workEndDate" 
+              name="workhistory_endDate" 
+              data-automation-id="workhistory_endDate" 
+              class="wd-input" 
+              placeholder="e.g. Present" 
+            />
+          </div>
+        </div>
+
+        <div class="wd-grid-2">
+          <div class="wd-form-group" style="justify-content: center;">
+            <label class="wd-radio-label" style="align-items: center; gap: 8px; margin-top: 10px;">
+              <input 
+                type="checkbox" 
+                id="workCurrentRole" 
+                name="workhistory_isCurrent" 
+                data-automation-id="workhistory_isCurrent" 
+              />
+              <span style="font-size: 13px; font-weight: 500; color: #374151;">I currently work in this role</span>
+            </label>
+          </div>
+          <div class="wd-form-group">
+            <label class="wd-label" for="totalExperience">Total Professional Experience (Years)</label>
+            <input 
+              type="number" 
+              id="totalExperience" 
+              name="totalExperience" 
+              data-automation-id="totalExperience" 
+              class="wd-input" 
+              placeholder="e.g. 3" 
+              min="0"
+              max="40"
+            />
+          </div>
+        </div>
+
+        <div class="wd-form-group">
+          <label class="wd-label" for="workDesc">Job Description &amp; Responsibilities</label>
+          <textarea 
+            id="workDesc" 
+            name="workhistory_description" 
+            data-automation-id="workhistory_description" 
+            class="wd-input" 
+            rows="3" 
+            placeholder="Brief description of key achievements, systems built, and technologies used..."
+          ></textarea>
+        </div>
+
+        <!-- Education Section -->
+        <div class="wd-section-title">Education</div>
+        <div class="wd-grid-2">
+          <div class="wd-form-group">
+            <label class="wd-label" for="eduSchool">School / University <span class="wd-req">*</span></label>
+            <input 
+              type="text" 
+              id="eduSchool" 
+              name="education_school" 
+              data-automation-id="education_school" 
+              class="wd-input" 
+              placeholder="e.g. National Institute of Technology" 
+              required
+            />
+          </div>
+          <div class="wd-form-group">
+            <label class="wd-label" for="eduDegree">Degree <span class="wd-req">*</span></label>
+            <input 
+              type="text" 
+              id="eduDegree" 
+              name="education_degree" 
+              data-automation-id="education_degree" 
+              class="wd-input" 
+              placeholder="e.g. Bachelor of Technology" 
+              required
+            />
+          </div>
+        </div>
+
+        <div class="wd-grid-2">
+          <div class="wd-form-group">
+            <label class="wd-label" for="eduField">Field of Study / Major</label>
+            <input 
+              type="text" 
+              id="eduField" 
+              name="education_fieldOfStudy" 
+              data-automation-id="education_fieldOfStudy" 
+              class="wd-input" 
+              placeholder="e.g. Computer Science and Engineering" 
+            />
+          </div>
+          <div class="wd-form-group">
+            <label class="wd-label" for="eduEndYear">Graduation Year</label>
+            <input 
+              type="text" 
+              id="eduEndYear" 
+              name="education_endYear" 
+              data-automation-id="education_endYear" 
+              class="wd-input" 
+              placeholder="e.g. 2022" 
+            />
+          </div>
+        </div>
+
+        <!-- Skills Section (Workday Pill-Wise Tag Selector) -->
+        <div class="wd-section-title">Key Technical Skills</div>
+        <div class="wd-form-group">
+          <label class="wd-label" for="applicantSkillsInput">Skills &amp; Technologies (Pill-Wise Selector) <span class="wd-req">*</span></label>
+          <div class="wd-pill-box" id="skills-pill-container" data-automation-id="skills-pill-container">
+            <div id="skills-pills-list" style="display: flex; flex-wrap: wrap; gap: 6px;"></div>
+            <div class="wd-pill-input-wrap">
+              <input 
+                type="text" 
+                id="applicantSkillsInput" 
+                name="skill_entry" 
+                data-automation-id="skills-pill-input" 
+                class="wd-pill-input" 
+                placeholder="Type skill (e.g. JavaScript, Python) and select or press Enter..." 
+                autocomplete="off" 
+              />
+              <button type="button" id="btnAddSkillPill" class="wd-pill-add-btn" title="Add Skill Pill">Add</button>
+              <div id="skills-dropdown" class="wd-pill-dropdown"></div>
+            </div>
+          </div>
+          <!-- Hidden / Sync input holding comma-separated list of skills for form submission & review summary -->
+          <input 
+            type="hidden" 
+            id="applicantSkills" 
+            name="skills" 
+            data-automation-id="skills" 
+            value="React, Node.js, TypeScript, Python, AWS" 
+          />
+          <div style="font-size: 11px; color: #6b7280; margin-top: 5px;">
+            💡 Workday Tag Selector: Type skills one by one (e.g. JavaScript, Python). Options dropdown and Enter key both generate skills pills.
+          </div>
+        </div>
+
+        <!-- Step 2 Actions -->
+        <div class="wd-action-bar">
+          <button type="button" class="wd-btn wd-btn-secondary" onclick="goToStep(1)">
+            <span>←</span>
+            <span>Back</span>
+          </button>
+          <button 
+            type="button" 
+            id="btnStep2Next" 
+            data-automation-id="bottom-navigation-next-button" 
+            class="wd-btn wd-btn-primary" 
+            onclick="goToStep(3)"
+          >
+            <span>Save and Continue</span>
+            <span>→</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- ==========================================
+           STEP 3: APPLICATION QUESTIONS
+           ========================================== -->
+      <div id="step-3-page" class="wd-step-page" style="display: none;">
+        <div class="wd-section-title">Work Authorization &amp; Questionnaire</div>
+
+        <!-- Work Auth Question -->
+        <div class="wd-form-group" data-automation-id="form-group-work-auth">
+          <label class="wd-label">Are you legally authorized to work in the country for which you are applying? <span class="wd-req">*</span></label>
+          <div class="wd-radio-group">
+            <label class="wd-radio-label">
+              <input type="radio" name="authorizedToWork" value="yes" />
+              <span>Yes</span>
+            </label>
+            <label class="wd-radio-label">
+              <input type="radio" name="authorizedToWork" value="no" />
+              <span>No</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Visa Sponsorship Question -->
+        <div class="wd-form-group" data-automation-id="form-group-sponsorship">
+          <label class="wd-label">Will you now or in the future require visa sponsorship for employment status? <span class="wd-req">*</span></label>
+          <div class="wd-radio-group">
+            <label class="wd-radio-label">
+              <input type="radio" name="requireSponsorship" value="yes" />
+              <span>Yes</span>
+            </label>
+            <label class="wd-radio-label">
+              <input type="radio" name="requireSponsorship" value="no" />
+              <span>No</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Former Employee Question -->
+        <div class="wd-form-group" data-automation-id="form-group-former-employee">
+          <label class="wd-label">Have you previously worked for or are you currently employed with Acme Corporation? <span class="wd-req">*</span></label>
+          <div class="wd-radio-group">
+            <label class="wd-radio-label">
+              <input type="radio" name="previouslyWorked" value="yes" />
+              <span>Yes</span>
+            </label>
+            <label class="wd-radio-label">
+              <input type="radio" name="previouslyWorked" value="no" />
+              <span>No</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Relatives Question -->
+        <div class="wd-form-group" data-automation-id="form-group-relatives">
+          <label class="wd-label">Do you have any relatives or family members currently employed at Acme Corporation? <span class="wd-req">*</span></label>
+          <div class="wd-radio-group">
+            <label class="wd-radio-label">
+              <input type="radio" name="relativeAtCompany" value="yes" />
+              <span>Yes</span>
+            </label>
+            <label class="wd-radio-label">
+              <input type="radio" name="relativeAtCompany" value="no" />
+              <span>No</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Conflict of Interest Question -->
+        <div class="wd-form-group" data-automation-id="form-group-conflict">
+          <label class="wd-label">Do you have any actual or potential conflict of interest that may impact your employment? <span class="wd-req">*</span></label>
+          <div class="wd-radio-group">
+            <label class="wd-radio-label">
+              <input type="radio" name="conflictOfInterest" value="yes" />
+              <span>Yes</span>
+            </label>
+            <label class="wd-radio-label">
+              <input type="radio" name="conflictOfInterest" value="no" />
+              <span>No</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Age 18+ Question -->
+        <div class="wd-form-group" data-automation-id="form-group-age">
+          <label class="wd-label">Are you 18 years of age or older? <span class="wd-req">*</span></label>
+          <div class="wd-radio-group">
+            <label class="wd-radio-label">
+              <input type="radio" name="age18OrOlder" value="yes" />
+              <span>Yes</span>
+            </label>
+            <label class="wd-radio-label">
+              <input type="radio" name="age18OrOlder" value="no" />
+              <span>No</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Notice Period & Source Dropdowns -->
+        <div class="wd-grid-2">
+          <div class="wd-form-group">
+            <label class="wd-label" for="noticePeriod">Notice Period / Availability <span class="wd-req">*</span></label>
+            <select id="noticePeriod" name="noticePeriod" class="wd-select">
+              <option value="" disabled selected>Select notice period...</option>
+              <option value="immediate">Immediate</option>
+              <option value="15">15 Days</option>
+              <option value="30">30 Days</option>
+              <option value="60">60 Days</option>
+            </select>
+          </div>
+          <div class="wd-form-group">
+            <label class="wd-label" for="howDidYouHear">How did you hear about us? <span class="wd-req">*</span></label>
+            <select id="howDidYouHear" name="howDidYouHear" class="wd-select">
+              <option value="" disabled selected>Select source...</option>
+              <option value="linkedin">LinkedIn</option>
+              <option value="website">Company Career Site</option>
+              <option value="referral">Employee Referral</option>
+              <option value="job-board">Online Job Board</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Compensation & Preferences -->
+        <div class="wd-section-title">Compensation &amp; Relocation</div>
+        <div class="wd-grid-2">
+          <div class="wd-form-group">
+            <label class="wd-label" for="desiredSalary">Desired Annual Salary / Expected CTC <span class="wd-req">*</span></label>
+            <input 
+              type="text" 
+              id="desiredSalary" 
+              name="desiredSalary" 
+              data-automation-id="desiredSalary" 
+              class="wd-input" 
+              placeholder="e.g. $135,000 or Competitive" 
+              required
+            />
+          </div>
+          <div class="wd-form-group">
+            <label class="wd-label" for="willingToRelocate">Willing to Relocate? <span class="wd-req">*</span></label>
+            <select id="willingToRelocate" name="willingToRelocate" data-automation-id="willingToRelocate" class="wd-select">
+              <option value="" disabled selected>Select relocation preference...</option>
+              <option value="yes">Yes</option>
+              <option value="no">No</option>
+              <option value="open">Open / Negotiable</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Voluntary Self-Identification (EEO) -->
+        <div class="wd-section-title">Voluntary Self-Identification (EEO)</div>
+        <p style="font-size: 12px; color: #64748b; margin-bottom: 12px;">
+          Equal Opportunity Employer guidelines require collection of demographic information for statistical reporting. Submission of this information is voluntary.
+        </p>
+
+        <div class="wd-grid-2">
+          <div class="wd-form-group">
+            <label class="wd-label" for="eeoGender">Gender Identity</label>
+            <select id="eeoGender" name="eeo_gender" data-automation-id="eeo_gender" class="wd-select">
+              <option value="" disabled selected>Select gender...</option>
+              <option value="male">Male</option>
+              <option value="female">Female</option>
+              <option value="nonbinary">Non-Binary / Third Gender</option>
+              <option value="decline">I choose not to disclose</option>
+            </select>
+          </div>
+          <div class="wd-form-group">
+            <label class="wd-label" for="eeoVeteran">Protected Veteran Status</label>
+            <select id="eeoVeteran" name="eeo_veteran" data-automation-id="eeo_veteran" class="wd-select">
+              <option value="" disabled selected>Select veteran status...</option>
+              <option value="not a protected veteran">I am not a protected veteran</option>
+              <option value="protected veteran">I identify as a protected veteran</option>
+              <option value="decline">I choose not to disclose</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="wd-grid-2">
+          <div class="wd-form-group">
+            <label class="wd-label" for="eeoDisability">Disability Status</label>
+            <select id="eeoDisability" name="eeo_disability" data-automation-id="eeo_disability" class="wd-select">
+              <option value="" disabled selected>Select disability status...</option>
+              <option value="no">No, I do not have a disability</option>
+              <option value="yes">Yes, I have a disability</option>
+              <option value="decline">I choose not to disclose</option>
+            </select>
+          </div>
+          <div class="wd-form-group">
+            <label class="wd-label" for="eeoRace">Race / Ethnicity</label>
+            <select id="eeoRace" name="eeo_race" data-automation-id="eeo_race" class="wd-select">
+              <option value="" disabled selected>Select race/ethnicity...</option>
+              <option value="asian">Asian</option>
+              <option value="white">White</option>
+              <option value="black">Black or African American</option>
+              <option value="hispanic">Hispanic or Latino</option>
+              <option value="two or more races">Two or More Races</option>
+              <option value="decline">I choose not to disclose</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Custom ARIA Role Checkbox for Mobile Alerts / Communications -->
+        <div class="wd-form-group" style="margin-top: 10px; margin-bottom: 18px;">
+          <div 
+            id="smsConsent" 
+            role="checkbox" 
+            aria-checked="false" 
+            tabindex="0"
+            data-automation-id="sms-alerts-consent"
+            style="display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; font-size: 13px; color: #374151; padding: 6px 0;"
+            onclick="const isChecked = this.getAttribute('aria-checked') === 'true'; this.setAttribute('aria-checked', isChecked ? 'false' : 'true'); this.classList.toggle('checked', !isChecked);"
+            onkeydown="if(event.key===' '||event.key==='Enter'){event.preventDefault(); this.click();}"
+          >
+            <div style="width: 18px; height: 18px; border: 2px solid #94a3b8; border-radius: 4px; display: flex; align-items: center; justify-content: center; background: #fff;" class="custom-checkbox-box">
+              <span style="display: none; font-size: 13px; font-weight: bold; color: #ffffff;" class="custom-checkbox-check">✓</span>
+            </div>
+            <span>I consent to receive SMS text updates and mobile notifications regarding my application status.</span>
+          </div>
+        </div>
+
+        <!-- Step 3 Actions -->
+        <div class="wd-action-bar">
+          <button type="button" class="wd-btn wd-btn-secondary" onclick="goToStep(2)">
+            <span>←</span>
+            <span>Back</span>
+          </button>
+          <button 
+            type="button" 
+            id="btnStep3Next" 
+            data-automation-id="bottom-navigation-next-button" 
+            class="wd-btn wd-btn-primary" 
+            onclick="goToStep(4)"
+          >
+            <span>Save and Continue</span>
+            <span>→</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- ==========================================
+           STEP 4: REVIEW & SUBMIT
+           ========================================== -->
+      <div id="step-4-page" class="wd-step-page" style="display: none;">
+        <div class="wd-section-title">Review Your Application</div>
+        <p style="font-size: 13px; color: #64748b; margin-bottom: 16px;">
+          Please review the details below before submitting your application. Click "Edit" on any section to make adjustments.
+        </p>
+
+        <!-- Review Card 1: Personal & Contact Details -->
+        <div class="wd-review-card">
+          <div class="wd-review-header">
+            <span class="wd-review-title">Candidate Details</span>
+            <span class="wd-review-edit" onclick="goToStep(1)">Edit</span>
+          </div>
+          <div class="wd-review-grid">
+            <span class="wd-review-label">Full Name:</span>
+            <span class="wd-review-value" id="rev-name">—</span>
+
+            <span class="wd-review-label">Father's Name:</span>
+            <span class="wd-review-value" id="rev-fatherName">—</span>
+
+            <span class="wd-review-label">Email:</span>
+            <span class="wd-review-value" id="rev-email">—</span>
+
+            <span class="wd-review-label">Phone:</span>
+            <span class="wd-review-value" id="rev-phone">—</span>
+
+            <span class="wd-review-label">Address:</span>
+            <span class="wd-review-value" id="rev-address">—</span>
+
+            <span class="wd-review-label">Resume / CV:</span>
+            <span class="wd-review-value" id="rev-resume" style="color: #059669;">Attached</span>
+          </div>
+        </div>
+
+        <!-- Review Card 2: Experience & Education -->
+        <div class="wd-review-card">
+          <div class="wd-review-header">
+            <span class="wd-review-title">Experience &amp; Education</span>
+            <span class="wd-review-edit" onclick="goToStep(2)">Edit</span>
+          </div>
+          <div class="wd-review-grid">
+            <span class="wd-review-label">Company &amp; Role:</span>
+            <span class="wd-review-value" id="rev-work">—</span>
+
+            <span class="wd-review-label">Duration:</span>
+            <span class="wd-review-value" id="rev-dates">—</span>
+
+            <span class="wd-review-label">Education:</span>
+            <span class="wd-review-value" id="rev-edu">—</span>
+
+            <span class="wd-review-label">Key Skills:</span>
+            <span class="wd-review-value" id="rev-skills">—</span>
+          </div>
+        </div>
+
+        <!-- Review Card 3: Questionnaire Answers -->
+        <div class="wd-review-card">
+          <div class="wd-review-header">
+            <span class="wd-review-title">Questionnaire Summary</span>
+            <span class="wd-review-edit" onclick="goToStep(3)">Edit</span>
+          </div>
+          <div class="wd-review-grid">
+            <span class="wd-review-label">Work Authorized:</span>
+            <span class="wd-review-value" id="rev-auth">—</span>
+
+            <span class="wd-review-label">Visa Sponsorship:</span>
+            <span class="wd-review-value" id="rev-sponsorship">—</span>
+
+            <span class="wd-review-label">Former Employee:</span>
+            <span class="wd-review-value" id="rev-former">—</span>
+
+            <span class="wd-review-label">Notice Period:</span>
+            <span class="wd-review-value" id="rev-notice">—</span>
+          </div>
+        </div>
+
+        <!-- Review Card 4: Compensation, Relocation & Demographics -->
+        <div class="wd-review-card">
+          <div class="wd-review-header">
+            <span class="wd-review-title">Compensation, Preferences &amp; EEO</span>
+            <span class="wd-review-edit" onclick="goToStep(3)">Edit</span>
+          </div>
+          <div class="wd-review-grid">
+            <span class="wd-review-label">Desired Salary:</span>
+            <span class="wd-review-value" id="rev-salary">—</span>
+
+            <span class="wd-review-label">Relocation:</span>
+            <span class="wd-review-value" id="rev-relocate">—</span>
+
+            <span class="wd-review-label">EEO Demographics:</span>
+            <span class="wd-review-value" id="rev-eeo">—</span>
+
+            <span class="wd-review-label">Total Experience:</span>
+            <span class="wd-review-value" id="rev-experience">—</span>
+          </div>
+        </div>
+
+        <!-- Legal Disclosures & Consent Checkboxes -->
+        <div class="wd-section-title">Disclosures, Electronic Signature &amp; Terms</div>
+
+        <div class="wd-form-group" style="margin-bottom: 12px;">
+          <label class="wd-radio-label" style="align-items: flex-start; gap: 10px; line-height: 1.4;">
+            <input type="checkbox" id="termsConsent" name="termsAndConditions" style="margin-top: 3px;" required />
+            <span>I have read, understood, and agree to the <strong>Terms &amp; Conditions</strong> and <strong>Applicant Privacy Notice</strong>. <span class="wd-req">*</span></span>
+          </label>
+        </div>
+
+        <div class="wd-form-group" style="margin-bottom: 16px;">
+          <label class="wd-radio-label" style="align-items: flex-start; gap: 10px; line-height: 1.4;">
+            <input type="checkbox" id="certifyAccuracy" name="certifyAccuracy" style="margin-top: 3px;" required />
+            <span>I certify that all statements and information provided in this application are true, accurate, and complete. <span class="wd-req">*</span></span>
+          </label>
+        </div>
+
+        <!-- Electronic Signature Section -->
+        <div class="wd-grid-2" style="margin-top: 16px; margin-bottom: 20px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 16px;">
+          <div class="wd-form-group" style="margin-bottom: 0;">
+            <label class="wd-label" for="electronicSignature">Electronic Signature (Type Full Legal Name) <span class="wd-req">*</span></label>
+            <input 
+              type="text" 
+              id="electronicSignature" 
+              name="electronicSignature" 
+              data-automation-id="electronicSignature" 
+              class="wd-input" 
+              placeholder="e.g. Akash V" 
+              required
+            />
+          </div>
+          <div class="wd-form-group" style="margin-bottom: 0;">
+            <label class="wd-label" for="signatureDate">Date of Signature <span class="wd-req">*</span></label>
+            <input 
+              type="text" 
+              id="signatureDate" 
+              name="signatureDate" 
+              data-automation-id="signatureDate" 
+              class="wd-input" 
+              placeholder="MM/DD/YYYY" 
+              required
+            />
+          </div>
+        </div>
+
+        <!-- Step 4 Actions -->
+        <div class="wd-action-bar">
+          <button type="button" class="wd-btn wd-btn-secondary" onclick="goToStep(3)">
+            <span>←</span>
+            <span>Back</span>
+          </button>
+          <button 
+            type="button" 
+            id="btnSubmitApplication" 
+            data-automation-id="bottom-navigation-next-button" 
+            class="wd-btn wd-btn-primary" 
+            style="background: #059669;"
+            onclick="submitApplication()"
+          >
+            <span>✓</span>
+            <span>Submit Application</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- ==========================================
+           SUCCESS CONFIRMATION SCREEN
+           ========================================== -->
+      <div id="step-success-page" class="wd-step-page" style="display: none;">
+        <div class="wd-success-box">
+          <div class="wd-success-icon">✓</div>
+          <h2 style="font-size: 24px; font-weight: 700; color: #111827; margin-bottom: 8px;">Application Submitted!</h2>
+          <p style="font-size: 14px; color: #4b5563; max-width: 500px; margin: 0 auto 16px; line-height: 1.5;">
+            Thank you, <strong id="success-name">Candidate</strong>! Your application for <strong>Senior Full Stack Engineer — Cloud Platform</strong> (Job ID: R-104928) has been successfully recorded.
+          </p>
+          <div style="display: inline-block; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 10px 18px; font-size: 13px; color: #166534; margin-bottom: 24px;">
+            ✦ Application status tracked &amp; synced with your AI Job Finder dashboard.
+          </div>
+          <div>
+            <button type="button" class="wd-btn wd-btn-primary" onclick="resetApplication()">
+              <span>↺</span>
+              <span>Start New Test Application</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </form>
+  </main>
+
+  <script>
+    let currentStep = 1;
+
+    function handleResumeFileChange(input) {
+      if (input.files && input.files[0]) {
+        const f = input.files[0];
+        const filenameEl = document.getElementById('wd-dropzone-filename');
+        const boxEl = document.getElementById('wd-dropzone-box');
+        if (filenameEl) {
+          filenameEl.innerHTML = `✓ Attached: <strong style="color: #059669;">${f.name}</strong> (${(f.size/1024).toFixed(1)} KB)`;
+        }
+        if (boxEl) {
+          boxEl.style.borderColor = '#10b981';
+          boxEl.style.backgroundColor = '#f0fdf4';
+        }
+      }
+    }
+
+    function goToStep(stepNum) {
+      currentStep = stepNum;
+
+      // Update Stepper Headers
+      for (let i = 1; i <= 4; i++) {
+        const stepBtn = document.getElementById(`step-btn-${i}`);
+        const pageEl = document.getElementById(`step-${i}-page`);
+
+        if (stepBtn) {
+          stepBtn.classList.remove('active', 'completed');
+          if (i === stepNum) {
+            stepBtn.classList.add('active');
+          } else if (i < stepNum) {
+            stepBtn.classList.add('completed');
+          }
+        }
+
+        if (pageEl) {
+          pageEl.style.display = (i === stepNum) ? 'block' : 'none';
+        }
+      }
+
+      const successPage = document.getElementById('step-success-page');
+      if (successPage) successPage.style.display = 'none';
+
+      // If entering Step 4 (Review), populate review summary fields
+      if (stepNum === 4) {
+        populateReviewSummary();
+      }
+
+      // Scroll smoothly to top of form container
+      window.scrollTo({ top: 100, behavior: 'smooth' });
+
+      // Trigger window resize so AI Job Copilot immediately re-audits the active step's fields
+      window.dispatchEvent(new Event('resize'));
+    }
+
+    function populateReviewSummary() {
+      const getVal = (id) => document.getElementById(id)?.value?.trim() || '';
+      const getRadio = (name) => {
+        const checked = document.querySelector(`input[name="${name}"]:checked`);
+        return checked ? checked.value.toUpperCase() : 'Not Specified';
+      };
+
+      const firstName = getVal('firstName');
+      const lastName = getVal('lastName');
+      const fullName = `${firstName} ${lastName}`.trim() || 'Not Provided';
+      const fatherName = getVal('fatherName') || 'Not Provided';
+      const email = getVal('email') || 'Not Provided';
+      const phone = getVal('phoneNumber') || 'Not Provided';
+      const address = [getVal('addressLine1'), getVal('city'), getVal('state'), getVal('postalCode'), getVal('country')].filter(Boolean).join(', ') || 'Not Provided';
+
+      const fileInput = document.getElementById('resumeUpload');
+      const resumeName = fileInput?.files?.[0]?.name || 'Akash_V_Resume.pdf (Auto-Attached)';
+
+      const company = getVal('workCompany') || 'Acme Cloud Technologies';
+      const title = getVal('workTitle') || 'Full Stack Engineer';
+      const workDates = `${getVal('workStartDate') || 'Aug 2022'} - ${getVal('workEndDate') || 'Present'}`;
+
+      const school = getVal('eduSchool') || 'National Institute of Technology';
+      const degree = getVal('eduDegree') || 'Bachelor of Technology';
+      const eduYear = getVal('eduEndYear') || '2022';
+      const eduSummary = `${degree} — ${school} (${eduYear})`;
+
+      const skills = getVal('applicantSkills') || 'React, Node.js, TypeScript, Python, AWS';
+
+      const setTxt = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = val;
+      };
+
+      setTxt('rev-name', fullName);
+      setTxt('rev-fatherName', fatherName);
+      setTxt('rev-email', email);
+      setTxt('rev-phone', phone);
+      setTxt('rev-address', address);
+      setTxt('rev-resume', resumeName);
+
+      setTxt('rev-work', `${title} at ${company}`);
+      setTxt('rev-dates', workDates);
+      setTxt('rev-edu', eduSummary);
+      setTxt('rev-skills', skills);
+
+      setTxt('rev-auth', getRadio('authorizedToWork'));
+      setTxt('rev-sponsorship', getRadio('requireSponsorship'));
+      setTxt('rev-former', getRadio('previouslyWorked'));
+      setTxt('rev-notice', getVal('noticePeriod') || 'Immediate');
+
+      const isCurrent = document.getElementById('workCurrentRole')?.checked;
+      const totalExp = getVal('totalExperience') || '3';
+      setTxt('rev-experience', `${totalExp} Years ${isCurrent ? '(Currently Employed)' : ''}`);
+      setTxt('rev-salary', getVal('desiredSalary') || '$135,000 / Competitive');
+      setTxt('rev-relocate', getVal('willingToRelocate') ? getVal('willingToRelocate').toUpperCase() : 'Open / Flexible');
+
+      const eeoGender = getVal('eeoGender') || 'Decline to disclose';
+      const eeoVet = getVal('eeoVeteran') || 'Not a protected veteran';
+      const eeoDis = getVal('eeoDisability') || 'No disability';
+      const eeoRace = getVal('eeoRace') || 'Asian';
+      setTxt('rev-eeo', `${eeoGender}, ${eeoRace}, ${eeoVet}`);
+    }
+
+    function submitApplication() {
+      const terms = document.getElementById('termsConsent');
+      const certify = document.getElementById('certifyAccuracy');
+      const signature = document.getElementById('electronicSignature');
+      if (terms && !terms.checked) {
+        alert('Please accept the Terms & Conditions before submitting.');
+        return;
+      }
+      if (certify && !certify.checked) {
+        alert('Please certify that all information is accurate before submitting.');
+        return;
+      }
+      if (signature && !signature.value.trim()) {
+        alert('Please provide your Electronic Signature before submitting.');
+        return;
+      }
+
+      // Hide all step pages
+      for (let i = 1; i <= 4; i++) {
+        const p = document.getElementById(`step-${i}-page`);
+        if (p) p.style.display = 'none';
+        const s = document.getElementById(`step-btn-${i}`);
+        if (s) s.classList.add('completed');
+      }
+
+      const fName = document.getElementById('firstName')?.value || 'Candidate';
+      const lName = document.getElementById('lastName')?.value || '';
+      const nameEl = document.getElementById('success-name');
+      if (nameEl) nameEl.textContent = `${fName} ${lName}`.trim();
+
+      const successPage = document.getElementById('step-success-page');
+      if (successPage) successPage.style.display = 'block';
+
+      window.scrollTo({ top: 100, behavior: 'smooth' });
+      window.dispatchEvent(new Event('resize'));
+    }
+
+    function resetApplication() {
+      document.getElementById('wd-application-form')?.reset();
+      currentSkills = ['React', 'Node.js', 'TypeScript', 'Python', 'AWS'];
+      renderSkillsPills();
+      const dropzoneFilename = document.getElementById('wd-dropzone-filename');
+      const dropzoneBox = document.getElementById('wd-dropzone-box');
+      if (dropzoneFilename) dropzoneFilename.innerHTML = 'Drop your resume here, or <span style="color: #0051c7; text-decoration: underline;">Browse</span>';
+      if (dropzoneBox) {
+        dropzoneBox.style.borderColor = '#94a3b8';
+        dropzoneBox.style.backgroundColor = '#f8fafc';
+      }
+      const smsCb = document.getElementById('smsConsent');
+      if (smsCb) {
+        smsCb.setAttribute('aria-checked', 'false');
+        smsCb.classList.remove('checked');
+      }
+      goToStep(1);
+    }
+
+    // Skills Pill Selector Management
+    let currentSkills = ['React', 'Node.js', 'TypeScript', 'Python', 'AWS'];
+    const popularSkillSuggestions = [
+      'JavaScript', 'Python', 'React', 'Node.js', 'TypeScript', 'AWS', 
+      'Docker', 'Kubernetes', 'Java', 'SQL', 'MongoDB', 'GraphQL', 
+      'C++', 'Go', 'Next.js', 'Express', 'Tailwind CSS', 'Git', 'CI/CD', 
+      'PostgreSQL', 'Redis', 'Linux'
+    ];
+
+    function renderSkillsPills() {
+      const listEl = document.getElementById('skills-pills-list');
+      const syncInput = document.getElementById('applicantSkills');
+      if (!listEl) return;
+      listEl.innerHTML = currentSkills.map((s, idx) => `
+        <span class="wd-skill-pill">
+          <span>${s}</span>
+          <button type="button" class="wd-pill-del" onclick="removeSkillPill(${idx})" title="Remove skill">×</button>
+        </span>
+      `).join('');
+      if (syncInput) syncInput.value = currentSkills.join(', ');
+    }
+
+    function addSkillPill(skillName) {
+      if (!skillName) return;
+      const clean = skillName.trim();
+      if (!clean) return;
+      if (!currentSkills.some(s => s.toLowerCase() === clean.toLowerCase())) {
+        currentSkills.push(clean);
+        renderSkillsPills();
+      }
+      const inp = document.getElementById('applicantSkillsInput');
+      if (inp) inp.value = '';
+      closeSkillsDropdown();
+    }
+
+    function removeSkillPill(index) {
+      currentSkills.splice(index, 1);
+      renderSkillsPills();
+    }
+
+    function filterSkillsDropdown(query) {
+      const dd = document.getElementById('skills-dropdown');
+      if (!dd) return;
+      const q = (query || '').toLowerCase().trim();
+      const matches = popularSkillSuggestions.filter(s => s.toLowerCase().includes(q) && !currentSkills.some(cs => cs.toLowerCase() === s.toLowerCase()));
+      if (matches.length === 0 && !q) {
+        dd.classList.remove('open');
+        return;
+      }
+      const showList = matches.length > 0 ? matches : (q ? [query.trim()] : []);
+      dd.innerHTML = showList.slice(0, 6).map(m => `
+        <div class="wd-pill-option" onclick="addSkillPill('${m.replace(/'/g, "\\'")}')">
+          <span>${m}</span>
+          <span style="font-size: 10px; color: #0284c7;">+ Add Pill</span>
+        </div>
+      `).join('');
+      dd.classList.add('open');
+    }
+
+    function closeSkillsDropdown() {
+      const dd = document.getElementById('skills-dropdown');
+      if (dd) dd.classList.remove('open');
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      renderSkillsPills();
+
+      const pillInput = document.getElementById('applicantSkillsInput');
+      const addBtn = document.getElementById('btnAddSkillPill');
+
+      pillInput?.addEventListener('input', (e) => {
+        filterSkillsDropdown(e.target.value);
+      });
+
+      pillInput?.addEventListener('focus', (e) => {
+        filterSkillsDropdown(e.target.value);
+      });
+
+      pillInput?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ',') {
+          e.preventDefault();
+          const val = pillInput.value.replace(/,/g, '').trim();
+          if (val) addSkillPill(val);
+        }
+      });
+
+      addBtn?.addEventListener('click', () => {
+        const val = pillInput?.value?.trim();
+        if (val) addSkillPill(val);
+      });
+
+      document.addEventListener('click', (e) => {
+        if (!e.target.closest('#skills-pill-container')) {
+          closeSkillsDropdown();
+        }
+      });
+    });
+  </script>
+
+</body>
+</html>

@@ -1,0 +1,53 @@
+{
+  "manifest_version": 3,
+  "name": "AI Job Application Copilot & Autofill",
+  "version": "1.0.0",
+  "description": "1-click ATS application autofill, AI screening question generator, and job tracking copilot powered by your AI Job Finder portfolio.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://ai-job-finder-7dr8.onrender.com/*",
+    "https://ai-job-finder-alpha.vercel.app/*",
+    "http://localhost:5000/*",
+    "http://127.0.0.1:5000/*",
+    "<all_urls>"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "AI Job Copilot & Autofill"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": [
+        "scripts/domUtils.js",
+        "scripts/coverLetterTemplate.js",
+        "scripts/formAutofill.js",
+        "scripts/questionsHandler.js",
+        "scripts/atsOutreach.js",
+        "scripts/sidebarUi.js",
+        "content.js"
+      ],
+      "css": ["content.css"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "ai-job-copilot@aijobfinder.local",
+      "strict_min_version": "109.0"
+    }
+  }
+}

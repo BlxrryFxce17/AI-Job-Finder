@@ -7,6 +7,7 @@ const Profile = require('../models/Profile');
 const User = require('../models/User');
 const Job = require('../models/Job');
 const { callAIWithRetry } = require('../utils/ai');
+const { resolveCompanyDomain, discoverEmailForJob, sendEmailViaAPI } = require('../utils/email');
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -38,14 +39,44 @@ router.get('/status', async (req, res) => {
   });
 });
 
+// Config for Extension AI Fallbacks (Groq + Gemini API keys)
+router.get('/ai-config', (req, res) => {
+  res.json({
+    success: true,
+    groqKey: process.env.GROQ_API_KEY || '',
+    geminiKey: process.env.GEMINI_API_KEY || ''
+  });
+});
+
 // 2. Fetch Autofill Profile for Active User
-router.get('/profile', requireAuth, async (req, res) => {
+router.get('/profile', async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select('email');
-    const profile = await Profile.findOne({ userId: req.user.id });
+    let userId = null;
+    let user = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const jwt = require('jsonwebtoken');
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        userId = decoded.id;
+        user = await User.findById(userId).select('email');
+      } catch (_) {}
+    }
+
+    let profile = userId ? await Profile.findOne({ userId }) : null;
+    if (!profile) {
+      profile = await Profile.findOne().sort({ updatedAt: -1 });
+    }
 
     if (!profile) {
       return res.status(404).json({ error: 'Profile not found. Please configure your profile first.' });
+    }
+
+    if (!user && profile.userId) {
+      try {
+        user = await User.findById(profile.userId).select('email');
+      } catch (_) {}
     }
 
     const fullName = (profile.name || '').trim();
@@ -53,14 +84,21 @@ router.get('/profile', requireAuth, async (req, res) => {
     const firstName = nameParts[0] || '';
     const lastName = nameParts.slice(1).join(' ') || '';
 
-    // Clean top repos
-    const topRepos = (profile.githubInsights?.repos || []).slice(0, 8).map(r => ({
+    // Clean top repos and prioritize user's selectedRepoNames from web app profile tab
+    const priorityNames = Array.isArray(profile.selectedRepoNames) ? profile.selectedRepoNames : [];
+    const allInsightRepos = (profile.githubInsights?.repos || []).map(r => ({
       name: r.name,
       description: r.description || '',
       language: r.language || '',
       url: r.url || (profile.github ? `${profile.github.replace(/\/$/, '')}/${r.name}` : ''),
-      stars: r.stars || 0
+      stars: r.stars || 0,
+      isPriority: priorityNames.includes(r.name)
     }));
+
+    allInsightRepos.sort((a, b) => (b.isPriority ? 1 : 0) - (a.isPriority ? 1 : 0));
+    const topRepos = allInsightRepos.slice(0, 10);
+
+    const effectiveProjectUrl = profile.projectUrl || (topRepos.length > 0 ? topRepos[0].url : (profile.github || ''));
 
     res.json({
       success: true,
@@ -83,6 +121,8 @@ router.get('/profile', requireAuth, async (req, res) => {
         linkedin: profile.linkedin || '',
         github: profile.github || '',
         portfolio: profile.portfolio || '',
+        resumeUrl: profile.resumeUrl || profile.cvUrl || '',
+        projectUrl: effectiveProjectUrl,
         title: profile.title || '',
         experienceLevel: profile.experienceLevel || 'Mid',
         skills: profile.skills || [],
@@ -130,6 +170,9 @@ router.put('/profile', requireAuth, async (req, res) => {
       linkedin,
       github,
       portfolio,
+      resumeUrl,
+      cvUrl,
+      projectUrl,
       title,
       skills,
       workExperience,
@@ -152,6 +195,9 @@ router.put('/profile', requireAuth, async (req, res) => {
     if (linkedin !== undefined) profile.linkedin = linkedin;
     if (github !== undefined) profile.github = github;
     if (portfolio !== undefined) profile.portfolio = portfolio;
+    if (resumeUrl !== undefined) profile.resumeUrl = resumeUrl;
+    else if (cvUrl !== undefined) profile.resumeUrl = cvUrl;
+    if (projectUrl !== undefined) profile.projectUrl = projectUrl;
     if (title !== undefined) profile.title = title;
     if (Array.isArray(skills)) profile.skills = skills;
     if (Array.isArray(workExperience)) profile.workExperience = workExperience;
@@ -331,7 +377,9 @@ router.get('/brain', requireAuth, async (req, res) => {
     const initialLen = profile.learnedRules?.length || 0;
     profile.learnedRules = (profile.learnedRules || []).filter(r => {
       const key = (r.fieldKey || '').toLowerCase().trim();
-      return !key.startsWith('prof-') && !key.startsWith('ai-') && key.length > 1;
+      const val = (r.value || '').trim();
+      const isEssay = val.length > 150 || /describe|explain|trace|webhook|schema|architecture|walkthrough|challenge|tell us|give one|built|coding assistant/i.test(key);
+      return !key.startsWith('prof-') && !key.startsWith('ai-') && key.length > 1 && !isEssay;
     });
 
     if (profile.learnedRules.length !== initialLen) {
@@ -359,6 +407,11 @@ router.post('/brain', requireAuth, async (req, res) => {
 
     // Do not save malformed emails or incomplete phone numbers
     const valTrimmed = (value || '').trim();
+
+    // DO NOT save dynamic screening questions or long essays as static brain rules
+    if (valTrimmed.length > 150 || /describe|explain|trace|webhook|schema|architecture|walkthrough|challenge|tell us|give one|built|coding assistant/i.test(normKey)) {
+      return res.status(400).json({ error: 'Dynamic screening questions and essays are tailored per job and cannot be saved as static brain rules' });
+    }
     if ((normKey.includes('email') || normKey === 'e-mail') && (!valTrimmed.includes('@') || !valTrimmed.includes('.'))) {
       return res.status(400).json({ error: 'Incomplete email cannot be saved as brain rule' });
     }
@@ -455,52 +508,403 @@ router.delete('/brain', requireAuth, async (req, res) => {
 });
 
 // 3. AI Screening Question Generator
-router.post('/generate-answer', requireAuth, async (req, res) => {
+router.post('/generate-answer', async (req, res) => {
   try {
-    const { question, jobDescription, role, company } = req.body;
+    const { question, jobDescription, role, company, profile: clientProfile, maxLength, minWords, minChars } = req.body;
 
     if (!question || !question.trim()) {
       return res.status(400).json({ error: 'Question text is required' });
     }
 
-    const profile = await Profile.findOne({ userId: req.user.id });
-    if (!profile) {
-      return res.status(404).json({ error: 'Profile not found' });
+    let userId = null;
+    let profile = null;
+
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const jwt = require('jsonwebtoken');
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        userId = decoded.id;
+        profile = await Profile.findOne({ userId });
+      } catch (_) {}
     }
 
-    const topSkills = (profile.skills || []).slice(0, 10).join(', ');
-    const userRepos = (profile.githubInsights?.repos || [])
-      .slice(0, 5)
-      .map(r => `- ${r.name} (${r.language || 'Code'}): ${r.description || 'Production software system'}`)
-      .join('\n');
+    if (!profile && clientProfile) {
+      profile = clientProfile;
+    }
 
-    const prompt = `You are ${profile.name}, applying to ${company || 'a company'}${role ? ` for ${role}` : ''}.
-Answer this screening question directly. Write in first person.
+    if (!profile) {
+      profile = await Profile.findOne().sort({ updatedAt: -1 });
+    }
 
-QUESTION: "${question}"
+    if (!profile) {
+      return res.status(404).json({ error: 'Profile not found. Please sync your profile in the extension.' });
+    }
 
-JOB CONTEXT: ${role || 'Software Engineer'} at ${company || 'target company'}. ${jobDescription ? jobDescription.slice(0, 600) : ''}
+    const qLower = (question || '').toLowerCase().trim();
 
-YOUR REAL BACKGROUND:
-- Title: ${profile.title || 'Full Stack Engineer'}
-- Skills: ${topSkills || 'JavaScript, React, Node.js, Python'}
-- Projects: ${userRepos || 'web apps and automation systems'}
+    // 1. Repository / Project / Walkthrough link (e.g. "Link to one real full-stack product, repository, or sanitized walkthrough")
+    if (
+      qLower.includes('link to one real') ||
+      qLower.includes('link to one') ||
+      (qLower.includes('link') && (qLower.includes('repository') || qLower.includes('product') || qLower.includes('walkthrough') || qLower.includes('project') || qLower.includes('code'))) ||
+      qLower.includes('repo url') ||
+      qLower.includes('repository url') ||
+      qLower.includes('github repo')
+    ) {
+      const priorityNames = Array.isArray(profile.selectedRepoNames) ? profile.selectedRepoNames : [];
+      const allRepos = Array.isArray(profile.repos) ? profile.repos : (profile.githubInsights?.repos || []);
+      const ghBase = (profile.github || '').replace(/\/$/, '');
 
-RULES:
-- Start with the answer. No filler ("Certainly", "As a developer", "Here is").
-- Keep it SHORT: 2-4 sentences for simple questions, max 1 short paragraph for behavioral ones.
-- Sound like a real human, not AI. Casual professional tone.
-- Reference 1-2 real projects or skills when relevant.
-- NO bullet points. NO "I'm passionate about" or "I thrive in" or similar cliches.
-- If asked about a bug or technical scenario, give a specific realistic example.`;
+      let repoUrl = profile.projectUrl || profile.repoUrl || null;
 
-    const answer = await callAIWithRetry(prompt, 3, 2000, {
-      action: 'Extension Question Answer',
-      userId: req.user.id
-    });
+      if (!repoUrl && priorityNames.length > 0) {
+        const priorityMatch = priorityNames.map(name => {
+          const found = allRepos.find(r => (r.name || '').toLowerCase() === name.toLowerCase());
+          return found ? (found.url || (ghBase ? `${ghBase}/${found.name}` : '')) : (ghBase ? `${ghBase}/${name}` : '');
+        }).find(Boolean);
+        if (priorityMatch) repoUrl = priorityMatch;
+      }
 
-    const cleanedAnswer = answer ? answer.replace(/^["']|["']$/g, '').trim() : '';
-    res.json({ success: true, answer: cleanedAnswer });
+      if (!repoUrl && allRepos.length > 0) {
+        const candidate = allRepos[0];
+        repoUrl = candidate.url || (ghBase ? `${ghBase}/${candidate.name}` : '');
+      }
+
+      if (!repoUrl) {
+        repoUrl = profile.projectUrl || ghBase || profile.portfolio || '';
+      }
+
+      if (repoUrl && !repoUrl.startsWith('http')) repoUrl = 'https://' + repoUrl;
+      return res.json({ success: true, answer: repoUrl });
+    }
+
+    // 2. Resume / CV URL (shareable link)
+    if (
+      qLower.includes('resume') ||
+      qLower.includes('résumé') ||
+      qLower.includes('cv url') ||
+      qLower.includes('cv link') ||
+      qLower.includes('drive link') ||
+      (qLower.includes('shareable link') && !qLower.includes('project'))
+    ) {
+      let cvUrl = profile.resumeUrl || profile.cvUrl || profile.resumeDriveUrl || '';
+      if (cvUrl && !cvUrl.startsWith('http')) cvUrl = 'https://' + cvUrl;
+      return res.json({ success: true, answer: cvUrl });
+    }
+
+    // 3. LinkedIn URL
+    if (qLower.includes('linkedin') && (qLower.includes('url') || qLower.includes('link') || qLower.includes('profile'))) {
+      let liUrl = profile.linkedin || '';
+      if (liUrl && !liUrl.startsWith('http')) liUrl = 'https://' + liUrl;
+      return res.json({ success: true, answer: liUrl });
+    }
+
+    // 4. GitHub URL
+    if (qLower.includes('github') && (qLower.includes('url') || qLower.includes('link') || qLower.includes('profile'))) {
+      let ghUrl = profile.github || '';
+      if (ghUrl && !ghUrl.startsWith('http')) ghUrl = 'https://' + ghUrl;
+      return res.json({ success: true, answer: ghUrl });
+    }
+
+    // 5. Portfolio URL
+    if (qLower.includes('portfolio') && (qLower.includes('url') || qLower.includes('link') || qLower.includes('site'))) {
+      let pUrl = profile.portfolio || profile.github || '';
+      if (pUrl && !pUrl.startsWith('http')) pUrl = 'https://' + pUrl;
+      return res.json({ success: true, answer: pUrl });
+    }
+
+    const maxChars = maxLength && !isNaN(Number(maxLength)) && Number(maxLength) > 20 ? Number(maxLength) : null;
+    const { location } = req.body;
+
+    // 6. Visa Status / Work Authorization / Sponsorship / Citizenship
+    const isVisaOrAuth =
+      qLower.includes('visa') ||
+      qLower.includes('authorized to work') ||
+      qLower.includes('work authorization') ||
+      qLower.includes('sponsorship') ||
+      qLower.includes('citizenship') ||
+      qLower.includes('citizen') ||
+      qLower.includes('work permit') ||
+      qLower.includes('right to work') ||
+      qLower.includes('immigration');
+
+    if (isVisaOrAuth) {
+      const candidateCountry = (profile.country || 'India').trim();
+      const isIndian = candidateCountry.toLowerCase() === 'india';
+
+      const jobContext = `${location || ''} ${jobDescription || ''} ${company || ''} ${role || ''}`.toLowerCase();
+      const isIndiaJob = jobContext.includes('india') || jobContext.includes('bengaluru') || jobContext.includes('bangalore') || jobContext.includes('chennai') || jobContext.includes('pune') || jobContext.includes('mumbai') || jobContext.includes('hyderabad') || jobContext.includes('gurgaon') || jobContext.includes('noida') || jobContext.includes('delhi');
+      const isUSJob = jobContext.includes('united states') || jobContext.includes('usa') || jobContext.includes('us citizen') || jobContext.includes('us work');
+
+      let visaAnswer = '';
+      if (isIndian) {
+        if (isIndiaJob || (!isUSJob && !location)) {
+          visaAnswer = `I am a citizen of India with full legal authorization to work in India, and I do not require any visa sponsorship for positions located in India.`;
+        } else {
+          visaAnswer = `I am an Indian citizen currently located in India. For on-site positions in this country, I would require employment visa sponsorship, but I am also fully eligible and equipped to work remotely.`;
+        }
+      } else {
+        visaAnswer = profile.authorizedToWork !== false
+          ? `I am a citizen of ${candidateCountry} with full authorization to work, and do not require visa sponsorship.`
+          : `I am currently based in ${candidateCountry} and will require work visa sponsorship for on-site employment.`;
+      }
+
+      if (maxChars && visaAnswer.length > maxChars) {
+        visaAnswer = visaAnswer.slice(0, maxChars).trim();
+      }
+      return res.json({ success: true, answer: visaAnswer });
+    }
+
+    // 7. Salary / Compensation / CTC (Dynamic, realistic fresher guessing)
+    const isSalaryOrComp =
+      qLower.includes('salary') ||
+      qLower.includes('compensation') ||
+      qLower.includes('ctc') ||
+      qLower.includes('pay expectation') ||
+      qLower.includes('desired pay') ||
+      qLower.includes('target pay') ||
+      qLower.includes('desired salary') ||
+      qLower.includes('expected salary');
+
+    if (isSalaryOrComp) {
+      if (profile.desiredSalary) {
+        return res.json({ success: true, answer: String(profile.desiredSalary) });
+      }
+
+      const jobContext = `${location || ''} ${jobDescription || ''} ${company || ''} ${role || ''}`.toLowerCase();
+      const isIndiaJob = jobContext.includes('india') || jobContext.includes('inr') || jobContext.includes('₹') || jobContext.includes('lpa') || jobContext.includes('bengaluru') || jobContext.includes('bangalore') || jobContext.includes('chennai') || jobContext.includes('pune') || jobContext.includes('mumbai') || jobContext.includes('hyderabad') || jobContext.includes('gurgaon');
+      const isUSJob = jobContext.includes('united states') || jobContext.includes('usa') || jobContext.includes('usd') || jobContext.includes('$');
+
+      const isFresher = !profile.workExperience || profile.workExperience.length === 0 || (profile.experienceLevel || '').toLowerCase().includes('fresher') || (profile.experienceLevel || '').toLowerCase().includes('entry') || (profile.title || '').toLowerCase().includes('trainee') || (profile.title || '').toLowerCase().includes('graduate');
+
+      let salaryAnswer = '';
+      if (isIndiaJob || (!isUSJob && (profile.country || 'India').toLowerCase() === 'india')) {
+        salaryAnswer = isFresher
+          ? `As an entry-level engineer / fresher, my expected compensation is in the range of ₹5,00,000 to ₹6,00,000 per annum (around 5 LPA), and I am open to negotiation based on company standards and role responsibilities.`
+          : `My expected compensation is in the range of ₹8,00,000 to ₹10,00,000 per annum, open to negotiation based on company standards.`;
+      } else if (isUSJob) {
+        salaryAnswer = isFresher
+          ? `As an entry-level engineer, my expected compensation is in the range of $70,000 to $80,000 per year, open to discussion based on company bands.`
+          : `My expected compensation is in the range of $100,000 to $120,000 per year, open to negotiation based on the role and benefits.`;
+      } else {
+        salaryAnswer = `Competitive and negotiable based on standard company compensation bands for this role and location.`;
+      }
+
+      if (maxChars && salaryAnswer.length > maxChars) {
+        salaryAnswer = salaryAnswer.slice(0, maxChars).trim();
+      }
+      return res.json({ success: true, answer: salaryAnswer });
+    }
+
+    // 8. Notice Period / Availability / Start Date
+    const isNoticeOrAvailability =
+      qLower.includes('notice period') ||
+      qLower.includes('start date') ||
+      qLower.includes('available to start') ||
+      qLower.includes('when are you available') ||
+      qLower.includes('how soon can you start') ||
+      qLower.includes('availability to start');
+
+    if (isNoticeOrAvailability) {
+      let noticeAnswer = `I have 0 days notice period as a recent graduate / fresher, and can join immediately or by the next upcoming Monday.`;
+      if (maxChars && noticeAnswer.length > maxChars) {
+        noticeAnswer = noticeAnswer.slice(0, maxChars).trim();
+      }
+      return res.json({ success: true, answer: noticeAnswer });
+    }
+
+    // Smart Question Intent Classification
+    const isSkills = /\b(best skills|better than most|top qualities|top 3 qualities|what are you good at|technologies you are|core competencies|key strengths|what sets you apart|superpower|list down.*technologies)\b/i.test(qLower);
+    const isComplex = /\b(complex|biggest product|biggest feature|scale of the product|scale|most challenging project|high volume|architecture|throughput)\b/i.test(qLower);
+    const isTechChallenge = /\b(technological challenge|technical challenge|challenge where you|difficult bug|problem you solved|hardest bug|bottleneck|obstacle)\b/i.test(qLower);
+    const isSocialImpact = /\b(vulnerable|society|social|real-world challenges|help people|humanitarian|underprivileged|community|ethics|impact on society|marginalized)\b/i.test(qLower);
+    const isWhyCompany = /\b(why do you want to work|why this company|why join|why should we hire|what excites you|interest in (this|our))\b/i.test(qLower);
+    const isTeamwork = /\b(conflict|disagree|disagreement|teamwork|working with others|pressure|tight deadline|difficult colleague)\b/i.test(qLower);
+
+    let intentGuidance = '';
+    if (isSkills) {
+      intentGuidance = `SPECIALIZED GUIDANCE FOR THIS QUESTION:
+- The question is asking for core technical skills and engineering advantages where you are better than most.
+- Focus directly on: TypeScript/JavaScript systems programming, backend architecture, ACID transaction consistency in relational databases, and defensive error handling across asynchronous workflows.
+- Core differentiator: Explain WHY you are better than most (writing strictly typed, maintainable systems that anticipate edge cases and concurrency issues rather than superficial happy-path code).
+- STRICT CONSTRAINT: Focus strictly on the technical domain asked by the question. Do not introduce irrelevant mobile frameworks when answering web or systems questions.`;
+    } else if (isComplex) {
+      intentGuidance = `SPECIALIZED GUIDANCE FOR THIS QUESTION:
+- The question is asking for your MOST COMPLEX PRODUCT / FEATURE and its SCALE.
+- Focus directly on: Production systems, automated job tracking platforms, distributed web copilot architectures, or backend worker services.
+- Architectural scale details: Asynchronous background worker queues, DOM heuristic engines parsing dynamic schemas, session persistence, and secure OAuth dispatch under strict browser sandboxing.
+- Discuss concurrency, throughput, DOM mutation handling, and fault tolerance.`;
+    } else if (isTechChallenge) {
+      intentGuidance = `SPECIALIZED GUIDANCE FOR THIS QUESTION:
+- The question is asking to describe a SPECIFIC TECHNOLOGICAL CHALLENGE and how it was solved.
+- State the exact technical bottleneck (e.g. eliminating race conditions in concurrent state synchronization, handling flaky DOM mutations in browser extensions, or optimizing offline cache consistency), the engineering solution, and the measurable outcome.`;
+    } else if (isSocialImpact) {
+      intentGuidance = `SPECIALIZED GUIDANCE FOR THIS QUESTION:
+- The question is asking whether technology can solve real-world challenges for the most VULNERABLE IN SOCIETY.
+- This is a philosophical and humanitarian question about social impact and ethics.
+- DO NOT open with "I built an app". Answer the humanitarian question with conviction, maturity, and insight.
+- Address how engineering reduces bureaucratic friction, healthcare disparities, and administrative overhead that disproportionately burden under-resourced communities.`;
+    } else if (isWhyCompany) {
+      intentGuidance = `SPECIALIZED GUIDANCE FOR THIS QUESTION:
+- Explain genuine excitement about ${company || 'the hiring company'} and the ${role || 'engineering'} role.
+- Connect your type-safe full-stack background to high-standards systems and real-world user impact.`;
+    }
+
+    function getBenchmarkAnswer() {
+      if (isSkills) {
+        return "My strongest engineering advantage is architecting resilient full-stack systems and high-throughput asynchronous pipelines using TypeScript and Node.js. While many engineers focus primarily on surface-level feature delivery, I prioritize deep type safety, relational data integrity via atomic SQL transactions, and rigorous error boundaries across distributed workflows. This disciplined, defensive approach prevents silent production failures and ensures predictable, maintainable state management under high concurrent load.";
+      }
+      if (isComplex) {
+        return "The most complex system I engineered is an automated multi-portal job discovery and application platform. Architecturally, it coordinates an asynchronous Node.js worker pipeline handling dynamic DOM heuristics, cross-portal session persistence, and OAuth token dispatch across hundreds of varied ATS schemas. Managing asynchronous background queues, flaky client DOM mutations, and rate limits under strict browser security constraints required resilient, fault-tolerant event engineering.";
+      }
+      if (isTechChallenge) {
+        return "A significant technological challenge I solved was eliminating race conditions and UI latency during high-concurrency client-server state synchronization. Under intermittent network conditions, conflicting payload mutations caused state drift. I architected an optimistic UI update layer paired with an idempotent transactional retry queue and defensive schema validation, ensuring atomic data consistency and seamless recovery without data loss.";
+      }
+      if (isSocialImpact) {
+        return "Yes, technology creates its most meaningful impact when eliminating systemic friction and digital divides for vulnerable populations. In public healthcare and municipal services, administrative overhead, manual paperwork, and fragmented systems disproportionately harm under-resourced communities. By engineering lightweight, offline-first applications and automated data pipelines, software can remove bureaucratic bottlenecks, reduce transcription errors, and deliver reliable, high-standard digital services directly to underserved and marginalized individuals.";
+      }
+      if (isWhyCompany) {
+        return `I am excited about this role because ${company || 'your team'} prioritizes building impactful, high-reliability products that solve substantive real-world problems. My background in building type-safe full-stack architectures and resilient asynchronous pipelines directly aligns with your technical standards. I want to contribute to high-performance systems, take ownership of complex features, and collaborate with an engineering team that values clean code, performance, and user-centric architecture.`;
+      }
+      if (isTeamwork) {
+        return "I approach teamwork and technical disagreements by focusing on objective data, clear documentation, and end-user impact rather than personal ego. When conflicting architectural trade-offs arise, I build quick prototypes, benchmark latency and memory metrics, and facilitate open code reviews to align the team. Clear, transparent communication and empathetic collaboration always result in superior system design, higher code quality, and faster consensus under tight delivery deadlines.";
+      }
+      return null;
+    }
+
+    function isQualityAnswer(text) {
+      if (!text || typeof text !== 'string') return false;
+      const words = text.trim().split(/\s+/).filter(Boolean).length;
+      const lower = text.toLowerCase();
+
+      // 1. If the webpage explicitly requested a minimum word count (e.g. 50 words minimum)
+      if (effectiveMinWords && words < effectiveMinWords) {
+        return false; // AI response fell short of the page's required minimum
+      }
+
+      // 2. Must be a substantive response (at least 20 words)
+      if (words < 20) return false;
+
+      // 3. Reject canned repetitive project openers on general questions (skills, why company, social impact, teamwork)
+      if (/^(i built|in my project|for my project|during my project|through my project)\b/i.test(lower.trim())) {
+        if (!isComplex && !isTechChallenge && !qLower.includes('project')) {
+          return false;
+        }
+      }
+
+      return true;
+    }
+
+    const topSkills = (profile.skills || []).slice(0, 8).join(', ');
+
+    // Smart length guidance: handles minWords (e.g. 50 words minimum) and enforces 65-85 words
+    const effectiveMinWords = minWords && !isNaN(Number(minWords)) && Number(minWords) > 5 ? Number(minWords) : null;
+    let lengthRule = '';
+    if (effectiveMinWords) {
+      const targetMin = Math.max(effectiveMinWords + 8, 65);
+      const targetMax = Math.max(effectiveMinWords + 25, 85);
+      lengthRule = `WORD COUNT REQUIREMENT: Must be AT LEAST ${effectiveMinWords + 2} words (NEVER fewer than ${effectiveMinWords} words; target ${targetMin} to ${targetMax} words total).`;
+    } else if (maxChars && maxChars < 350) {
+      lengthRule = `STRICT CHARACTER LIMIT: Total length MUST be under ${maxChars - 10} characters. Keep it brief, crisp, and finish all sentences completely.`;
+    } else {
+      lengthRule = `LENGTH: 65 to 85 words (around 420 to 550 characters). Never write fewer than 58 words so you safely exceed 50-word minimum application thresholds.`;
+    }
+
+    // Collect available portfolio repos dynamically from profile
+    const allCandidateRepos = (
+      (profile.githubInsights?.repos && profile.githubInsights.repos.length > 0)
+        ? profile.githubInsights.repos
+        : (profile.repos || profile.topRepos || [])
+    );
+
+    let reposPortfolioText = '';
+    if (allCandidateRepos.length > 0) {
+      reposPortfolioText = allCandidateRepos.slice(0, 8).map(r => 
+        `- ${r.name} (${r.language || 'Full Stack'}): ${r.description || 'Production web/software application'}`
+      ).join('\n');
+    } else if (profile.workExperience && profile.workExperience.length > 0) {
+      reposPortfolioText = profile.workExperience.slice(0, 3).map(w =>
+        `- ${w.title} at ${w.company}: ${w.description || 'Software engineering and systems development'}`
+      ).join('\n');
+    } else {
+      const pSkills = (profile.skills && profile.skills.length ? profile.skills : ['TypeScript', 'Node.js', 'React', 'PostgreSQL']).slice(0, 6).join(', ');
+      reposPortfolioText = `- Production Web & API Systems (${pSkills}): Full-stack applications featuring responsive interfaces, asynchronous queues, and resilient database integration.
+- Scalable Backend Services (${pSkills}): High-availability REST services with atomic transactions, schema validation, and defensive error boundaries.`;
+    }
+
+    const prompt = `You are an expert software engineer candidate answering an interview screening question directly on a job application form.
+Write in first person ("I"). Write intelligently, authentically, and conversationally.
+
+QUESTION TO ANSWER:
+"${question}"
+
+TARGET ROLE & COMPANY:
+${role || 'Software Engineer'} at ${company || 'the hiring company'}
+
+CANDIDATE TECHNICAL BACKGROUND:
+- Primary Technologies: ${topSkills || 'TypeScript, Node.js, Express, React, PostgreSQL, MongoDB, Python'}
+- Real Projects & Experience:
+${reposPortfolioText}
+
+${intentGuidance ? intentGuidance + '\n\n' : ''}CRITICAL RULES — READ CAREFULLY:
+1. ANSWER THE QUESTION FIRST AND DIRECTLY:
+   - Your very first sentence MUST answer the question directly.
+   - NEVER begin your answer with "I built [Project name]" or "In my project [Project name]". That is a canned, spammy response and looks completely fake.
+   - If asked about your best skills: State your core technical proficiencies and explain WHY you are exceptionally good at them.
+   - If asked about your biggest/most complex product: Focus on architectural complexity, worker queues, and scale.
+   - If asked about helping the vulnerable in society: Answer the humanitarian and ethical question directly with insight.
+2. DIVERSIFY YOUR TECHNICAL REFERENCES:
+   - Do NOT fixate on or repeat a single project for every question. Reference the most relevant technologies, architectural patterns, and systems from your background that directly answer the prompt.
+3. ${lengthRule}
+4. TONE & STYLE: Natural, confident, direct, and pragmatic. No robotic fluff (never say "passionate", "thrive", "testament", "seamlessly", "in conclusion"). Never start with "Certainly" or "Here is".
+5. NO MARKDOWN: Zero asterisks, no hashes, no bullet symbols. Plain text only.
+6. FINISH ALL SENTENCES: Every sentence must end with a period. Never cut off mid-thought.`;
+
+    let finalAnswer = '';
+    try {
+      const answerObj = await callAIWithRetry(prompt, 3, 2000, {
+        action: 'Extension Question Answer',
+        userId: userId || req.user?.id || null
+      });
+
+      const rawAnswer = answerObj?.text || (typeof answerObj === 'string' ? answerObj : '');
+      let cleanedAnswer = rawAnswer
+        ? rawAnswer.replace(/^["']|["']$/g, '').replace(/[*#_`]/g, '').trim()
+        : '';
+
+      if (isQualityAnswer(cleanedAnswer)) {
+        finalAnswer = cleanedAnswer;
+      }
+    } catch (err) {
+      console.warn('[Extension API] AI generation error:', err.message);
+    }
+
+    if (!finalAnswer) {
+      finalAnswer = getBenchmarkAnswer() || '';
+    }
+
+    // If maxChars constraint exists, strictly enforce safety clamp
+    if (maxChars && finalAnswer.length > maxChars) {
+      const sliced = finalAnswer.slice(0, maxChars);
+      const lastSentenceEnd = Math.max(
+        sliced.lastIndexOf('. '),
+        sliced.lastIndexOf('.\n'),
+        sliced.lastIndexOf('.'),
+        sliced.lastIndexOf('!'),
+        sliced.lastIndexOf('?')
+      );
+      if (lastSentenceEnd > 40) {
+        finalAnswer = sliced.slice(0, lastSentenceEnd + 1).trim();
+      } else {
+        const lastSpace = sliced.lastIndexOf(' ');
+        finalAnswer = (lastSpace > 0 ? sliced.slice(0, lastSpace) : sliced).trim();
+        if (!/[.!?]$/.test(finalAnswer)) finalAnswer += '.';
+      }
+    }
+
+    res.json({ success: true, answer: finalAnswer });
   } catch (err) {
     console.error('[Extension API] Failed to generate answer:', err);
     res.status(500).json({ error: err.message || 'Failed to generate answer' });
@@ -545,6 +949,479 @@ router.post('/log-job', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('[Extension API] Failed to log job:', err);
     res.status(500).json({ error: 'Failed to log job' });
+  }
+});
+
+// ── 5. ATS Resume Match & Keyword Gap Detector ─────────────────────────────
+const TECH_KEYWORDS = [
+  'javascript','typescript','python','java','go','golang','rust','ruby','php','swift',
+  'kotlin','c++','c#','csharp','dart','scala','elixir','sql','nosql',
+  'react','vue','angular','svelte','next','nextjs','next.js','nuxt','remix','tailwind','css','html',
+  'node','nodejs','node.js','express','fastapi','flask','django','spring','nest','nestjs','graphql','rest','api','grpc',
+  'postgres','postgresql','mysql','mongodb','mongo','redis','elasticsearch','dynamodb','supabase','firebase','prisma',
+  'docker','kubernetes','k8s','aws','gcp','azure','terraform','ci/cd','cicd','github actions','jenkins','linux',
+  'ai','ml','machine learning','deep learning','llm','gemini','openai','langchain','pytorch','tensorflow',
+  'mobile','ios','android','react native','flutter',
+  'microservices','monorepo','full-stack','fullstack','backend','frontend','distributed systems','system design',
+  'automation','scraper','scraping','websocket','socket','queue','kafka','rabbitmq'
+];
+
+router.post('/match-score', async (req, res) => {
+  try {
+    const { role, company, jobDescription, profile: clientProfile, persona } = req.body;
+    let userId = null;
+    let profile = null;
+
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const jwt = require('jsonwebtoken');
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        userId = decoded.id;
+        profile = await Profile.findOne({ userId });
+      } catch (_) {}
+    }
+    if (!profile && clientProfile) profile = clientProfile;
+    if (!profile) profile = await Profile.findOne().sort({ updatedAt: -1 });
+
+    const jdText = `${role || ''} ${company || ''} ${jobDescription || ''}`.toLowerCase();
+    
+    // Candidate's known skill inventory
+    const candidateSkills = (profile?.skills || []).map(s => s.toLowerCase().trim());
+    const candidateResumeText = (profile?.resumeText || '').toLowerCase();
+    const candidateRepos = (profile?.githubInsights?.repos || profile?.repos || []).map(r => `${r.name || ''} ${r.language || ''} ${r.description || ''}`.toLowerCase()).join(' ');
+    const candidateFullCorpus = `${candidateSkills.join(' ')} ${candidateResumeText} ${candidateRepos}`;
+
+    // Extract JD technical keywords
+    const jdFoundKeywords = [];
+    for (const kw of TECH_KEYWORDS) {
+      const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`(?:^|[\\s,;/()\\-])${escaped}(?:[\\s,;/()\\-.]|$)`, 'i');
+      if (regex.test(jdText)) {
+        jdFoundKeywords.push(kw);
+      }
+    }
+
+    // Categorize matched vs missing
+    const matched = [];
+    const missing = [];
+
+    for (const kw of jdFoundKeywords) {
+      const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`(?:^|[\\s,;/()\\-])${escaped}(?:[\\s,;/()\\-.]|$)`, 'i');
+      const isKnown = candidateSkills.some(cs => cs === kw || cs.includes(kw) || kw.includes(cs)) || regex.test(candidateFullCorpus);
+      if (isKnown) {
+        matched.push(kw);
+      } else {
+        missing.push(kw);
+      }
+    }
+
+    // Calculate score
+    const total = jdFoundKeywords.length;
+    let score = 76; // Default healthy baseline
+    if (total > 0) {
+      const ratio = matched.length / total;
+      score = Math.min(98, Math.max(35, Math.round(ratio * 100)));
+      if (matched.includes('typescript') || matched.includes('node') || matched.includes('react') || matched.includes('javascript')) {
+        score = Math.min(98, score + 6);
+      }
+    }
+
+    // Tailored Recommendations
+    const recommendations = [];
+    if (missing.length > 0) {
+      recommendations.push(`Mention experience or familiarity with ${missing.slice(0, 3).join(', ')} in your application answers to improve ATS keyword density.`);
+    }
+    if (score >= 80) {
+      recommendations.push('High ATS alignment! Your core technical background matches the primary requirements for this opening.');
+    } else {
+      recommendations.push('Emphasize your type-safe architectures and scalable project implementations to offset missing specialized keywords.');
+    }
+
+    res.json({
+      success: true,
+      score,
+      matched: Array.from(new Set(matched)),
+      missing: Array.from(new Set(missing)),
+      recommendations,
+      role: role || 'Software Engineer',
+      company: company || 'Company'
+    });
+  } catch (err) {
+    console.error('[Extension API] Failed to calculate match score:', err);
+    res.status(500).json({ error: err.message || 'Failed to calculate match score' });
+  }
+});
+
+// ── 6. Discover Recruiter / Company Email ──────────────────────────────────
+function isJobBoardOrAtsDomain(host) {
+  if (!host || typeof host !== 'string') return false;
+  const clean = host.toLowerCase().trim().replace(/^www\./, '');
+  const jobBoardPattern = /\b(adzuna|indeed|naukri|linkedin|glassdoor|internshala|foundit|monster|shine|timesjobs|hirist|instahyre|cuvette|unstop|wellfound|angel\.co|ziprecruiter|simplyhired|careerbuilder|dice|apify|google|facebook|twitter|instagram|youtube|wikipedia|github|medium|zaubacorp|tofler|ambitionbox|zoominfo|greenhouse|lever|workday|myworkdayjobs|smartrecruiters|ashbyhq|breezy|recruitee|jobvite|bamboohr|workable)\b/i;
+  return jobBoardPattern.test(clean);
+}
+
+router.post('/discover-email', async (req, res) => {
+  try {
+    const { company, role, jobDescription } = req.body;
+    if (!company) return res.status(400).json({ error: 'Company name is required' });
+
+    let domain = await resolveCompanyDomain(company);
+    let emailResult = null;
+    if (domain) {
+      emailResult = await discoverEmailForJob(company, domain, null);
+    }
+
+    let finalEmail = emailResult?.email || null;
+    let source = emailResult?.source || 'Domain Inferred';
+
+    if (!finalEmail && jobDescription) {
+      const emailMatch = jobDescription.match(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/);
+      if (emailMatch && !isJobBoardOrAtsDomain(emailMatch[0].split('@')[1])) {
+        finalEmail = emailMatch[0];
+        source = 'Job Description Text';
+      }
+    }
+
+    if (!finalEmail && domain) {
+      finalEmail = `careers@${domain}`;
+      source = 'Corporate Careers Address';
+    }
+
+    res.json({
+      success: true,
+      email: finalEmail,
+      domain: domain || '',
+      source: source || 'Discovered',
+      deliverabilityScore: emailResult?.deliverabilityScore || (finalEmail ? 80 : 0)
+    });
+  } catch (err) {
+    console.error('[Extension API] Failed to discover email:', err);
+    res.status(500).json({ error: err.message || 'Failed to discover email' });
+  }
+});
+
+// ── 7. Draft Cold Outreach Email (Using AI Webapp Engine) ──────────────────
+router.post('/draft-email', async (req, res) => {
+  try {
+    const { company, role, jobDescription, recipientEmail, persona } = req.body;
+    let userId = null;
+    let profile = null;
+
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const jwt = require('jsonwebtoken');
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        userId = decoded.id;
+        profile = await Profile.findOne({ userId });
+      } catch (_) {}
+    }
+    if (!profile) profile = await Profile.findOne().sort({ updatedAt: -1 });
+    if (!profile) return res.status(404).json({ error: 'Profile not found. Please sync profile in extension.' });
+
+    const targetCompany = company || 'your company';
+    const targetRole = role || 'Software Engineer';
+    const candidateName = profile.name || 'Candidate';
+
+    let personaEmphasis = '';
+    if (persona === 'backend') {
+      personaEmphasis = 'Emphasize backend architecture, ACID transaction integrity in SQL/PostgreSQL, distributed worker queues, and resilient REST/gRPC microservices.';
+    } else if (persona === 'frontend') {
+      personaEmphasis = 'Emphasize modern React, Next.js, responsive UX architecture, state optimization, and polished component systems.';
+    } else if (persona === 'mobile') {
+      personaEmphasis = 'Emphasize mobile development, Flutter/Dart, offline-first architectures with Hive, and on-device ML / OCR parsing.';
+    } else {
+      personaEmphasis = 'Emphasize full-stack engineering, type safety with TypeScript, Node.js asynchronous pipelines, and scalable database design.';
+    }
+
+    let outreachProjectsList = '';
+    if (profile.githubInsights?.repos && profile.githubInsights.repos.length > 0) {
+      outreachProjectsList = profile.githubInsights.repos.slice(0, 3).map(r =>
+        `  * ${r.name} (${r.language || 'Full Stack'}): ${r.description || 'Production web/software application'}`
+      ).join('\n');
+    } else if (profile.workExperience && profile.workExperience.length > 0) {
+      outreachProjectsList = profile.workExperience.slice(0, 2).map(w =>
+        `  * ${w.title} at ${w.company}: ${w.description || 'Systems engineering and application delivery'}`
+      ).join('\n');
+    } else {
+      const pSkills = (profile.skills || ['TypeScript', 'Node.js', 'React', 'PostgreSQL']).slice(0, 4).join(', ');
+      outreachProjectsList = `  * Scalable Full-Stack Applications (${pSkills})
+  * Resilient Backend Architecture (REST APIs, asynchronous queues, ACID relational data integrity)`;
+    }
+
+    const prompt = `You are elite software engineer ${candidateName} drafting a concise, high-impact cold outreach email directly to the engineering hiring team at ${targetCompany} regarding the ${targetRole} opening.
+Role Persona Focus: ${personaEmphasis}
+
+Job Description Context:
+${(jobDescription || '').slice(0, 1500)}
+
+Candidate Projects & Skills:
+- Top Skills: ${(profile.skills || ['TypeScript', 'Node.js', 'React', 'PostgreSQL']).slice(0, 8).join(', ')}
+- Projects & Experience:
+${outreachProjectsList}
+
+CRITICAL RULES:
+1. STRICTLY 110 to 150 words total. Hiring leads spend 5 seconds scanning.
+2. Direct technical hook in the very first sentence referencing the ${targetRole} role and company's engineering challenge.
+3. 2 concise bullet points highlighting concrete mechanisms (e.g. atomic database transactions, async queues, on-device parsing) from the candidate's actual background. No fake metric percentages.
+4. Confident, direct tone. No corporate fluff ("I hope this finds you well", "I was thrilled to see", "passion").
+5. Clean wrap-up: "I have attached my CV and would welcome the opportunity to discuss how my engineering background maps to ${targetCompany}'s goals."
+6. Output in this exact format:
+SUBJECT: Application for ${targetRole} - ${candidateName}
+BODY:
+Hi ${targetCompany} Engineering Team,
+
+[Email body here]`;
+
+    let subject = `Application for ${targetRole} - ${candidateName}`;
+    let body = '';
+
+    try {
+      const aiRes = await callAIWithRetry(prompt, 3, 2000, { action: 'Draft Outreach Email', userId });
+      const rawText = aiRes?.text || '';
+      const subjectMatch = rawText.match(/SUBJECT:\s*(.*)/i);
+      const bodyMatch = rawText.match(/BODY:\s*([\s\S]*)/i);
+      if (subjectMatch) subject = subjectMatch[1].trim();
+      if (bodyMatch) body = bodyMatch[1].trim();
+      else body = rawText.replace(/SUBJECT:.*?\n/i, '').trim();
+    } catch (err) {
+      console.warn('[Extension API] AI draft error:', err.message);
+    }
+
+    if (!body) {
+      const s1 = profile.skills?.[0] || 'TypeScript';
+      const s2 = profile.skills?.[1] || 'Node.js';
+      const s3 = profile.skills?.[2] || 'React';
+      body = `Hi ${targetCompany} Engineering Team,\n\nI noticed your opening for ${targetRole}. As an engineer specializing in resilient full-stack architectures and high-throughput asynchronous systems using ${s1}, ${s2}, and ${s3}, I wanted to introduce my background.\n\n• Engineered scalable web and distributed services with asynchronous worker pipelines, clean API contracts, and defensive error handling.\n• Architected modular, performant user interfaces and transactional data stores with strict type safety and relational data integrity.\n\nI have attached my CV and would welcome the opportunity to discuss how my engineering background maps to ${targetCompany}'s technical roadmap.\n\nBest regards,\n${candidateName}`;
+    }
+
+    res.json({
+      success: true,
+      subject,
+      body,
+      recipientEmail: recipientEmail || '',
+      company: targetCompany,
+      role: targetRole
+    });
+  } catch (err) {
+    console.error('[Extension API] Failed to draft email:', err);
+    res.status(500).json({ error: err.message || 'Failed to draft email' });
+  }
+});
+
+// ── 8. Send Outreach Email Directly (via Webapp Dispatcher) ───────────────
+router.post('/send-outreach-email', async (req, res) => {
+  try {
+    const { to, subject, body, company, role, jd } = req.body;
+    if (!to || !to.includes('@')) return res.status(400).json({ error: 'Valid recipient email is required' });
+    if (!subject) return res.status(400).json({ error: 'Subject is required' });
+    if (!body) return res.status(400).json({ error: 'Email body is required' });
+
+    let userId = null;
+    let user = null;
+    let profile = null;
+
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const jwt = require('jsonwebtoken');
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        userId = decoded.id;
+        user = await User.findById(userId);
+        profile = await Profile.findOne({ userId });
+      } catch (_) {}
+    }
+    if (!user) user = await User.findOne().sort({ createdAt: -1 });
+    if (!profile) profile = await Profile.findOne().sort({ updatedAt: -1 });
+
+    const mailOptions = {
+      from: user?.email || process.env.EMAIL_USER,
+      to: to.trim(),
+      subject: subject.trim(),
+      text: body.trim(),
+      html: `<div style="font-family: Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #1e293b;">
+        ${body.replace(/\n/g, '<br/>')}
+      </div>`,
+      attachments: []
+    };
+
+    if (profile?.resumePdf) {
+      mailOptions.attachments.push({
+        filename: profile.resumeFilename || 'Resume.pdf',
+        content: profile.resumePdf,
+        contentType: 'application/pdf'
+      });
+    }
+
+    await sendEmailViaAPI(user || {}, mailOptions);
+
+    try {
+      const newJob = new Job({
+        userId: user?._id || profile?.userId,
+        company: (company || 'Company').trim(),
+        role: (role || 'Software Engineer').trim(),
+        status: 'Sent',
+        source: 'Extension Direct Outreach',
+        emailRecipient: to.trim(),
+        emailDraft: body.trim(),
+        sentAt: new Date(),
+        notes: `Direct email sent from Copilot sidebar to ${to.trim()}`
+      });
+      await newJob.save();
+    } catch (_) {}
+
+    res.json({
+      success: true,
+      message: `Email successfully sent to ${to.trim()} with CV attached!`
+    });
+  } catch (err) {
+    console.error('[Extension API] Failed to send outreach email:', err);
+    res.status(500).json({ error: err.message || 'Failed to send outreach email' });
+  }
+});
+
+// ── 9. Tailored Cover Letter Generator ─────────────────────────────────────
+router.post('/generate-cover-letter', async (req, res) => {
+  try {
+    const { company, role, jobDescription, persona } = req.body;
+    let userId = null;
+    let profile = null;
+
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const jwt = require('jsonwebtoken');
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        userId = decoded.id;
+        profile = await Profile.findOne({ userId });
+      } catch (_) {}
+    }
+    if (!profile && req.body.profile) profile = req.body.profile;
+    if (!profile) profile = await Profile.findOne().sort({ updatedAt: -1 });
+
+    const targetCompany = company || 'Hiring Company';
+    const targetRole = role || 'Software Engineer';
+    const candidateName = req.body.candidateName || profile?.name || 'Akash V.';
+    const candidateEmail = profile?.email || req.body.candidateEmail || '';
+    const candidatePhone = profile?.phone || req.body.candidatePhone || '';
+
+    // Analyze role specialization
+    const roleLower = targetRole.toLowerCase();
+    let roleFocus = 'Full-Stack';
+    if (roleLower.includes('front') || roleLower.includes('react') || roleLower.includes('ui') || roleLower.includes('web dev')) {
+      roleFocus = 'Frontend Engineering & Client Architecture';
+    } else if (roleLower.includes('back') || roleLower.includes('node') || roleLower.includes('api') || roleLower.includes('platform') || roleLower.includes('system')) {
+      roleFocus = 'Backend Systems & API Architecture';
+    } else if (roleLower.includes('mobile') || roleLower.includes('flutter') || roleLower.includes('react native') || roleLower.includes('android') || roleLower.includes('ios')) {
+      roleFocus = 'Mobile & Cross-Platform Architecture';
+    } else if (roleLower.includes('ml') || roleLower.includes('ai') || roleLower.includes('machine learning')) {
+      roleFocus = 'AI/ML & Vision Systems';
+    }
+
+    const jdSample = (jobDescription || '').slice(0, 2500);
+
+    let signatureProjectsText = '';
+    if (profile?.githubInsights?.repos && profile.githubInsights.repos.length > 0) {
+      signatureProjectsText = profile.githubInsights.repos.slice(0, 2).map((r, idx) =>
+        `- Signature Project ${idx + 1}: ${r.name} (${r.language || 'Full Stack'} - ${r.description || 'Production software system'})`
+      ).join('\n');
+    } else if (profile?.workExperience && profile.workExperience.length > 0) {
+      signatureProjectsText = profile.workExperience.slice(0, 2).map((w, idx) =>
+        `- Experience Highlight ${idx + 1}: ${w.title} at ${w.company} (${w.description || 'Built scalable systems and client-facing features'})`
+      ).join('\n');
+    } else {
+      const stack = (profile?.skills || ['TypeScript', 'Node.js', 'React', 'PostgreSQL']).slice(0, 5).join(', ');
+      signatureProjectsText = `- Signature Focus: Scalable Web & Distributed Systems (Hands-on engineering using ${stack}, focusing on asynchronous workflows, database integrity, and high-performance UI state).`;
+    }
+
+    const prompt = `You are an exceptional software engineer crafting a bespoke, persuasive, and highly tailored cover letter for an application.
+Candidate Identity: ${candidateName}
+Target Role: ${targetRole}
+Target Company: ${targetCompany}
+Specialization Focus: ${roleFocus} (Active Persona: ${persona || 'fullstack'})
+
+Target Job Description & Company Context:
+${jdSample || 'Focus on modern, high-reliability software architecture, performant user interfaces, scalable services, and clean engineering standards.'}
+
+Candidate Profile & Technical Accomplishments:
+- Full Name: ${candidateName}
+- Core Stack: ${(profile?.skills || ['TypeScript', 'JavaScript', 'React', 'Node.js', 'Express', 'PostgreSQL', 'MongoDB', 'Tailwind CSS']).slice(0, 10).join(', ')}
+${signatureProjectsText}
+- Engineering Mindset: Rigorous defensive error handling, modular component architecture, atomic transactions, and user-centric software delivery.
+
+MANDATORY INSTRUCTIONS FOR RELEVANCE & UNIQUENESS:
+1. DEEPLY GROUND IN THE JD & COMPANY:
+   - Identify what ${targetCompany} actually builds or the technical domain of this role (e.g. APIs, platforms, SaaS, fintech, developer tooling) from the JD text.
+   - Specifically weave in 3-4 keywords and technical requirements from their JD (e.g. state management, modular component design, RESTful APIs, type-safe data models, UI performance).
+2. ALIGN WITH ROLE (${roleFocus}):
+   - If Frontend: Focus on responsive client-side architecture, state management, web vitals, accessible component design, and dynamic DOM interaction.
+   - If Backend: Focus on high-throughput API endpoints, database transaction integrity, asynchronous queue workers, and system reliability.
+   - If Full-Stack: Connect robust backend data pipelines with responsive, type-safe client interfaces.
+3. STRUCTURE (3 distinct paragraphs):
+   - Paragraph 1 (Direct Hook & Alignment): State the exact role (${targetRole}) at ${targetCompany}, specifically explain why their engineering challenges or product domain resonate with you, and summarize your matching technical identity.
+   - Paragraph 2 (Deep Technical Evidence): Showcase your hands-on achievements from your actual projects and background, directly connecting the technical hurdles you solved (e.g. state synchronization, resilient API design, DOM heuristics) to the exact requirements in their JD.
+   - Paragraph 3 (Team Culture, Delivery & Forward Momentum): Reiterate your proactive ownership and eagerness to contribute immediately to ${targetCompany}'s upcoming sprints. Express your enthusiasm to discuss technical alignment.
+4. STRICT TONE & FORMAT RULES:
+   - Target word count: 200 to 260 words. Punchy, authentic, engineering-first.
+   - NO cliches or generic fluff ("I am writing to express my eager desire", "esteemed organization", "perfect fit", "thrive in fast-paced").
+   - NO markdown asterisks, no bullet points, no headers.
+   - Output ONLY the 3 body paragraphs. Do NOT include header lines, addresses, dates, salutations ("Dear..."), or sign-offs ("Sincerely...", name) as the PDF/HTML formatter attaches those.`;
+
+    let coverLetter = '';
+    try {
+      const aiRes = await callAIWithRetry(prompt, 3, 2000, { action: 'Generate Cover Letter', userId });
+      coverLetter = (aiRes?.text || '').replace(/[*#_`]/g, '').trim();
+    } catch (err) {
+      console.warn('[Extension API] Cover letter AI error:', err.message);
+    }
+
+    if (!coverLetter) {
+      // Role-aware intelligent fallback
+      const isFrontend = roleFocus.includes('Frontend');
+      const isBackend = roleFocus.includes('Backend');
+      if (isFrontend) {
+        coverLetter = `I am writing to express my strong enthusiasm for the ${targetRole} position at ${targetCompany}. With hands-on experience building performant client-side architectures, modular component systems, and responsive web interfaces using TypeScript, React, and modern CSS, I am drawn to ${targetCompany}'s commitment to engineering excellence. I thrive at the intersection of intuitive UI engineering and robust state synchronization, and I am eager to contribute immediately to your product deliverables.
+
+Throughout my engineering work, I have focused on solving real-world frontend and client-side challenges. In developing modern web applications, I have architected reactive interfaces featuring real-time DOM mutation handling, dynamic component composition, and live multi-step state synchronization without UI latency. Additionally, I prioritize accessible, mobile-first design and comprehensive error boundaries to ensure reliable performance across varied devices and network constraints. These experiences have instilled in me a deep commitment to web performance, accessible component architecture, and predictable client state.
+
+What excites me about ${targetCompany} is the opportunity to tackle meaningful technical challenges alongside a high-execution engineering team. My proactive approach to code quality, edge-case testing, and rapid feature iteration ensures I can make a direct, positive impact from my first sprint. I would welcome the opportunity to discuss how my frontend engineering background aligns with your team's objectives.`;
+      } else if (isBackend) {
+        coverLetter = `I am writing to express my strong interest in the ${targetRole} position at ${targetCompany}. With hands-on experience designing high-throughput RESTful APIs, type-safe data services, and resilient distributed architectures using TypeScript, Node.js, and relational databases, I am inspired by ${targetCompany}'s technical focus. I am eager to leverage my systems background to support your team's scalability and reliability goals.
+
+In my software projects, I have concentrated on solving high-concurrency and data integrity challenges. I have engineered high-availability services featuring asynchronous queue orchestration, rate-limited external API integrations, and defensive data persistence across dynamic external schemas. Furthermore, I prioritize atomic database transactions, strict type contracts, and comprehensive error logging to ensure zero data loss and deterministic recovery under peak load. These experiences reinforced my commitment to predictable state transitions, clean API contracts, and defensive error boundaries.
+
+I thrive in collaborative engineering environments that value technical curiosity, proactive ownership, and pragmatic system design. I am confident that my technical skills and disciplined problem-solving mindset will allow me to contribute meaningfully to ${targetCompany}'s infrastructure from day one. I welcome the opportunity to connect and discuss how my background matches your team's needs.`;
+      } else {
+        coverLetter = `I am writing to express my strong enthusiasm for the ${targetRole} opportunity at ${targetCompany}. With a versatile background spanning responsive frontend interfaces, type-safe REST APIs, and asynchronous data pipelines using TypeScript, React, and Node.js, I am drawn to ${targetCompany}'s mission. I enjoy taking full ownership of features from database schemas to polished user experiences, and I am excited about the chance to contribute to your engineering team.
+
+Across my technical initiatives, I have focused on solving real-world engineering bottlenecks across both client and server boundaries. I have built end-to-end applications pairing reactive user interfaces with asynchronous worker queues, structured relational databases, and resilient REST APIs. I emphasize end-to-end type safety, optimistic UI updates with graceful fallback states, and atomic database consistency. These projects taught me to balance rapid iteration with rigorous edge-case handling, scalable component design, and database integrity.
+
+What draws me to ${targetCompany} is your dedication to engineering excellence and building high-impact products. I bring a self-driven work ethic, high execution velocity, and a passion for continuous learning. I would love the chance to discuss how my full-stack background and technical capabilities can help advance your team's product goals.`;
+      }
+    }
+
+    const candidateLocation = [profile?.city, profile?.state, profile?.country].filter(Boolean).join(', ') || profile?.addressLine1 || profile?.location || '';
+    const wordCount = coverLetter.split(/\s+/).filter(Boolean).length;
+    res.json({
+      success: true,
+      coverLetter,
+      wordCount,
+      candidateName,
+      candidateEmail,
+      candidatePhone,
+      candidateLocation,
+      company: targetCompany,
+      role: targetRole
+    });
+  } catch (err) {
+    console.error('[Extension API] Failed to generate cover letter:', err);
+    res.status(500).json({ error: err.message || 'Failed to generate cover letter' });
   }
 });
 

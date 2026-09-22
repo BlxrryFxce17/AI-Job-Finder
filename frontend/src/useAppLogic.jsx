@@ -163,14 +163,14 @@ export function useAppLogic() {
   const [selectedJobDetails, setSelectedJobDetails] = useState(null);
   
   // Profile State
-  const [profile, setProfile] = useState({ name: 'Loading...', title: '', phone: '', linkedin: '', github: '', portfolio: '', resumeFilename: '', emailUser: '' });
+  const [profile, setProfile] = useState({ name: 'Loading...', title: '', phone: '', linkedin: '', github: '', portfolio: '', resumeUrl: '', projectUrl: '', resumeFilename: '', emailUser: '' });
   const [originalProfile, setOriginalProfile] = useState(null);
   const [savingProfile, setSavingProfile] = useState(false);
 
   // Mismatch detection between frontend and DB
   const hasProfileInfoChanges = React.useMemo(() => {
     if (!originalProfile) return false;
-    const fields = ['name', 'title', 'phone', 'linkedin', 'portfolio', 'github', 'experienceLevel', 'tone'];
+    const fields = ['name', 'title', 'phone', 'linkedin', 'portfolio', 'github', 'experienceLevel', 'tone', 'resumeUrl', 'projectUrl'];
     return fields.some(f => (profile[f] || '').trim() !== (originalProfile[f] || '').trim());
   }, [profile, originalProfile]);
 

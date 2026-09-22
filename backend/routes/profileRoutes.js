@@ -79,13 +79,16 @@ const updateProfileHandler = async (req, res) => {
     const profile = await getProfile(req.user.id);
 
     const allowedFields = [
-      'name', 'title', 'phone', 'linkedin', 'github', 'portfolio', 
+      'name', 'title', 'phone', 'linkedin', 'github', 'portfolio', 'resumeUrl', 'projectUrl',
       'githubToken', 'tone', 'experienceLevel', 'enableFlex', 
       'enableAutoFollowUp', 'aiInstructions', 'githubRepoLinkCount', 'selectedRepoNames',
       'skills', 'workExperience', 'education', 'fatherName', 'preferredName',
       'addressLine1', 'city', 'state', 'postalCode', 'country',
       'authorizedToWork', 'requireSponsorship', 'formerEmployee', 'resumeFilename'
     ];
+    if (req.body.cvUrl && !req.body.resumeUrl) {
+      req.body.resumeUrl = req.body.cvUrl;
+    }
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) {
         profile[field] = req.body[field];

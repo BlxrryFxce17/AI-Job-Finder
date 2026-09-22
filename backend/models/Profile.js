@@ -8,6 +8,8 @@ const profileSchema = new mongoose.Schema({
   linkedin: { type: String, default: '' },
   github: { type: String, default: '' },
   portfolio: { type: String, default: '' },
+  resumeUrl: { type: String, default: '' },
+  projectUrl: { type: String, default: '' },
   githubToken: { type: String, default: '' },
   resumeText: { type: String, default: '' },
   resumePdf: { type: Buffer },

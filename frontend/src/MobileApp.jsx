@@ -2440,6 +2440,11 @@ export default function MobileApp(props) {
               <input className="form-input" value={profile.portfolio || ''} onChange={e => setProfile({ ...profile, portfolio: e.target.value })} placeholder="https://yourportfolio.dev" />
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
+                <label className="mobile-label" style={{ margin: 0 }}>Resume / CV Drive Link</label>
+              </div>
+              <input className="form-input" value={profile.resumeUrl || ''} onChange={e => setProfile({ ...profile, resumeUrl: e.target.value })} placeholder="https://drive.google.com/file/d/..." />
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
                 <label className="mobile-label" style={{ margin: 0 }}>GitHub URL</label>
                 <button
                   type="button"
@@ -2464,18 +2469,19 @@ export default function MobileApp(props) {
                 <option value="Short & Punchy">Short & Punchy</option>
               </select>
 
-              <button
-                type="submit"
-                className="btn btn-primary"
-                style={{
-                  marginTop: '12px',
-                  cursor: (!hasProfileInfoChanges || savingProfile) ? 'not-allowed' : 'pointer',
-                  opacity: (!hasProfileInfoChanges || savingProfile) ? 0.6 : 1
-                }}
-                disabled={!hasProfileInfoChanges || savingProfile}
-              >
-                {savingProfile ? <span className="spinner"></span> : hasProfileInfoChanges ? 'Save Changes' : '✓ No Changes'}
-              </button>
+              {hasProfileInfoChanges && (
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  style={{
+                    marginTop: '12px',
+                    cursor: savingProfile ? 'not-allowed' : 'pointer'
+                  }}
+                  disabled={savingProfile}
+                >
+                  {savingProfile ? <span className="spinner"></span> : 'Save Changes'}
+                </button>
+              )}
             </form>
 
             {/* Technical Portfolio & Repositories Card */}

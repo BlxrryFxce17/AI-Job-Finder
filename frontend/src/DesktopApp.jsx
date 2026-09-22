@@ -4179,6 +4179,21 @@ export default function DesktopApp(props) {
                       />
                     </div>
 
+                    <div>
+                      <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', color: 'var(--text-2)', fontSize: '12px', fontWeight: 500 }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                          📄 Resume / CV Google Drive Link (Shareable URL)
+                        </span>
+                      </label>
+                      <input
+                        className="form-input"
+                        style={{ width: '100%', fontSize: '13px' }}
+                        value={profile.resumeUrl || ''}
+                        onChange={e => setProfile({ ...profile, resumeUrl: e.target.value })}
+                        placeholder="https://drive.google.com/file/d/..."
+                      />
+                    </div>
+
                     <div className="form-row">
                       <div style={{ flex: 1 }}>
                         <label style={{ display: 'block', marginBottom: '6px', color: 'var(--text-2)', fontSize: '12px', fontWeight: 500 }}>GitHub Profile URL</label>
@@ -4200,22 +4215,23 @@ export default function DesktopApp(props) {
                       </select>
                     </div>
 
-                    <button
-                      type="submit"
-                      className="btn btn-primary"
-                      style={{
-                        alignSelf: 'flex-start',
-                        marginTop: '8px',
-                        padding: '9px 22px',
-                        fontSize: '13px',
-                        fontWeight: 600,
-                        cursor: (!hasProfileInfoChanges || savingProfile) ? 'not-allowed' : 'pointer',
-                        opacity: (!hasProfileInfoChanges || savingProfile) ? 0.6 : 1
-                      }}
-                      disabled={!hasProfileInfoChanges || savingProfile}
-                    >
-                      {savingProfile ? <span className="spinner"></span> : hasProfileInfoChanges ? '💾 Save Profile Information' : '✓ Profile Up to Date'}
-                    </button>
+                    {hasProfileInfoChanges && (
+                      <button
+                        type="submit"
+                        className="btn btn-primary"
+                        style={{
+                          alignSelf: 'flex-start',
+                          marginTop: '8px',
+                          padding: '9px 22px',
+                          fontSize: '13px',
+                          fontWeight: 600,
+                          cursor: savingProfile ? 'not-allowed' : 'pointer'
+                        }}
+                        disabled={savingProfile}
+                      >
+                        {savingProfile ? <span className="spinner"></span> : '💾 Save Profile Information'}
+                      </button>
+                    )}
                   </form>
                 </div>
 
