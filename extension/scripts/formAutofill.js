@@ -6,6 +6,14 @@
 
   const sleep = window.sleep || ((ms) => new Promise(resolve => setTimeout(resolve, ms)));
 
+  const isElementVisible = (el) => {
+    if (typeof window.isElementVisible === 'function') return window.isElementVisible(el);
+    if (!el) return false;
+    if (el.closest('[style*="display: none"], [style*="display:none"], [hidden]')) return false;
+    const style = window.getComputedStyle(el);
+    return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+  };
+
 
   function getPriorityRepoUrl(p, contextText = '') {
     if (!p) return '';
@@ -82,70 +90,45 @@
     return chars.join('');
   }
 
-  // Realistic Human-Like Field Click & Character-by-Character Typing
-  async function typeTextHumanLike(element, text, speed = 20) {
+  // Fast, Reliable & Authentic Human-Like Field Setting (JobRight Style)
+  async function typeTextHumanLike(element, text, speed = 10) {
     if (!element) return;
     const str = String(text ?? '');
 
     try {
-      // 1. Scroll smoothly into view (safe modal scrolling)
+      // 1. Scroll into view if needed (smooth & safe for modals)
       const activeModal = typeof getActiveApplicationModal === 'function' ? getActiveApplicationModal() : null;
-      if (activeModal && activeModal.contains(element)) {
-        try { element.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (_) {}
-      } else {
-        try { element.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
-      }
-      await sleep(80);
+      try {
+        if (activeModal && activeModal.contains(element)) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } else {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      } catch (_) { }
 
       // 2. Add visual active typing highlight
       element.classList.add('ai-field-typing-focus');
 
-      // 3. Click and Focus with authentic mouse & pointer events (preventScroll prevents window jumps)
+      // 3. Focus & authentic user interactions
       element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
       try { element.focus({ preventScroll: true }); } catch (_) { element.focus(); }
       element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
       element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
       element.dispatchEvent(new Event('focus', { bubbles: true }));
-      await sleep(60);
 
-      // 4. Clear existing content
-      setNativeChar(element, '');
+      // 4. Native value setter (compatible with React, Vue, Angular, Workday)
+      setNativeValue(element, str);
 
-      // 5. Type character by character with micro-delays
-      for (let i = 0; i < str.length; i++) {
-        if (!isAutofilling) break;
-        const char = str[i];
-        const partial = str.slice(0, i + 1);
+      // 5. Authentic synthetic events
+      element.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+      element.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
 
-        setNativeChar(element, partial);
+      // Crisp pacing delay between fields (JobRight style)
+      await sleep(25);
 
-        element.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
-        element.dispatchEvent(new KeyboardEvent('keypress', { key: char, bubbles: true }));
-        element.dispatchEvent(new Event('input', { bubbles: true }));
-        element.dispatchEvent(new KeyboardEvent('keyup', { key: char, bubbles: true }));
-
-        // Natural typing jitter
-        await sleep(speed + Math.floor(Math.random() * 10));
-      }
-    } catch (err) {
-      console.warn('[Copilot Typing Notice]', err);
-    } finally {
-      // CRITICAL FAIL-SAFE: ALWAYS commit the exact, 100% full string so email/phone are NEVER truncated!
-      try {
-        setNativeChar(element, str);
-        element.value = str;
-      } catch (_) {
-        element.value = str;
-      }
-
-      // Final commit events
-      element.dispatchEvent(new Event('input', { bubbles: true }));
-      element.dispatchEvent(new Event('change', { bubbles: true }));
-      element.dispatchEvent(new Event('blur', { bubbles: true }));
-
-      // LinkedIn Typeahead / Autocomplete Commit (City, Location, Company fields)
+      // 6. LinkedIn & ATS Typeahead / Autocomplete Commit (City, Location, Company fields)
       if (element.classList.contains('artdeco-typeahead__input') || element.closest('.artdeco-typeahead, .jobs-easy-apply-modal')) {
-        await sleep(180);
+        await sleep(60);
         const suggestion = document.querySelector('.artdeco-typeahead__results-list li, .artdeco-typeahead__result, [role="option"], .jobs-easy-apply-modal .artdeco-typeahead__results-list [role="option"]');
         if (suggestion) {
           suggestion.click();
@@ -154,12 +137,20 @@
           element.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
         }
       }
+    } catch (err) {
+      console.warn('[Copilot Typing Notice]', err);
+    } finally {
+      // 7. Ensure final value is committed & blur dispatched
+      try {
+        setNativeValue(element, str);
+        element.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+        element.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+        element.dispatchEvent(new Event('blur', { bubbles: true, composed: true }));
+      } catch (_) { }
 
-      // Success flash & clean up
       element.classList.remove('ai-field-typing-focus');
       element.classList.add('ai-field-filled-success');
-      setTimeout(() => element.classList.remove('ai-field-filled-success'), 1200);
-      await sleep(100);
+      setTimeout(() => element.classList.remove('ai-field-filled-success'), 600);
     }
   }
 
@@ -250,17 +241,15 @@
     } catch (_) { }
   }
 
-  // Human-like Select Option Selection
+  // Fast & Accurate Select Option Selection (JobRight Style)
   async function selectOptionHumanLike(selectElem, keywords) {
     if (!selectElem) return;
     try { selectElem.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
-    await sleep(90);
 
     selectElem.classList.add('ai-field-typing-focus');
     selectElem.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     selectElem.focus();
     selectElem.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await sleep(100);
 
     const allOptions = Array.from(selectElem.options || []);
     // Exclude placeholder / dummy options from candidate matches
@@ -307,7 +296,7 @@
       }
     }
 
-    // Pass 4: Substring match (require kw to have length >= 3 to avoid false positives like 'no' matching 'innovation')
+    // Pass 4: Substring match (require kw to have length >= 3 to avoid false positives)
     if (!match) {
       for (const kw of keywords) {
         const k = kw.toLowerCase().trim();
@@ -333,8 +322,8 @@
 
     selectElem.classList.remove('ai-field-typing-focus');
     selectElem.classList.add('ai-field-filled-success');
-    setTimeout(() => selectElem.classList.remove('ai-field-filled-success'), 1200);
-    await sleep(130);
+    setTimeout(() => selectElem.classList.remove('ai-field-filled-success'), 600);
+    await sleep(25);
   }
 
   // ── Smart Combobox / ARIA Listbox Option Selector ──────────────────────────────────────
@@ -648,13 +637,11 @@
     }
   }
 
-  // Human-like Radio Button Clicking
+  // Fast & Authentic Radio Button Clicking (JobRight Style)
   async function clickRadioHumanLike(radio) {
     if (!radio) return;
     try {
       try { radio.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
-      await sleep(80);
-
       radio.classList.add('ai-field-typing-focus');
       try { radio.focus(); } catch (_) { }
 
@@ -685,18 +672,16 @@
       radio.checked = true;
       radio.classList.remove('ai-field-typing-focus');
       radio.classList.add('ai-field-filled-success');
-      setTimeout(() => radio.classList.remove('ai-field-filled-success'), 1200);
-      await sleep(100);
+      setTimeout(() => radio.classList.remove('ai-field-filled-success'), 600);
+      await sleep(20);
     }
   }
 
-  // Human-like Checkbox Checking (Supports native and custom [role="checkbox"])
+  // Fast & Authentic Checkbox Checking (JobRight Style)
   async function clickCheckboxHumanLike(checkbox) {
     if (!checkbox) return;
     try {
       try { checkbox.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
-      await sleep(80);
-
       checkbox.classList.add('ai-field-typing-focus');
       try { checkbox.focus(); } catch (_) { }
 
@@ -735,18 +720,16 @@
       if (checkbox.getAttribute && checkbox.getAttribute('role') === 'checkbox') checkbox.setAttribute('aria-checked', 'true');
       checkbox.classList.remove('ai-field-typing-focus');
       checkbox.classList.add('ai-field-filled-success');
-      setTimeout(() => checkbox.classList.remove('ai-field-filled-success'), 1200);
-      await sleep(100);
+      setTimeout(() => checkbox.classList.remove('ai-field-filled-success'), 600);
+      await sleep(20);
     }
   }
 
-  // Human-like Checkbox Unchecking (For roles candidate no longer works in)
+  // Fast Checkbox Unchecking (For roles candidate no longer works in)
   async function uncheckCheckboxHumanLike(checkbox) {
     if (!checkbox) return;
     try {
       try { checkbox.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
-      await sleep(60);
-
       checkbox.classList.add('ai-field-typing-focus');
       if (checkbox.getAttribute && checkbox.getAttribute('role') === 'checkbox') {
         checkbox.setAttribute('aria-checked', 'false');
@@ -775,7 +758,7 @@
     } finally {
       if (checkbox.type === 'checkbox') checkbox.checked = false;
       checkbox.classList.remove('ai-field-typing-focus');
-      await sleep(60);
+      await sleep(20);
     }
   }
 
@@ -952,7 +935,7 @@
     return btoa(binary);
   }
 
-  // Workday / ATS Pill-Wise Skill Tag Input Filler
+  // Fast Workday / ATS Pill-Wise Skill Tag Input Filler (JobRight Style)
   async function fillSkillPillsHumanLike(input, skills) {
     if (!input || !Array.isArray(skills) || skills.length === 0) return;
 
@@ -960,98 +943,69 @@
       try { input.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
       input.classList.add('ai-field-typing-focus');
       try { input.focus(); } catch (_) { }
-      await sleep(150);
 
-      // Take top 8 skills
-      const skillsToFill = skills.slice(0, 8);
+      // Take top 6 skills
+      const skillsToFill = skills.slice(0, 6);
 
       for (const skill of skillsToFill) {
         if (!isAutofilling) break;
 
-        // 1. Clear the input first
-        setNativeValue(input, '');
-        await sleep(60);
-
-        // 2. Type the skill name character by character
-        for (let i = 0; i < skill.length; i++) {
-          const partial = skill.slice(0, i + 1);
-          const char = skill[i];
-          input.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
-          setNativeChar(input, partial);
-          input.dispatchEvent(new KeyboardEvent('keyup', { key: char, bubbles: true }));
-          input.dispatchEvent(new Event('input', { bubbles: true }));
-          await sleep(20);
-        }
+        // 1. Direct value assignment
         setNativeValue(input, skill);
-        await sleep(200);
+        input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+        await sleep(30);
 
-        // 3. Check for dropdown/autocomplete options in the global DOM
+        // 2. Check for dropdown/autocomplete options in the DOM
         const dropdownSelectors = [
+          '.wd-pill-option',
+          '.pill-option',
           '[role="listbox"] [role="option"]',
           '[role="option"]',
           'ul.ui-autocomplete li',
-          '.wd-pill-option',
-          '.pill-option',
           '.dropdown-item',
-          '.suggestion-item',
-          '.sapMSelectListItem',
-          '[class*="autocomplete" i] li',
-          '[class*="suggest" i] li',
+          '.suggestion-item'
         ];
 
-        let dropdownOpts = [];
+        let matchingOpt = null;
         for (const sel of dropdownSelectors) {
           const candidates = window.querySelectorAllDeep(sel).filter(el => isElementVisible(el));
-          if (candidates.length > 0) { dropdownOpts = candidates; break; }
-        }
-
-        const matchingOpt = dropdownOpts.find(opt => {
-          const t = (opt.textContent || '').trim().toLowerCase();
-          return t.includes(skill.toLowerCase()) || skill.toLowerCase().includes(t.slice(0, 10));
-        }) || (dropdownOpts.length > 0 ? dropdownOpts[0] : null);
-
-        if (matchingOpt && isElementVisible(matchingOpt)) {
-          // 4a. Click the autocomplete suggestion
-          matchingOpt.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-          matchingOpt.click();
-          await sleep(200);
-        } else {
-          // 4b. No dropdown — commit via Enter key (Workday multi-value, Greenhouse tags, LinkedIn skill pills)
-          input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
-          input.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
-          input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
-          await sleep(120);
-
-          // 4c. Try Tab key as alternative commit
-          input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', keyCode: 9, which: 9, bubbles: true }));
-          input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Tab', code: 'Tab', keyCode: 9, which: 9, bubbles: true }));
-          await sleep(80);
-
-          // 4d. Also try comma-delimited commit (some inputs treat comma as a separator)
-          // Re-focus in case Tab moved away
-          try { input.focus(); } catch (_) { }
-
-          // 4e. Check for and click an "Add" / "+" button near the input
-          const pillBox = input.closest('.wd-pill-box, [data-automation-id*="pill" i], [class*="pill" i], [class*="tag" i], [class*="multi" i], .form-group, div') || document.body;
-          const addBtn = pillBox.querySelector(
-            '#btnAddSkillPill, button[title*="Add" i], button[aria-label*="Add" i], '
-            + 'button.wd-pill-add-btn, button[data-automation-id*="add" i], '
-            + '[class*="add-skill" i], [class*="addSkill" i]'
-          );
-          if (addBtn && isElementVisible(addBtn)) {
-            addBtn.click();
-            await sleep(150);
+          if (candidates.length > 0) {
+            matchingOpt = candidates.find(opt => {
+              const t = (opt.textContent || '').trim().toLowerCase();
+              return t.includes(skill.toLowerCase()) || skill.toLowerCase().includes(t.slice(0, 10));
+            }) || candidates[0];
+            break;
           }
         }
 
-        // 5. Clear input for next skill entry
+        if (matchingOpt && isElementVisible(matchingOpt)) {
+          matchingOpt.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+          matchingOpt.click();
+          await sleep(35);
+        } else {
+          // No dropdown — commit via Enter key
+          input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+          input.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+          input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+          await sleep(30);
+
+          // Check for and click an Add button if present
+          const pillBox = input.closest('.wd-pill-box, [data-automation-id*="pill" i], [class*="pill" i], .form-group') || input.parentElement;
+          const addBtn = pillBox?.querySelector('#btnAddSkillPill, button.wd-pill-add-btn, button[title*="Add" i]');
+          if (addBtn && isElementVisible(addBtn)) {
+            addBtn.click();
+            await sleep(25);
+          }
+        }
+
+        // Clear input for next skill entry
         try {
           if (input.value && input.value.trim().length > 0) {
             setNativeValue(input, '');
             input.dispatchEvent(new Event('input', { bubbles: true }));
           }
         } catch (_) { }
-        await sleep(150);
+        await sleep(20);
       }
 
       // Sync hidden skills input if present
@@ -1062,7 +1016,7 @@
 
       input.classList.remove('ai-field-typing-focus');
       input.classList.add('ai-field-filled-success');
-      setTimeout(() => input.classList.remove('ai-field-filled-success'), 1500);
+      setTimeout(() => input.classList.remove('ai-field-filled-success'), 800);
     } catch (err) {
       console.warn('[Copilot Pill Skills Error]', err);
     }
@@ -1170,7 +1124,7 @@
   // (e.g. Work Experience > Add, Education > Add, Certifications > Add)
   async function expandAndActivateSections(p) {
     try {
-      // 1. Click "Expand all" buttons
+      // 1. Click "Expand all" buttons if present
       const expandAllBtn = window.querySelectorAllDeep('a, button, [role="button"], span')
         .find(el => {
           const t = (el.textContent || '').trim().toLowerCase();
@@ -1178,7 +1132,7 @@
         });
       if (expandAllBtn) {
         expandAllBtn.click();
-        await sleep(300);
+        await sleep(50);
       }
 
       // 2. Expand individual collapsed accordion headers
@@ -1188,18 +1142,14 @@
           try { h.click(); } catch (_) { }
         }
       });
-      if (collapsedHeaders.length > 0) await sleep(250);
+      if (collapsedHeaders.length > 0) await sleep(50);
 
       // 3. Workday / ATS section "Add" button logic
-      // Sections like Work Experience, Education, Certifications, Languages each have an "Add" button.
-      // We click Add, wait for the form sub-section to expand, then return (autofillForm will fill it).
       const sectionDefs = [
         {
-          keywords: ['work experience', 'employment history', 'professional experience', 'experience'],
+          keywords: ['work experience', 'employment history', 'professional experience'],
           dataAutomationIds: ['workExperienceSection', 'workExperience', 'employment-section'],
           fill: () => {
-            // We'll handle field fill in the main autofillForm input loop.
-            // Just return the data the expanded form needs.
             const exp = (p?.workExperience && p.workExperience[0]) || null;
             return exp ? [
               { kw: ['job title', 'position', 'role', 'title'], val: exp.title || p?.title || 'Full Stack Engineer' },
@@ -1251,26 +1201,24 @@
 
       // Find which sections are currently showing only an "Add" button (not yet expanded)
       for (const sectionDef of sectionDefs) {
-        // Try data-automation-id first (Workday)
         let sectionEl = null;
         for (const aid of sectionDef.dataAutomationIds) {
           sectionEl = document.querySelector(`[data-automation-id="${aid}"], [data-automation-id*="${aid}" i]`);
           if (sectionEl && isElementVisible(sectionEl)) break;
           sectionEl = null;
         }
-        // Fallback: scan headings for keyword match
         if (!sectionEl) {
-          const headings = window.querySelectorAllDeep('h2, h3, h4, h5, [class*="section-title" i], [class*="sectionTitle" i], [class*="group-header" i], legend, label');
+          const headings = window.querySelectorAllDeep('h2, h3, h4, h5, [class*="section-title" i], [class*="sectionTitle" i], [class*="group-header" i], legend');
           const hMatch = headings.find(h => {
             const t = (h.textContent || '').trim().toLowerCase();
             return sectionDef.keywords.some(k => t.includes(k)) && isElementVisible(h);
           });
-          if (hMatch) sectionEl = hMatch.closest('section, fieldset, [class*="section" i], [class*="group" i], div') || hMatch.parentElement;
+          if (hMatch) sectionEl = hMatch.closest('section, fieldset, [class*="section" i], [class*="group" i]') || hMatch.parentElement;
         }
 
         if (!sectionEl) continue;
 
-        // Check if the section currently only shows an Add button (no sub-form yet)
+        // Check if the section already has inputs visible
         const hasVisibleSubForm = window.querySelectorAllDeep(
           'input:not([type="hidden"]):not([type="submit"]):not([type="button"]), textarea, select',
           sectionEl
@@ -1278,25 +1226,25 @@
 
         if (hasVisibleSubForm) continue; // Form already expanded
 
-        // Find and click the Add button for this section
+        // Find and click the Add button STRICTLY inside this section
         const addBtn = window.querySelectorAllDeep(
-          'button, [role="button"], a'
+          'button, [role="button"], a',
+          sectionEl
         ).find(btn => {
           const t = (btn.textContent || btn.getAttribute('aria-label') || btn.title || '').trim().toLowerCase();
           return (t === 'add' || t.startsWith('add ') || t === '+ add' || t === 'add new' || t === 'add entry') && isElementVisible(btn);
         });
 
         if (addBtn) {
-          addBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          await sleep(200);
           addBtn.click();
-          await sleep(600); // wait for sub-form to expand in DOM
+          await sleep(100);
 
           // Pre-fill the newly expanded sub-form fields
           const fields = sectionDef.fill();
           if (fields.length > 0) {
             const subInputs = window.querySelectorAllDeep(
-              'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea, select'
+              'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea, select',
+              sectionEl
             ).filter(el => isElementVisible(el));
 
             for (const subInput of subInputs) {
@@ -1307,26 +1255,9 @@
               if (subInput.tagName === 'SELECT') {
                 await selectOptionHumanLike(subInput, [fieldDef.val]);
               } else {
-                // Check if it's an ARIA combobox / datepicker
-                const isDateLike = subInput.type === 'date' || /date|month|year/.test(labelStr);
-                if (isDateLike && /start|from|begin/.test(labelStr)) {
-                  const exp = (p?.workExperience && p?.workExperience[0]) || null;
-                  const dateStr = exp?.startDate || '2022';
-                  const parsed = new Date(dateStr);
-                  if (!isNaN(parsed)) {
-                    await selectDatepickerHumanLike(subInput, parsed);
-                  } else {
-                    await typeTextHumanLike(subInput, fieldDef.val);
-                  }
-                } else if (isDateLike && /end|to|grad|pass|expir/.test(labelStr)) {
-                  await typeTextHumanLike(subInput, fieldDef.val);
-                } else if (subInput.getAttribute('role') === 'combobox' || subInput.getAttribute('aria-haspopup') === 'listbox') {
-                  await selectComboboxOptionHumanLike(subInput, [fieldDef.val]);
-                } else {
-                  await typeTextHumanLike(subInput, fieldDef.val);
-                }
+                await typeTextHumanLike(subInput, fieldDef.val);
               }
-              await sleep(80);
+              await sleep(20);
             }
           }
         }
@@ -1570,11 +1501,28 @@
 
   async function autofillForm() {
     if (isAutofilling) {
-      showToast('Autofill is currently in progress...', 'info');
-      return { success: false, message: 'Already in progress' };
+      if (Date.now() - (window.__lastAutofillStartTime || 0) > 8000) {
+        console.warn('[Copilot] Resetting stuck autofill lock');
+        isAutofilling = false;
+        window.isAutofilling = false;
+      } else {
+        showToast('Autofill is currently in progress...', 'info');
+        return { success: false, message: 'Already in progress' };
+      }
     }
+    window.__lastAutofillStartTime = Date.now();
 
-    let profileRes = await safeMsg({ action: 'GET_PROFILE' });
+    // Fast parallel fetch for candidate profile, brain rules, and CV attachment data
+    const [profileRes, brainRes, cvRes] = await Promise.all([
+      (cachedProfile && (cachedProfile.firstName || cachedProfile.email))
+        ? Promise.resolve({ success: true, profile: cachedProfile })
+        : safeMsg({ action: 'GET_PROFILE' }),
+      (cachedBrainRules && cachedBrainRules.length > 0)
+        ? Promise.resolve({ learnedRules: cachedBrainRules })
+        : safeMsg({ action: 'GET_BRAIN' }),
+      safeMsg({ action: 'GET_CV_DATA' }).catch(() => null)
+    ]);
+
     if (!profileRes?.success || !profileRes.profile) {
       showToast(profileRes?.error || 'Please connect & sync your profile first!', 'error');
       openSidebar('profile');
@@ -1582,31 +1530,19 @@
     }
 
     cachedProfile = profileRes.profile;
-
-    // Retrieve Brain Rules
-    const brainRes = await safeMsg({ action: 'GET_BRAIN' });
     cachedBrainRules = brainRes?.learnedRules || [];
-
-    // Retrieve CV Data for Native File Attachment
-    let cvData = null;
-    try {
-      const cvRes = await safeMsg({ action: 'GET_CV_DATA' });
-      cvData = cvRes?.cvData;
-    } catch (_) { }
+    const cvData = cvRes?.cvData || null;
 
     const p = cachedProfile;
     const host = window.location.hostname.toLowerCase();
 
-    // Auto-expand collapsed sections + trigger Workday section Add buttons
+    // Auto-expand collapsed sections if needed
     expandCollapsedSections();
     await expandAndActivateSections(p);
-    await sleep(300);
 
-    // Detect and fill ATS Create Account / Sign-In registration pages
-    const filledAccount = await detectAndFillCreateAccount(p);
-    if (filledAccount) {
-      // Account creation form filled — main field scan will still run to catch any extra fields
-      await sleep(400);
+    // Fast check for ATS Create Account / Sign-In registration pages
+    if (document.querySelector('input[type="password"]')) {
+      await detectAndFillCreateAccount(p);
     }
 
     // 1. Gather all candidate fill actions in page reading order
@@ -2828,7 +2764,7 @@
         } else if (item.type === 'combobox') {
           await typeComboboxHumanLike(item.element, item.value);
           if ((item.label || '').toLowerCase().includes('country')) {
-            await sleep(400);
+            await sleep(60);
           }
         } else if (item.type === 'select') {
           if (Array.isArray(item.value)) {
@@ -2837,7 +2773,7 @@
             await selectOptionHumanLike(item.element, [item.value]);
           }
           if ((item.label || '').toLowerCase().includes('country')) {
-            await sleep(400);
+            await sleep(60);
           }
         } else if (item.type === 'radio') {
           await clickRadioHumanLike(item.element);
@@ -2858,21 +2794,19 @@
         } else if (item.type === 'gf_radio') {
           // Google Forms radio: click the label / div[role="radio"] element
           try { item.element.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
-          await sleep(80);
           const clickTarget = item.element.closest('.docssharedWizToggleLabeledContainer, label') || item.element.querySelector('.vd3tt, .AB7Lab') || item.element;
           clickTarget.click();
           item.element.click();
           item.element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-          await sleep(150);
+          await sleep(40);
         } else if (item.type === 'gf_checkbox') {
           // Google Forms checkbox: click the label / div[role="checkbox"] element
           try { item.element.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
-          await sleep(80);
           const clickTarget = item.element.closest('.docssharedWizToggleLabeledContainer, label') || item.element.querySelector('.vd3tt, .uHMk6b') || item.element;
           clickTarget.click();
           item.element.click();
           item.element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-          await sleep(150);
+          await sleep(40);
         } else if (item.type === 'ai_generate') {
           try {
             try { item.element.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
@@ -2899,7 +2833,7 @@
             console.warn('[Copilot] AI field generation notice:', err);
           } finally {
             item.element.classList.remove('ai-field-typing-focus');
-            await sleep(100);
+            await sleep(50);
           }
         }
 
@@ -2946,7 +2880,7 @@
       showToast('Autofill interrupted: ' + err.message, 'error');
     } finally {
       isAutofilling = false;
-      refreshAuditList();
+      refreshAuditList(true);
     }
 
     return { success: true, fieldsFilled };

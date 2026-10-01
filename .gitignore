@@ -8,3 +8,5 @@ backend/node_modules/
 frontend/node_modules/
 IDEA.md
 dist-extension/
+.agent/
+.skills.json

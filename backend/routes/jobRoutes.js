@@ -489,14 +489,20 @@ router.post('/fetch-jobs', requireAuth, async (req, res) => {
     try {
       for (const what of searchQueries) {
         if (totalAdded >= 20) break;
-        if (clientAborted || res.writableEnded) {
+        if (clientAborted) {
           console.log('[Fetch-Jobs] Request aborted by client. Halting scrape.');
+          if (!res.writableEnded) {
+            return res.json({ message: 'Job search stopped', count: totalAdded });
+          }
           return;
         }
         for (const loc of targetLocations) {
           if (totalAdded >= 20) break;
-          if (clientAborted || res.writableEnded) {
+          if (clientAborted) {
             console.log('[Fetch-Jobs] Request aborted by client. Halting scrape.');
+            if (!res.writableEnded) {
+              return res.json({ message: 'Job search stopped', count: totalAdded });
+            }
             return;
           }
           let country = 'in';
@@ -523,18 +529,18 @@ router.post('/fetch-jobs', requireAuth, async (req, res) => {
           const maxPages = (searchQueries.length * targetLocations.length > 4) ? 1 : 2;
 
           for (let page = 1; page <= maxPages; page++) {
-            // Fetch jobs from past 24 hours
-            const fullUrl = `https://api.adzuna.com/v1/api/jobs/${country}/search/${page}?app_id=${process.env.ADZUNA_APP_ID}&app_key=${process.env.ADZUNA_APP_KEY}&what=${encodeURIComponent(searchQuery)}${whereParam}&results_per_page=20&max_days_old=1&sort_by=date`;
+            // Fetch jobs up to past 7 days
+            const fullUrl = `https://api.adzuna.com/v1/api/jobs/${country}/search/${page}?app_id=${process.env.ADZUNA_APP_ID}&app_key=${process.env.ADZUNA_APP_KEY}&what=${encodeURIComponent(searchQuery)}${whereParam}&results_per_page=20&max_days_old=7&sort_by=date`;
 
             const response = await axios.get(fullUrl);
             const apiJobs = response.data.results || [];
             if (apiJobs.length === 0) break; // No more results on subsequent pages
 
             for (const job of apiJobs) {
-              // Skip listings older than 12 hours
+              // Skip listings older than 72 hours (3 days)
               if (job.created) {
                 const ageMs = Date.now() - new Date(job.created).getTime();
-                if (!isNaN(ageMs) && ageMs > 12 * 60 * 60 * 1000) {
+                if (!isNaN(ageMs) && ageMs > 72 * 60 * 60 * 1000) {
                   continue;
                 }
               }
@@ -723,7 +729,7 @@ router.post('/fetch-jobs', requireAuth, async (req, res) => {
             params: {
               query: queryStr,
               num_pages: '1',
-              date_posted: 'today'
+              date_posted: '3days'
             },
             headers: {
               'x-rapidapi-host': 'jsearch.p.rapidapi.com',
@@ -732,13 +738,14 @@ router.post('/fetch-jobs', requireAuth, async (req, res) => {
             timeout: 8000
           });
 
-          const apiJobs = jsearchRes.data?.data?.jobs || [];
+          const rawData = jsearchRes.data?.data;
+          const apiJobs = Array.isArray(rawData) ? rawData : (rawData?.jobs || []);
           for (const job of apiJobs) {
-            // Check 12-hour freshness cutoff
+            // Check 72-hour freshness cutoff
             const postedDate = job.job_posted_at_datetime_utc ? new Date(job.job_posted_at_datetime_utc) : null;
             if (postedDate && !isNaN(postedDate.getTime())) {
               const ageMs = Date.now() - postedDate.getTime();
-              if (ageMs > 12 * 60 * 60 * 1000) continue;
+              if (ageMs > 72 * 60 * 60 * 1000) continue;
             }
 
             const company = job.employer_name || 'Unknown Company';
@@ -811,8 +818,8 @@ router.post('/fetch-jobs', requireAuth, async (req, res) => {
     }
   }
 
-  // Fallback search only if no jobs found from primary sources
-  if (totalAdded === 0 && (process.env.TAVILY_API_KEY || process.env.SERPER_API_KEY)) {
+  // Fallback search if fewer than 8 jobs found from primary sources
+  if (totalAdded < 8 && (process.env.TAVILY_API_KEY || process.env.SERPER_API_KEY)) {
     try {
       for (const what of searchQueries.slice(0, 2)) {
         if (totalAdded >= 10) break;
@@ -862,7 +869,7 @@ router.post('/fetch-jobs', requireAuth, async (req, res) => {
   const expLabel = targetExperience && targetExperience !== 'All' ? `${targetExperience} ` : '';
   const nonAllLocs = targetLocations.filter(l => !['all', 'all india'].includes(l.toLowerCase()));
   const locLabel = nonAllLocs.length > 0 ? ` in ${nonAllLocs.join(', ')}` : '';
-  res.json({ message: `Fetched and added ${totalAdded} new ${expLabel}jobs${locLabel}.` });
+  res.json({ message: `Fetched and added ${totalAdded} new ${expLabel}jobs${locLabel}.`, count: totalAdded });
 });
 
 const bounceScanCooldowns = new Map(); // userId -> lastScanTimestamp
@@ -1096,8 +1103,25 @@ router.post('/scrape-hr', requireAuth, async (req, res) => {
       candidates.push(hr);
     }
 
-    if (clientAborted || res.writableEnded) {
+    // If candidates is empty because all scraped profiles were previously seen, provide guaranteed fresh directory leads
+    if (candidates.length === 0) {
+      console.log('[Scrape-HR] All candidates were previously seen. Generating guaranteed fresh leads from directory...');
+      const fallbackList = discoverHRProfilesFromDirectory(query, location, [], [], []);
+      const freshFallback = fallbackList.filter(hr => {
+        const norm = normalizeHrName(hr.name);
+        return norm && !existingNames.has(norm);
+      });
+      const toUse = freshFallback.length > 0 ? freshFallback.slice(0, 8) : fallbackList.slice(0, 8);
+      for (const f of toUse) {
+        candidates.push(f);
+      }
+    }
+
+    if (clientAborted) {
       console.log('[Scrape-HR] Request aborted by client before lead dispatch.');
+      if (!res.writableEnded) {
+        return res.json({ success: true, count: 0, jobs: [] });
+      }
       return;
     }
 

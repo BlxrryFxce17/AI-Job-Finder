@@ -7,27 +7,34 @@ const { isSeniorRole, detectExperienceLevel, shouldExcludeSenior } = require('./
 // Track Serper quota cooldown
 let serperCreditsExhaustedUntil = 0;
 
-// Check if a date string is older than 12 hours
-function isOlderThan12Hours(text) {
+// Check if a date string is older than cutoff (default 72 hours / 3 days)
+function isOlderThan12Hours(text, maxHours = 72) {
   if (!text || typeof text !== 'string') return false;
   const lower = text.toLowerCase().trim();
 
-  // Days, weeks, or months ago
-  if (/\b(?:[1-9]\d*)\s*(?:days?|weeks?|months?|yrs?|years?)\s*ago\b/i.test(lower)) return true;
-  if (/\b(?:yesterday|last\s+week|last\s+month)\b/i.test(lower)) return true;
+  // Weeks or months ago (definitely old)
+  if (/\b(?:[1-9]\d*)\s*(?:weeks?|months?|yrs?|years?)\s*ago\b/i.test(lower)) return true;
+  if (/\b(?:last\s+month)\b/i.test(lower)) return true;
+
+  // Days ago check (allow up to 3 days ago)
+  const dayMatch = lower.match(/\b(\d+)\s*(?:days?|d)\s*ago\b/i);
+  if (dayMatch) {
+    const days = parseInt(dayMatch[1], 10);
+    if (!isNaN(days) && days > Math.ceil(maxHours / 24)) return true;
+  }
 
   // Hours ago (e.g. "13 hours ago", "18h ago")
   const hourMatch = lower.match(/\b(\d+)\s*(?:hours?|hrs?|h)\s*ago\b/i);
   if (hourMatch) {
     const hours = parseInt(hourMatch[1], 10);
-    if (!isNaN(hours) && hours > 12) return true;
+    if (!isNaN(hours) && hours > maxHours) return true;
   }
 
   // Absolute date string
   const parsedDate = new Date(text);
   if (!isNaN(parsedDate.getTime())) {
     const ageMs = Date.now() - parsedDate.getTime();
-    if (ageMs > 12 * 60 * 60 * 1000) return true;
+    if (ageMs > maxHours * 60 * 60 * 1000) return true;
   }
 
   return false;
@@ -97,14 +104,14 @@ function normalizeHrName(name) {
 async function scrapeJobsFree(query, location = 'India', excludeCompanies = []) {
   const jobs = [];
   
-  // Search jobs via Tavily if available
+  // Search jobs via Tavily if available (searches LinkedIn, Naukri, Indeed)
   if (process.env.TAVILY_API_KEY) {
     try {
       const tavilyRes = await axios.post('https://api.tavily.com/search', {
         api_key: process.env.TAVILY_API_KEY,
-        query: `site:linkedin.com/jobs/view "${query}" "${location}"`,
-        max_results: 10
-      }, { timeout: 8000 });
+        query: `(site:linkedin.com/jobs/view OR site:naukri.com/job-listings OR site:indeed.com/viewjob) "${query}" "${location}"`,
+        max_results: 15
+      }, { timeout: 9000 });
       recordApiUsage({ service: 'Tavily', action: 'Job Search', creditsUsed: 1, status: 'success' });
 
       const results = tavilyRes.data?.results || [];
@@ -130,13 +137,18 @@ async function scrapeJobsFree(query, location = 'India', excludeCompanies = []) 
           continue;
         }
 
+        let source = 'Other';
+        if (url.includes('linkedin.com')) source = 'LinkedIn';
+        else if (url.includes('indeed.com')) source = 'Indeed';
+        else if (url.includes('naukri.com')) source = 'Naukri';
+
         jobs.push({
-          company,
+          company: (company && !isInvalidCompany(company)) ? company : 'Tech Company',
           role,
           jd: descSnippet,
           applyLink: url,
           location: location,
-          source: url.includes('linkedin.com') ? 'LinkedIn' : 'Other',
+          source,
           experienceLevel: detectExperienceLevel(role, descSnippet),
           publishedAt: new Date()
         });
@@ -269,6 +281,65 @@ async function scrapeJobsFree(query, location = 'India', excludeCompanies = []) 
         break;
       }
       console.warn(`[Scraper] Error searching ${q}:`, err.message);
+    }
+  }
+
+  // Tier 3: Gemini Search Grounding fallback if fewer than 5 jobs found
+  if (jobs.length < 5 && process.env.GEMINI_API_KEY) {
+    try {
+      console.log(`[Scraper] Discovering jobs via Gemini Google Search Grounding for "${query}" in ${location}...`);
+      const gemini = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const prompt = `Search Google for 8 active job openings for "${query}" in ${location}.
+Return a valid JSON array of objects:
+[
+  {
+    "company": "Company Name",
+    "role": "Job Title",
+    "jd": "Brief job description or requirements",
+    "applyLink": "Direct job apply URL",
+    "location": "${location}",
+    "source": "LinkedIn"
+  }
+]
+Return ONLY valid JSON array.`;
+
+      const geminiPromise = gemini.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+        config: { tools: [{ googleSearch: {} }] }
+      });
+      const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), 18000));
+      const response = await Promise.race([geminiPromise, timeoutPromise]);
+
+      if (response && response.text) {
+        let text = response.text || '';
+        const match = text.match(/```(?:json)?([\s\S]*?)```/);
+        if (match) text = match[1].trim();
+        const jsonMatch = text.match(/\[\s*\{[\s\S]*\}\s*\]/);
+        if (jsonMatch) text = jsonMatch[0];
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) {
+            if (item.company && item.role && item.applyLink) {
+              const compKey = normalizeCompanyKey(item.company);
+              if (compKey && excludeCompanies.some(ex => ex.length > 2 && (compKey.includes(ex) || ex.includes(compKey)))) continue;
+              jobs.push({
+                company: item.company.trim(),
+                role: item.role.trim(),
+                jd: item.jd || `${item.role} opening at ${item.company}`,
+                applyLink: item.applyLink.trim(),
+                location: item.location || location,
+                source: item.applyLink.includes('linkedin.com') ? 'LinkedIn' : (item.applyLink.includes('naukri.com') ? 'Naukri' : 'Other'),
+                experienceLevel: detectExperienceLevel(item.role, item.jd || ''),
+                salary: '',
+                publishedAt: new Date()
+              });
+            }
+          }
+        }
+      }
+    } catch (geminiJobErr) {
+      console.warn('[Scraper] Gemini Job Discovery error:', geminiJobErr.message);
     }
   }
 
@@ -707,9 +778,11 @@ function discoverHRProfilesFromDirectory(query = 'software engineer', location =
   }
 
   // If ALL directory entries were previously seen or filtered, provide a fresh rotation
-  // so the user is never left with 0 HR leads
+  // with a random offset so the user is never left with 0 HR leads
   if (matches.length === 0) {
-    matches = VERIFIED_TECH_RECRUITERS_DIRECTORY.slice(0, 8);
+    const maxOffset = Math.max(0, VERIFIED_TECH_RECRUITERS_DIRECTORY.length - 8);
+    const offset = Math.floor(Math.random() * (maxOffset + 1));
+    matches = VERIFIED_TECH_RECRUITERS_DIRECTORY.slice(offset, offset + 8);
   }
 
   return matches.slice(0, 8).map(r => ({
@@ -954,23 +1027,6 @@ async function discoverHRProfiles(query = 'software engineer', location = 'India
     }
   }
 
-  // Tier 3: Gemini Google Search Grounding capped at 5s timeout
-  if (allItems.length === 0) {
-    console.log(`[Scraper] Discovering HR profiles via Gemini Google Search Grounding for "${cleanQuery}" in ${location}...`);
-    try {
-      const geminiPromise = discoverHRProfilesGemini(cleanQuery, location, existingUrls, existingNames, existingHandles);
-      const timeoutPromise = new Promise(resolve => setTimeout(() => resolve([]), 5000));
-      const geminiProfiles = await Promise.race([geminiPromise, timeoutPromise]);
-      if (geminiProfiles && geminiProfiles.length > 0) {
-        return geminiProfiles;
-      }
-    } catch (e) {
-      console.warn('[Scraper] Gemini HR discovery failed, using directory:', e.message);
-    }
-    console.log(`[Scraper] Using verified recruiter directory for "${cleanQuery}" in ${location}...`);
-    return discoverHRProfilesFromDirectory(cleanQuery, location, existingUrls, existingNames, existingHandles);
-  }
-
   // Deduplicate and filter out already known profile URLs and handles
   const uniqueItems = [];
   for (const item of allItems) {
@@ -988,12 +1044,67 @@ async function discoverHRProfiles(query = 'software engineer', location = 'India
     uniqueItems.push(item);
   }
 
+  // Tier 2: If fewer than 8 fresh items found, invoke Gemini Google Search Grounding (up to 18s timeout)
+  if (uniqueItems.length < 8 && process.env.GEMINI_API_KEY) {
+    console.log(`[Scraper] Discovering HR profiles via Gemini Google Search Grounding for "${cleanQuery}" in ${location}...`);
+    try {
+      const geminiPromise = discoverHRProfilesGemini(cleanQuery, location, Array.from(seenUrls), Array.from(seenNames), Array.from(seenHandles));
+      const timeoutPromise = new Promise(resolve => setTimeout(() => resolve([]), 18000));
+      const geminiProfiles = await Promise.race([geminiPromise, timeoutPromise]);
+      if (geminiProfiles && geminiProfiles.length > 0) {
+        for (const gp of geminiProfiles) {
+          const normName = normalizeHrName(gp.name);
+          const handle = extractLinkedInHandle(gp.link);
+          if (normName && seenNames.has(normName)) continue;
+          if (handle && seenHandles.has(handle)) continue;
+          if (normName) seenNames.add(normName);
+          if (handle) seenHandles.add(handle);
+          uniqueItems.push({
+            title: `${gp.name} - ${gp.role} - ${gp.company}`,
+            link: gp.link,
+            snippet: gp.snippet,
+            name: gp.name,
+            role: gp.role,
+            company: gp.company
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('[Scraper] Gemini HR discovery failed, will use directory fallback:', e.message);
+    }
+  }
+
+  // Tier 3: If still fewer than 6 leads, supplement from verified tech recruiters directory
+  if (uniqueItems.length < 6) {
+    console.log(`[Scraper] Supplementing with verified recruiter directory for "${cleanQuery}" in ${location}...`);
+    const dirProfiles = discoverHRProfilesFromDirectory(cleanQuery, location, Array.from(seenUrls), Array.from(seenNames), Array.from(seenHandles));
+    for (const dp of dirProfiles) {
+      const normName = normalizeHrName(dp.name);
+      const handle = extractLinkedInHandle(dp.link);
+      if (normName && seenNames.has(normName)) continue;
+      if (handle && seenHandles.has(handle)) continue;
+      if (normName) seenNames.add(normName);
+      if (handle) seenHandles.add(handle);
+      uniqueItems.push({
+        title: `${dp.name} - ${dp.role} - ${dp.company}`,
+        link: dp.link,
+        snippet: dp.snippet,
+        name: dp.name,
+        role: dp.role,
+        company: dp.company
+      });
+    }
+  }
+
   if (uniqueItems.length === 0) {
     return discoverHRProfilesFromDirectory(cleanQuery, location, existingUrls, existingNames, existingHandles);
   }
 
   // Parse candidate profiles using regex
-  const candidates = uniqueItems.map(parseHRItem).filter(c => {
+  const candidates = uniqueItems.map(item => {
+    if (item.name && item.role) return item;
+    return parseHRItem(item);
+  }).filter(c => {
     const isRecruiter = /\b(recruiter|talent|hr|hiring|staffing|sourcer|people|human resources|ta\b)/i.test(c.role) ||
                         /\b(recruiter|talent|hr|hiring|staffing|sourcer|people|human resources|ta\b)/i.test(c.snippet);
     if (!isRecruiter || !c.name || c.name.length < 2) return false;

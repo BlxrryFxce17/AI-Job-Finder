@@ -430,7 +430,9 @@ export default function DesktopApp(props) {
   const [draftingIntent, setDraftingIntent] = React.useState(null);
   const [updatingJobStatus, setUpdatingJobStatus] = React.useState(false);
   const [hrFilter, setHrFilter] = React.useState('all');
-  const [hrQuery, setHrQuery] = React.useState('');
+  const [hrQuery, setHrQuery] = React.useState(() => {
+    return (fetchQueries && fetchQueries[0]) || (props.profile && props.profile.title) || '';
+  });
   const [hrLocation, setHrLocation] = React.useState(() => locationFilter || 'All India');
   const [customHrLocation, setCustomHrLocation] = React.useState('');
   const [hrLocations, setHrLocations] = React.useState(() => {
@@ -2737,7 +2739,8 @@ export default function DesktopApp(props) {
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
-                    handleScrapeHR({ query: hrQuery, locations: hrLocations, experience: experienceFilter });
+                    const q = hrQuery.trim() || (fetchQueries && fetchQueries[0]) || (props.profile && props.profile.title) || 'software developer';
+                    handleScrapeHR({ query: q, locations: hrLocations, experience: experienceFilter });
                   }}
                   style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', position: 'relative', zIndex: 30 }}
                 >

@@ -795,10 +795,17 @@ export function useAppLogic() {
       });
       const result = await r.json();
       if (result.success) {
+        if (result.jobs && Array.isArray(result.jobs) && result.jobs.length > 0) {
+          setJobs(prev => {
+            const existingIds = new Set(prev.map(j => String(j.id || j._id)));
+            const fresh = result.jobs.filter(j => !existingIds.has(String(j.id || j._id)));
+            return [...fresh, ...prev];
+          });
+        }
         const nonAll = effectiveLocations.filter(l => !['all', 'all india'].includes(l.toLowerCase()));
         const locText = nonAll.length > 0 ? ` in ${nonAll.join(', ')}` : '';
         notify(`Discovered ${result.count} new HR leads for "${effectiveQuery}"${locText}!`);
-        loadJobs();
+        await loadJobs();
       } else {
         notify(result.error || 'Failed to find HRs', 'error');
       }
