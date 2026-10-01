@@ -389,7 +389,24 @@
     }
   }
 
-  function openInGmailDraft() {
+  function formatDraftToHtml(text) {
+    if (!text) return '';
+    let html = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
+    // Convert markdown links [Label](url) into styled clickable HTML anchors
+    html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/gi, (m, label, url) => {
+      const cleanUrl = url.trim();
+      const cleanLabel = label.trim();
+      return `<a href="${cleanUrl}" target="_blank" style="color: #1155cc; text-decoration: underline; font-weight: 500;">${cleanLabel}</a>`;
+    });
+
+    return html.replace(/\n/g, '<br/>');
+  }
+
+  async function openInGmailDraft() {
     const emailInp = document.getElementById('ai-recruiter-email');
     const subjectInp = document.getElementById('ai-outreach-subject');
     const bodyTa = document.getElementById('ai-outreach-body');
@@ -398,17 +415,38 @@
     const su = (subjectInp?.value || '').trim();
     const body = (bodyTa?.value || '').trim();
 
+    // Auto-copy rich HTML to clipboard so user can also Ctrl+V directly if preferred
+    try {
+      const htmlBody = formatDraftToHtml(body);
+      const blobHtml = new Blob([htmlBody], { type: 'text/html' });
+      const blobText = new Blob([body], { type: 'text/plain' });
+      await navigator.clipboard.write([
+        new ClipboardItem({ 'text/html': blobHtml, 'text/plain': blobText })
+      ]);
+    } catch (_) {}
+
     const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${encodeURIComponent(su)}&body=${encodeURIComponent(body)}`;
     window.open(gmailUrl, '_blank');
-    showToast('✉️ Opening Gmail draft in new tab...', 'info');
+    showToast('✉️ Opening Gmail draft... (Hyperlinks auto-formatted)', 'info');
   }
 
-  function copyOutreachEmail() {
+  async function copyOutreachEmail() {
     const su = (document.getElementById('ai-outreach-subject')?.value || '').trim();
     const body = (document.getElementById('ai-outreach-body')?.value || '').trim();
-    const text = `Subject: ${su}\n\n${body}`;
-    navigator.clipboard.writeText(text);
-    showToast('📋 Outreach message copied to clipboard!', 'success');
+    const plainText = `Subject: ${su}\n\n${body}`;
+
+    try {
+      const htmlBody = `<div><strong>Subject: ${su}</strong><br/><br/>${formatDraftToHtml(body)}</div>`;
+      const blobHtml = new Blob([htmlBody], { type: 'text/html' });
+      const blobText = new Blob([plainText], { type: 'text/plain' });
+      await navigator.clipboard.write([
+        new ClipboardItem({ 'text/html': blobHtml, 'text/plain': blobText })
+      ]);
+      showToast('📋 Copied with clickable hyperlinks (LinkedIn, GitHub, Portfolio)!', 'success');
+    } catch (e) {
+      navigator.clipboard.writeText(plainText);
+      showToast('📋 Outreach message copied to clipboard!', 'success');
+    }
   }
 
   // ── Cover Letter Methods ───────────────────────────────────────────────────

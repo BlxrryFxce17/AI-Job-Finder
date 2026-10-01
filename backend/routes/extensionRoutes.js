@@ -1204,14 +1204,17 @@ router.post('/draft-email', async (req, res) => {
     const signOffBlock = buildExtensionSignOff(profile, candidateName);
 
     let personaEmphasis = '';
-    if (persona === 'backend') {
-      personaEmphasis = 'Emphasize backend architecture, ACID transaction integrity in SQL/PostgreSQL, distributed worker queues, and resilient REST/gRPC microservices.';
-    } else if (persona === 'frontend') {
-      personaEmphasis = 'Emphasize modern React, Next.js, responsive UX architecture, state optimization, and polished component systems.';
-    } else if (persona === 'mobile') {
-      personaEmphasis = 'Emphasize mobile development, Flutter/Dart, offline-first architectures with Hive, and on-device ML / OCR parsing.';
+    const lowerRole = targetRole.toLowerCase();
+    if (lowerRole.includes('devops') || lowerRole.includes('sre') || lowerRole.includes('cloud') || lowerRole.includes('infrastructure') || lowerRole.includes('platform') || lowerRole.includes('reliability')) {
+      personaEmphasis = 'DevOps / Infrastructure Engineering: Focus on CI/CD pipelines, Docker containerization, cloud deployment automation (AWS/GCP/Linux), shell/Python scripting, and zero-downtime reliability.';
+    } else if (persona === 'backend' || lowerRole.includes('backend')) {
+      personaEmphasis = 'Backend Engineering: Focus on high-throughput REST APIs, database persistence/indexing (SQL/PostgreSQL/MongoDB), caching, and resilient error recovery.';
+    } else if (persona === 'frontend' || lowerRole.includes('frontend') || lowerRole.includes('ui')) {
+      personaEmphasis = 'Frontend Engineering: Focus on modern React, Next.js, responsive component architecture, client-side state optimization, and polished UX.';
+    } else if (persona === 'mobile' || lowerRole.includes('mobile') || lowerRole.includes('flutter') || lowerRole.includes('android') || lowerRole.includes('ios')) {
+      personaEmphasis = 'Mobile Engineering: Focus on cross-platform Flutter/Dart or native development, offline-first data caching, and clean mobile UX performance.';
     } else {
-      personaEmphasis = 'Emphasize full-stack engineering, type safety with TypeScript, Node.js asynchronous pipelines, and scalable database design.';
+      personaEmphasis = 'Full-Stack Software Engineering: Focus on full-lifecycle development across React/TypeScript frontend, robust Node.js backend services, and reliable database persistence.';
     }
 
     let outreachProjectsList = '';
@@ -1225,34 +1228,34 @@ router.post('/draft-email', async (req, res) => {
       ).join('\n');
     } else {
       const pSkills = (profile.skills || ['TypeScript', 'Node.js', 'React', 'PostgreSQL']).slice(0, 4).join(', ');
-      outreachProjectsList = `  * Scalable Full-Stack Applications (${pSkills})
-  * Resilient Backend Architecture (REST APIs, asynchronous queues, ACID relational data integrity)`;
+      outreachProjectsList = `  * Scalable Applications & Automation Tools (${pSkills})
+  * Resilient Production Architectures (CI/CD, REST APIs, database persistence, asynchronous workflows)`;
     }
 
-    const prompt = `You are elite software engineer ${candidateName} drafting a concise, high-impact cold outreach email directly to the engineering hiring team at ${targetCompany} regarding the ${targetRole} opening.
-Role Persona Focus: ${personaEmphasis}
+    const prompt = `You are a talented software engineer named ${candidateName} writing a direct, high-impact cold email to the engineering team at ${targetCompany} for the "${targetRole}" opening.
+Discipline Focus: ${personaEmphasis}
 
-Job Description Context:
+Target Job Context:
 ${(jobDescription || '').slice(0, 1500)}
 
-Candidate Projects & Skills:
-- Top Skills: ${(profile.skills || ['TypeScript', 'Node.js', 'React', 'PostgreSQL']).slice(0, 8).join(', ')}
-- Projects & Experience:
+Candidate's Background & Projects:
+- Top Skills: ${(profile.skills || ['TypeScript', 'Node.js', 'React', 'PostgreSQL', 'Docker', 'Python']).slice(0, 8).join(', ')}
+- Verified Projects/Experience:
 ${outreachProjectsList}
 
-CRITICAL RULES (ABSOLUTELY NO AI SLOP):
-1. WRITE LIKE A REAL HUMAN DEVELOPER: Speak directly, naturally, and conversationally. No stiff formalities, no empty corporate praise ("I hope this finds you well", "I was thrilled to see", "passion for innovation", "perfect fit").
-2. STRICTLY NO BULLET POINTS: Do NOT use "*", "•", "-", or numbered lists. Real engineers reaching out write in short, natural paragraphs.
-3. CONCISE LENGTH: Strictly 85 to 125 words total.
-4. CONTENT FLOW:
-   - Greeting: Hi ${targetCompany} Team, (NEVER use a job portal or job board name).
-   - Paragraph 1: Mention you saw their opening for ${targetRole} at ${targetCompany} and wanted to reach out directly. State 2-3 technologies you regularly work with that match what they need.
-   - Paragraph 2: In 2 natural sentences, briefly mention a real project or system you built—explain what you did in plain, honest terms (e.g. built responsive interfaces, designed clean REST endpoints, handled database persistence).
-   - Closing: "I've attached my resume and would love to chat if my background looks like a fit for what you're building."
-   - Sign-off:
+GUIDELINES FOR A REAL, COMPELLING HUMAN EMAIL (ZERO AI SLOP):
+1. SOUND LIKE A SHARP, EAGER DEVELOPER:
+   - Talk directly to the technical team with genuine energy and clarity.
+   - NO stiff robotic phrases ("I am writing to express my interest", "which aligns well with the layers you are likely using", "my passion for your innovative company", "I am a perfect fit").
+2. CONCISE & PUNCHY (80 to 120 words total):
+   - Paragraph 1 (The Hook): Say you noticed the ${targetRole} role at ${targetCompany} and wanted to reach out directly. State the 2-3 core technologies or tools you actively build with that directly tackle what this role demands.
+   - Paragraph 2 (The Proof): Highlight a specific, tangible project or architecture you built (referencing your projects above). Explain in clear, technical terms what problem you solved (e.g. automated deployment pipelines, asynchronous data scraping, robust DB persistence, or reactive UI state).
+   - Paragraph 3 (The Low-Friction Call-to-Action): "I've attached my resume and would welcome a quick 10-minute chat if my background looks like a match for what you're building."
+3. STRICTLY NO BULLET POINTS: Write in 2-3 clean, readable paragraphs.
+4. SIGN-OFF BLOCK:
 ${signOffBlock}
 
-5. Output in this exact format:
+Output format:
 SUBJECT: Application for ${targetRole} - ${candidateName}
 BODY:
 Hi ${targetCompany} Team,

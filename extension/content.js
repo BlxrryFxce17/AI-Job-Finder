@@ -195,6 +195,31 @@
     if (checks > 6) clearInterval(pollTimer);
   }, 1000);
 
+  // ── 7. Gmail Compose Markdown Link Auto-Converter ──────────────────────────
+  if (window.location.hostname === 'mail.google.com') {
+    function formatGmailComposeMarkdownLinks() {
+      const composeBoxes = document.querySelectorAll('div[aria-label*="Message Body"], div[role="textbox"][contenteditable="true"]');
+      composeBoxes.forEach(box => {
+        if (!box) return;
+        const html = box.innerHTML;
+        // Check if box contains markdown links e.g. [LinkedIn](url) | [GitHub](url) | [Portfolio](url)
+        if (/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/i.test(html)) {
+          const enhancedHtml = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/gi, (m, label, url) => {
+            const cleanUrl = url.trim();
+            const cleanLabel = label.trim();
+            return `<a href="${cleanUrl}" target="_blank" style="color: #1155cc; text-decoration: underline; font-weight: 500;">${cleanLabel}</a>`;
+          });
+          box.innerHTML = enhancedHtml;
+          box.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      });
+    }
+
+    const gmailObserver = new MutationObserver(() => formatGmailComposeMarkdownLinks());
+    gmailObserver.observe(document.body || document.documentElement, { childList: true, subtree: true });
+    setInterval(formatGmailComposeMarkdownLinks, 1000);
+  }
+
   window.scheduleAudit = scheduleAudit;
   window.AiCopilot = window.AiCopilot || {};
   window.AiCopilot.scheduleAudit = scheduleAudit;
