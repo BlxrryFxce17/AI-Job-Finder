@@ -71,6 +71,24 @@
       subjectInp.value = `Application: ${job.role || 'Software Engineer'} – ${cName}`;
     }
 
+    // Auto-attach detected email from page if present
+    const emailInp = document.getElementById('ai-recruiter-email');
+    const hint = document.getElementById('ai-email-hint');
+    const badge = document.getElementById('ai-email-source-badge');
+    if (emailInp && !emailInp.value && job.email) {
+      emailInp.value = job.email;
+      if (badge) {
+        badge.style.display = 'inline-block';
+        badge.textContent = 'Found on Page';
+        badge.style.background = 'rgba(16, 185, 129, 0.2)';
+        badge.style.color = '#34d399';
+      }
+      if (hint) {
+        hint.textContent = `✓ Auto-attached contact email directly from this page: ${job.email}`;
+        hint.style.color = '#34d399';
+      }
+    }
+
     // Auto-analyze once if not analyzed yet
     if (!currentAtsScoreData) {
       analyzeAtsMatch();
@@ -195,6 +213,24 @@
     const badge = document.getElementById('ai-email-source-badge');
 
     const job = extractJobDetails();
+
+    // Prioritize direct email found on the current job page
+    if (job.email) {
+      if (input) input.value = job.email;
+      if (badge) {
+        badge.style.display = 'inline-block';
+        badge.textContent = 'Found on Page';
+        badge.style.background = 'rgba(16, 185, 129, 0.2)';
+        badge.style.color = '#34d399';
+      }
+      if (hint) {
+        hint.textContent = `✓ Auto-attached contact email directly from this job posting: ${job.email}`;
+        hint.style.color = '#34d399';
+      }
+      showToast(`✓ Attached email from page: ${job.email}`, 'success');
+      return;
+    }
+
     if (btn) {
       btn.disabled = true;
       btn.innerHTML = '<span>⏳</span><span>Finding...</span>';
@@ -246,6 +282,24 @@
     const job = extractJobDetails();
     const persona = await getActivePersona();
     const candidateName = cachedProfile?.name || cachedProfile?.firstName || 'Candidate';
+
+    // Auto-attach page email to input if not already populated
+    const emailInp = document.getElementById('ai-recruiter-email');
+    if (emailInp && !emailInp.value && job.email) {
+      emailInp.value = job.email;
+      const badge = document.getElementById('ai-email-source-badge');
+      const hint = document.getElementById('ai-email-hint');
+      if (badge) {
+        badge.style.display = 'inline-block';
+        badge.textContent = 'Found on Page';
+        badge.style.background = 'rgba(16, 185, 129, 0.2)';
+        badge.style.color = '#34d399';
+      }
+      if (hint) {
+        hint.textContent = `✓ Auto-attached contact email from page: ${job.email}`;
+        hint.style.color = '#34d399';
+      }
+    }
 
     if (btn) {
       btn.disabled = true;

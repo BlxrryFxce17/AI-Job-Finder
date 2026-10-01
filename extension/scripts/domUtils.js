@@ -954,24 +954,74 @@
       company = '';
     }
 
-    let location = '';
-    const locElem = document.querySelector('[data-automation-id*="location" i], .job-location, .posting-categories, .location, [class*="location" i]');
-    if (locElem) {
-      location = locElem.textContent.trim();
-    } else if (isGoogleForm()) {
-      const formSubtitle = document.querySelector('.cBGGJ, .freebirdFormviewerViewHeaderDescription, .m7sMe');
-      if (formSubtitle) {
-        const text = formSubtitle.innerText || '';
-        const m = text.match(/\b(remote\s+[a-z]+|remote\s+india|remote|india|united states|usa|hybrid|on-site|bangalore|bengaluru|mumbai|delhi|pune|hyderabad|chennai)\b/i);
-        if (m) location = m[0].trim();
+    const EMAIL_BLACKLIST = [
+      'support@firstoffer.online', 'help@wellfound.com', 'support@linkedin.com',
+      'support@indeed.com', 'help@naukri.com', 'feedback@', 'privacy@',
+      'legal@', 'abuse@', 'security@', 'postmaster@', 'noreply@', 'no-reply@',
+      'donotreply@', 'example@', 'domain@', 'test@', 'user@', 'yourname@',
+      'email@', 'name@', 'sentry.io', 'w3.org', 'schema.org', 'github.com',
+      'google.com', 'cloudflare.com', 'wixpress.com'
+    ];
+
+    function isValidJobEmail(emailStr) {
+      if (!emailStr || typeof emailStr !== 'string') return false;
+      const clean = emailStr.toLowerCase().trim().replace(/[.,;!?)]+$/, '');
+      if (!/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(clean)) return false;
+      if (clean.length < 6 || clean.length > 70) return false;
+      for (const b of EMAIL_BLACKLIST) {
+        if (b.endsWith('@') ? clean.startsWith(b) : clean.includes(b)) return false;
       }
+      return true;
     }
+
+    function extractEmailFromPage(desc = '') {
+      // 1. Mailto links on page
+      const mailtoLinks = Array.from(document.querySelectorAll('a[href^="mailto:"]'));
+      for (const a of mailtoLinks) {
+        const raw = (a.getAttribute('href') || '').replace(/^mailto:/i, '').split('?')[0].trim();
+        if (isValidJobEmail(raw)) return raw.toLowerCase();
+      }
+
+      // 2. High-priority contextual regex ("send resume to ...", "apply at ...", "contact: ...")
+      const priorityRegex = /(?:send|email|forward|share|submit|reach|contact|write|apply|mail)(?:\s+[\w\s]{0,25})?\s*(?:to|at|via)?\s*[:\-]?\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/gi;
+      let match;
+      const textSources = [desc, document.body?.innerText || ''];
+      for (const text of textSources) {
+        if (!text) continue;
+        while ((match = priorityRegex.exec(text)) !== null) {
+          if (isValidJobEmail(match[1])) return match[1].toLowerCase().replace(/[.,;!?)]+$/, '');
+        }
+      }
+
+      // 3. Scan the description for any valid email
+      if (desc) {
+        const anyEmailRegex = /\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/g;
+        while ((match = anyEmailRegex.exec(desc)) !== null) {
+          if (isValidJobEmail(match[0])) return match[0].toLowerCase().replace(/[.,;!?)]+$/, '');
+        }
+      }
+
+      // 4. Scan main job container
+      const container = document.querySelector('[class*="job-description" i], [class*="job-details" i], [class*="posting" i], main, article, #content, .content');
+      if (container) {
+        const anyEmailRegex = /\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/g;
+        const cText = container.innerText || '';
+        while ((match = anyEmailRegex.exec(cText)) !== null) {
+          if (isValidJobEmail(match[0])) return match[0].toLowerCase().replace(/[.,;!?)]+$/, '');
+        }
+      }
+
+      return '';
+    }
+
+    const pageEmail = extractEmailFromPage(description);
 
     return {
       company: (company || 'Company').trim(),
       role: (role || 'Software Engineer').trim(),
       description: (description || '').trim(),
-      location: (location || '').trim()
+      location: (location || '').trim(),
+      email: pageEmail
     };
   }
 
