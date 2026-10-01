@@ -7,7 +7,15 @@ const Profile = require('../models/Profile');
 const User = require('../models/User');
 const Job = require('../models/Job');
 const { callAIWithRetry } = require('../utils/ai');
-const { resolveCompanyDomain, discoverEmailForJob, sendEmailViaAPI } = require('../utils/email');
+const {
+  resolveCompanyDomain,
+  discoverEmailForJob,
+  sendEmailViaAPI,
+  formatEmailTextToHtml,
+  cleanDraftEmailText,
+  stripSignOff,
+  getEffectivePortfolio
+} = require('../utils/email');
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -1123,9 +1131,77 @@ router.post('/draft-email', async (req, res) => {
     if (!profile) profile = await Profile.findOne().sort({ updatedAt: -1 });
     if (!profile) return res.status(404).json({ error: 'Profile not found. Please sync profile in extension.' });
 
-    const targetCompany = company || 'your company';
-    const targetRole = role || 'Software Engineer';
+    // Job Portal Blacklist for backend sanitization
+    const BACKEND_PORTAL_BLACKLIST = [
+      'firstoffer', 'firstoffer.online', 'first offer',
+      'wellfound', 'angellist', 'angel list',
+      'y combinator', 'work at a startup', 'yc',
+      'linkedin', 'indeed', 'glassdoor',
+      'naukri', 'naukri.com', 'foundit', 'monster',
+      'cutshort', 'instahyre', 'hirist', 'shine', 'freshersworld',
+      'hiringcafe', 'otta', 'built in', 'builtin',
+      'internshala', 'unstop', 'cuvette', 'techfetch', 'dice',
+      'ziprecruiter', 'google jobs', 'remoteok', 'weworkremotely',
+      'jobicy', 'simplyhired', 'careerbuilder', 'join.com',
+      'breezy', 'greenhouse', 'lever', 'workday', 'ashby',
+      'smartrecruiters', 'workable', 'recruitee', 'jobvite', 'bamboohr'
+    ];
+
+    function isBackendPortalName(name) {
+      if (!name || typeof name !== 'string') return true;
+      const clean = name.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (!clean || clean.length < 2 || clean === 'company' || clean === 'unknown') return true;
+      for (const p of BACKEND_PORTAL_BLACKLIST) {
+        const pClean = p.replace(/[^a-z0-9]/g, '');
+        if (clean === pClean || (clean.length <= pClean.length + 3 && pClean.length <= clean.length + 3 && clean.includes(pClean))) return true;
+      }
+      return false;
+    }
+
+    function buildExtensionSignOff(p, candName) {
+      const name = candName || p?.name || 'Akash V';
+      const phone = (p?.phone || '').trim();
+      const baseUrl = (process.env.PUBLIC_URL || 'https://ai-job-finder-7dr8.onrender.com').replace(/\/+$/, '');
+      const clickId = Date.now().toString() + Math.random().toString().substring(2, 6);
+
+      const trackClick = (url) => {
+        if (!url) return '';
+        const clean = url.trim();
+        return baseUrl ? `${baseUrl}/api/track-click/${clickId}?url=${encodeURIComponent(clean)}` : clean;
+      };
+
+      const links = [];
+      if (p?.linkedin) {
+        links.push(`[LinkedIn](${trackClick(p.linkedin)})`);
+      }
+      if (p?.github) {
+        links.push(`[GitHub](${trackClick(p.github)})`);
+      }
+      const portfolioUrl = getEffectivePortfolio(p);
+      if (portfolioUrl) {
+        links.push(`[Portfolio](${trackClick(portfolioUrl)})`);
+      }
+
+      const lines = ['Best,', name];
+      if (phone) lines.push(phone);
+      if (links.length > 0) lines.push(links.join(' | '));
+
+      return lines.join('\n');
+    }
+
+    let targetCompany = (company || '').trim();
+    if (isBackendPortalName(targetCompany)) {
+      const jdMatch = (jobDescription || '').match(/(?:at|@)\s+([A-Z][A-Za-z0-9\s&.,'-]{1,35}?)(?:\s*[·•–—|-]|\s*[,.\n]|\s*$)/);
+      if (jdMatch && !isBackendPortalName(jdMatch[1])) {
+        targetCompany = jdMatch[1].trim();
+      } else {
+        targetCompany = 'the engineering team';
+      }
+    }
+
+    const targetRole = (role || 'Software Engineer').trim();
     const candidateName = profile.name || 'Candidate';
+    const signOffBlock = buildExtensionSignOff(profile, candidateName);
 
     let personaEmphasis = '';
     if (persona === 'backend') {
@@ -1164,18 +1240,26 @@ Candidate Projects & Skills:
 - Projects & Experience:
 ${outreachProjectsList}
 
-CRITICAL RULES:
-1. STRICTLY 110 to 150 words total. Hiring leads spend 5 seconds scanning.
-2. Direct technical hook in the very first sentence referencing the ${targetRole} role and company's engineering challenge.
-3. 2 concise bullet points highlighting concrete mechanisms (e.g. atomic database transactions, async queues, on-device parsing) from the candidate's actual background. No fake metric percentages.
-4. Confident, direct tone. No corporate fluff ("I hope this finds you well", "I was thrilled to see", "passion").
-5. Clean wrap-up: "I have attached my CV and would welcome the opportunity to discuss how my engineering background maps to ${targetCompany}'s goals."
-6. Output in this exact format:
+CRITICAL RULES (ABSOLUTELY NO AI SLOP):
+1. WRITE LIKE A REAL HUMAN DEVELOPER: Speak directly, naturally, and conversationally. No stiff formalities, no empty corporate praise ("I hope this finds you well", "I was thrilled to see", "passion for innovation", "perfect fit").
+2. STRICTLY NO BULLET POINTS: Do NOT use "*", "•", "-", or numbered lists. Real engineers reaching out write in short, natural paragraphs.
+3. CONCISE LENGTH: Strictly 85 to 125 words total.
+4. CONTENT FLOW:
+   - Greeting: Hi ${targetCompany} Team, (NEVER use a job portal or job board name).
+   - Paragraph 1: Mention you saw their opening for ${targetRole} at ${targetCompany} and wanted to reach out directly. State 2-3 technologies you regularly work with that match what they need.
+   - Paragraph 2: In 2 natural sentences, briefly mention a real project or system you built—explain what you did in plain, honest terms (e.g. built responsive interfaces, designed clean REST endpoints, handled database persistence).
+   - Closing: "I've attached my resume and would love to chat if my background looks like a fit for what you're building."
+   - Sign-off:
+${signOffBlock}
+
+5. Output in this exact format:
 SUBJECT: Application for ${targetRole} - ${candidateName}
 BODY:
-Hi ${targetCompany} Engineering Team,
+Hi ${targetCompany} Team,
 
-[Email body here]`;
+[Email body here]
+
+${signOffBlock}`;
 
     let subject = `Application for ${targetRole} - ${candidateName}`;
     let body = '';
@@ -1192,11 +1276,14 @@ Hi ${targetCompany} Engineering Team,
       console.warn('[Extension API] AI draft error:', err.message);
     }
 
-    if (!body) {
+    if (body) {
+      const cleanBody = stripSignOff(cleanDraftEmailText(body, profile, targetCompany, targetRole, { preserveMarkdownLinks: true }), profile);
+      body = `${cleanBody}\n\n${signOffBlock}`;
+    } else {
       const s1 = profile.skills?.[0] || 'TypeScript';
       const s2 = profile.skills?.[1] || 'Node.js';
       const s3 = profile.skills?.[2] || 'React';
-      body = `Hi ${targetCompany} Engineering Team,\n\nI noticed your opening for ${targetRole}. As an engineer specializing in resilient full-stack architectures and high-throughput asynchronous systems using ${s1}, ${s2}, and ${s3}, I wanted to introduce my background.\n\n• Engineered scalable web and distributed services with asynchronous worker pipelines, clean API contracts, and defensive error handling.\n• Architected modular, performant user interfaces and transactional data stores with strict type safety and relational data integrity.\n\nI have attached my CV and would welcome the opportunity to discuss how my engineering background maps to ${targetCompany}'s technical roadmap.\n\nBest regards,\n${candidateName}`;
+      body = `Hi ${targetCompany} Team,\n\nI saw the opening for the ${targetRole} position and wanted to reach out directly. I've been actively developing full-stack web applications using ${s1}, ${s2}, and ${s3}, with a focus on building clean REST APIs and responsive user interfaces.\n\nRecently, I built and deployed full-stack projects handling real-time state, backend database persistence, and robust error handling. I'd love to bring this hands-on engineering mindset to ${targetCompany}.\n\nI've attached my resume and would love to chat if my background sounds like a fit for your team.\n\n${signOffBlock}`;
     }
 
     res.json({
@@ -1245,7 +1332,7 @@ router.post('/send-outreach-email', async (req, res) => {
       subject: subject.trim(),
       text: body.trim(),
       html: `<div style="font-family: Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #1e293b;">
-        ${body.replace(/\n/g, '<br/>')}
+        ${formatEmailTextToHtml(body.trim())}
       </div>`,
       attachments: []
     };
@@ -1305,7 +1392,15 @@ router.post('/generate-cover-letter', async (req, res) => {
     if (!profile && req.body.profile) profile = req.body.profile;
     if (!profile) profile = await Profile.findOne().sort({ updatedAt: -1 });
 
-    const targetCompany = company || 'Hiring Company';
+    let targetCompany = (company || '').trim();
+    if (isBackendPortalName(targetCompany)) {
+      const jdMatch = (jobDescription || '').match(/(?:at|@)\s+([A-Z][A-Za-z0-9\s&.,'-]{1,35}?)(?:\s*[·•–—|-]|\s*[,.\n]|\s*$)/);
+      if (jdMatch && !isBackendPortalName(jdMatch[1])) {
+        targetCompany = jdMatch[1].trim();
+      } else {
+        targetCompany = 'the engineering team';
+      }
+    }
     const targetRole = role || 'Software Engineer';
     const candidateName = req.body.candidateName || profile?.name || 'Akash V.';
     const candidateEmail = profile?.email || req.body.candidateEmail || '';
@@ -1386,23 +1481,23 @@ MANDATORY INSTRUCTIONS FOR RELEVANCE & UNIQUENESS:
       const isFrontend = roleFocus.includes('Frontend');
       const isBackend = roleFocus.includes('Backend');
       if (isFrontend) {
-        coverLetter = `I am writing to express my strong enthusiasm for the ${targetRole} position at ${targetCompany}. With hands-on experience building performant client-side architectures, modular component systems, and responsive web interfaces using TypeScript, React, and modern CSS, I am drawn to ${targetCompany}'s commitment to engineering excellence. I thrive at the intersection of intuitive UI engineering and robust state synchronization, and I am eager to contribute immediately to your product deliverables.
+        coverLetter = `I am applying for the ${targetRole} position at ${targetCompany}. With hands-on experience building performant client-side architectures, modular component systems, and responsive web interfaces using TypeScript and React, I am really excited about what ${targetCompany} is building.
 
-Throughout my engineering work, I have focused on solving real-world frontend and client-side challenges. In developing modern web applications, I have architected reactive interfaces featuring real-time DOM mutation handling, dynamic component composition, and live multi-step state synchronization without UI latency. Additionally, I prioritize accessible, mobile-first design and comprehensive error boundaries to ensure reliable performance across varied devices and network constraints. These experiences have instilled in me a deep commitment to web performance, accessible component architecture, and predictable client state.
+In my recent engineering projects, I have focused on solving real-world frontend challenges. I have architected reactive interfaces featuring real-time DOM updates, dynamic component composition, and smooth multi-step state management without UI latency. I prioritize accessible, mobile-first design and comprehensive error boundaries to ensure reliable performance across devices and network constraints.
 
-What excites me about ${targetCompany} is the opportunity to tackle meaningful technical challenges alongside a high-execution engineering team. My proactive approach to code quality, edge-case testing, and rapid feature iteration ensures I can make a direct, positive impact from my first sprint. I would welcome the opportunity to discuss how my frontend engineering background aligns with your team's objectives.`;
+What excites me about ${targetCompany} is the opportunity to tackle meaningful engineering challenges alongside a high-execution team. My proactive approach to code quality, edge-case testing, and rapid iteration allows me to make a direct impact from day one. I would love to discuss how my background aligns with your team's upcoming goals.`;
       } else if (isBackend) {
-        coverLetter = `I am writing to express my strong interest in the ${targetRole} position at ${targetCompany}. With hands-on experience designing high-throughput RESTful APIs, type-safe data services, and resilient distributed architectures using TypeScript, Node.js, and relational databases, I am inspired by ${targetCompany}'s technical focus. I am eager to leverage my systems background to support your team's scalability and reliability goals.
+        coverLetter = `I am applying for the ${targetRole} position at ${targetCompany}. With hands-on experience designing RESTful APIs, type-safe data services, and resilient backend systems using TypeScript, Node.js, and relational databases, I am really drawn to ${targetCompany}'s technical focus.
 
-In my software projects, I have concentrated on solving high-concurrency and data integrity challenges. I have engineered high-availability services featuring asynchronous queue orchestration, rate-limited external API integrations, and defensive data persistence across dynamic external schemas. Furthermore, I prioritize atomic database transactions, strict type contracts, and comprehensive error logging to ensure zero data loss and deterministic recovery under peak load. These experiences reinforced my commitment to predictable state transitions, clean API contracts, and defensive error boundaries.
+In my software work, I have focused on building scalable, reliable services. I have engineered high-availability endpoints with asynchronous worker queues, clean database migrations, and defensive error logging to ensure data integrity under load. These experiences reinforced my commitment to predictable state transitions, clean API contracts, and defensive boundaries.
 
-I thrive in collaborative engineering environments that value technical curiosity, proactive ownership, and pragmatic system design. I am confident that my technical skills and disciplined problem-solving mindset will allow me to contribute meaningfully to ${targetCompany}'s infrastructure from day one. I welcome the opportunity to connect and discuss how my background matches your team's needs.`;
+I thrive in collaborative environments that value technical curiosity, pragmatic system design, and continuous learning. I am confident that my problem-solving mindset will allow me to contribute meaningfully to ${targetCompany}'s infrastructure. I would welcome the opportunity to connect and discuss how my background matches your team's needs.`;
       } else {
-        coverLetter = `I am writing to express my strong enthusiasm for the ${targetRole} opportunity at ${targetCompany}. With a versatile background spanning responsive frontend interfaces, type-safe REST APIs, and asynchronous data pipelines using TypeScript, React, and Node.js, I am drawn to ${targetCompany}'s mission. I enjoy taking full ownership of features from database schemas to polished user experiences, and I am excited about the chance to contribute to your engineering team.
+        coverLetter = `I am applying for the ${targetRole} position at ${targetCompany}. With a versatile background spanning responsive frontend interfaces, clean REST APIs, and asynchronous data pipelines using TypeScript, React, and Node.js, I am excited about what ${targetCompany} is building.
 
-Across my technical initiatives, I have focused on solving real-world engineering bottlenecks across both client and server boundaries. I have built end-to-end applications pairing reactive user interfaces with asynchronous worker queues, structured relational databases, and resilient REST APIs. I emphasize end-to-end type safety, optimistic UI updates with graceful fallback states, and atomic database consistency. These projects taught me to balance rapid iteration with rigorous edge-case handling, scalable component design, and database integrity.
+Across my recent projects, I have taken ownership of features from database schemas to polished user interfaces. I build applications pairing reactive frontends with asynchronous worker queues, structured relational databases, and resilient APIs. I emphasize end-to-end type safety, optimistic UI updates, and atomic database consistency.
 
-What draws me to ${targetCompany} is your dedication to engineering excellence and building high-impact products. I bring a self-driven work ethic, high execution velocity, and a passion for continuous learning. I would love the chance to discuss how my full-stack background and technical capabilities can help advance your team's product goals.`;
+What draws me to ${targetCompany} is your team's commitment to building solid, high-impact products. I bring a self-driven work ethic, high execution velocity, and a passion for engineering fundamentals. I would love the chance to discuss how my full-stack background can help advance your team's product roadmap.`;
       }
     }
 

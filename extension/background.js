@@ -139,30 +139,30 @@ function generateAdaptiveCoverLetter(payload) {
   let p1, p2, p3;
 
   if (isFrontend) {
-    p1 = `I am writing to express my strong enthusiasm for the ${cRole} position at ${cComp}. With hands-on experience building performant client-side architectures, modular component systems, and responsive web interfaces using ${techStackPhrase}, I am drawn to ${cComp}'s mission in ${domainFocus}. I thrive at the intersection of intuitive UI engineering and robust state synchronization, and I am eager to contribute immediately to your product deliverables.`;
+    p1 = `I am applying for the ${cRole} position at ${cComp}. With hands-on experience building performant client-side architectures, modular component systems, and responsive web interfaces using ${techStackPhrase}, I am really excited about what ${cComp} is building in ${domainFocus}. I thrive building intuitive UI interfaces and responsive client state, and I am eager to contribute immediately to your product deliverables.`;
 
-    p2 = `Throughout my personal work, I have focused on solving real-world frontend and client-side engineering challenges. In developing modern web applications, I have architected reactive interfaces featuring real-time DOM mutation handling, dynamic component composition, and live multi-step state synchronization without UI latency. Additionally, I prioritize accessible design and comprehensive error boundaries to ensure reliable performance across varied devices and network constraints. These experiences have instilled in me a deep commitment to web vitals, accessible component design, and predictable client state.`;
+    p2 = `Throughout my engineering work, I have focused on solving real-world frontend and client-side challenges. In developing modern web applications, I have architected reactive interfaces featuring real-time DOM mutation handling, dynamic component composition, and smooth multi-step state management without UI latency. Additionally, I prioritize accessible design and comprehensive error boundaries to ensure reliable performance across devices and network constraints.`;
 
-    p3 = `What excites me about ${cComp} is the opportunity to tackle meaningful technical challenges alongside a high-execution engineering team. My proactive approach to code quality, defensive edge-case handling, and rapid feature iteration ensures I can make a direct, positive impact from my first sprint. I welcome the opportunity to discuss how my frontend engineering background aligns with your team's objectives.`;
+    p3 = `What excites me about ${cComp} is the opportunity to tackle meaningful technical challenges alongside a high-execution engineering team. My proactive approach to code quality, edge-case testing, and rapid feature iteration allows me to make a direct impact from day one. I would welcome the opportunity to discuss how my frontend engineering background aligns with your team's objectives.`;
   } else if (isBackend) {
-    p1 = `I am writing to express my strong interest in the ${cRole} position at ${cComp}. With hands-on experience designing high-throughput RESTful APIs, type-safe data services, and resilient distributed architectures using ${techStackPhrase}, I am inspired by ${cComp}'s work in ${domainFocus}. I am eager to leverage my systems background to support your team's scalability and reliability goals.`;
+    p1 = `I am applying for the ${cRole} position at ${cComp}. With hands-on experience designing RESTful APIs, type-safe data services, and resilient backend systems using ${techStackPhrase}, I am really drawn to ${cComp}'s work in ${domainFocus}. I am eager to leverage my systems background to support your team's scalability and reliability goals.`;
 
-    p2 = `In my engineering work, I have concentrated on solving high-concurrency and data integrity challenges. I have engineered high-availability services featuring asynchronous queue orchestration, rate-limited external API integrations, and defensive data persistence across dynamic external schemas. Furthermore, I prioritize atomic database transactions, strict type contracts, and comprehensive error logging to ensure zero data loss and deterministic recovery under peak load. These experiences reinforced my commitment to predictable state transitions, clean API contracts, and defensive error boundaries.`;
+    p2 = `In my software work, I have concentrated on solving high-concurrency and data integrity challenges. I have engineered high-availability services featuring asynchronous queue orchestration, rate-limited external API integrations, and defensive data persistence. Furthermore, I prioritize atomic database transactions, strict type contracts, and comprehensive error logging to ensure zero data loss and deterministic recovery under peak load.`;
 
-    p3 = `I thrive in collaborative engineering environments that value technical curiosity, proactive ownership, and pragmatic system design. I am confident that my technical skills and disciplined problem-solving mindset will allow me to contribute meaningfully to ${cComp}'s infrastructure from day one. I welcome the opportunity to connect and discuss how my background matches your team's needs.`;
+    p3 = `I thrive in collaborative engineering environments that value technical curiosity, proactive ownership, and pragmatic system design. I am confident that my technical skills and disciplined problem-solving mindset will allow me to contribute meaningfully to ${cComp}'s infrastructure. I would welcome the opportunity to connect and discuss how my background matches your team's needs.`;
   } else if (isMobile) {
-    p1 = `I am writing to express my strong enthusiasm for the ${cRole} position at ${cComp}. With hands-on experience designing cross-platform client applications, offline-first data synchronization, and responsive mobile interfaces using ${techStackPhrase}, I am drawn to ${cComp}'s vision in ${domainFocus}. I am eager to bring this holistic mobile perspective to your engineering team.`;
+    p1 = `I am applying for the ${cRole} position at ${cComp}. With hands-on experience designing cross-platform client applications, offline-first data synchronization, and responsive mobile interfaces using ${techStackPhrase}, I am drawn to ${cComp}'s vision in ${domainFocus}. I am eager to bring this holistic mobile perspective to your engineering team.`;
 
-    p2 = `My recent work demonstrates my focus on mobile client reliability and performance. I have built applications emphasizing offline-first local data synchronization, reactive state management, and strict memory constraint management in low-bandwidth environments. I pair this with clean background task orchestration and defensive crash analytics to ensure consistent user experience under constrained hardware conditions. These experiences honed my ability to build fluid, battery-conscious mobile interfaces that handle edge cases cleanly.`;
+    p2 = `My recent work demonstrates my focus on mobile client reliability and performance. I have built applications emphasizing offline-first local data synchronization, reactive state management, and strict memory constraint management in low-bandwidth environments. I pair this with clean background task orchestration and defensive crash analytics to ensure a consistent user experience under constrained hardware conditions.`;
 
     p3 = `I am excited by the prospect of contributing to ${cComp}'s product roadmap. I bring a strong engineering discipline, rapid adaptability, and a commitment to polished user interactions. I look forward to the opportunity to discuss how my mobile background can support your upcoming releases.`;
   } else {
     // Full-Stack / SDE
-    p1 = `I am writing to express my strong enthusiasm for the ${cRole} opportunity at ${cComp}. With a versatile background spanning responsive frontend interfaces, type-safe REST APIs, and asynchronous data pipelines using ${techStackPhrase}, I am drawn to ${cComp}'s focus on ${domainFocus}. I enjoy taking full ownership of features from database schemas to polished user experiences, and I am excited about the chance to contribute to your engineering team.`;
+    p1 = `I am applying for the ${cRole} position at ${cComp}. With a versatile background spanning responsive frontend interfaces, type-safe REST APIs, and asynchronous data pipelines using ${techStackPhrase}, I am excited about what ${cComp} is building in ${domainFocus}. I enjoy taking full ownership of features from database schemas to polished user experiences.`;
 
-    p2 = `Across my technical initiatives, I have focused on solving real-world engineering bottlenecks across both client and server boundaries. I have built end-to-end applications pairing reactive user interfaces with asynchronous worker queues, structured relational databases, and resilient REST APIs. I emphasize end-to-end type safety, optimistic UI updates with graceful fallback states, and atomic database consistency. These projects taught me to balance rapid iteration with rigorous edge-case handling, scalable component design, and database integrity.`;
+    p2 = `Across my technical initiatives, I have focused on solving real-world engineering bottlenecks across both client and server boundaries. I have built end-to-end applications pairing reactive user interfaces with asynchronous worker queues, structured relational databases, and resilient REST APIs. I emphasize end-to-end type safety, optimistic UI updates with graceful fallback states, and atomic database consistency.`;
 
-    p3 = `What draws me to ${cComp} is your dedication to engineering excellence and building high-impact products. I bring a self-driven work ethic, high execution velocity, and a passion for continuous learning. I would love the chance to discuss how my full-stack background and technical capabilities can help advance your team's product goals.`;
+    p3 = `What draws me to ${cComp} is your dedication to engineering excellence and building high-impact products. I bring a self-driven work ethic, high execution velocity, and a passion for engineering fundamentals. I would love the chance to discuss how my full-stack background and technical capabilities can help advance your team's product goals.`;
   }
 
   const letter = [p1, p2, p3].join('\n\n');
@@ -1228,25 +1228,30 @@ ${intentGuidance ? intentGuidance + '\n\n' : ''}CRITICAL RULES — READ CAREFULL
         return data;
       } catch (err) {
         // Fallback draft template if backend is busy or offline
-        const { company, role, candidateName } = payload || {};
-        const cName = candidateName || 'Candidate';
+        const { company, role, candidateName, profile } = payload || {};
+        const cName = candidateName || profile?.name || 'Candidate';
         const cComp = company || 'your engineering team';
         const cRole = role || 'Full-Stack Software Engineer';
+        const phone = (profile?.phone || '').trim();
+        const baseUrl = 'https://ai-job-finder-7dr8.onrender.com';
+        const clickId = Date.now().toString() + Math.random().toString().substring(2, 6);
+        const trackClick = (url) => url ? `${baseUrl}/api/track-click/${clickId}?url=${encodeURIComponent(url.trim())}` : '';
+
+        const links = [];
+        if (profile?.linkedin) links.push(`[LinkedIn](${trackClick(profile.linkedin)})`);
+        if (profile?.github) links.push(`[GitHub](${trackClick(profile.github)})`);
+        const portfolio = profile?.portfolio || profile?.portfolioUrl || (profile?.githubInsights?.username ? `https://${profile.githubInsights.username}.github.io` : '');
+        if (portfolio) links.push(`[Portfolio](${trackClick(portfolio)})`);
+
+        const signOffLines = ['Best,', cName];
+        if (phone) signOffLines.push(phone);
+        if (links.length > 0) signOffLines.push(links.join(' | '));
+        const signOff = signOffLines.join('\n');
+
         return {
           success: true,
           subject: `Application: ${cRole} – ${cName}`,
-          body: `Hi ${cComp} Hiring Team,
-
-I noticed your opening for ${cRole} and wanted to reach out directly.
-
-With a strong foundation in building resilient TypeScript/Node.js web platforms and full-stack asynchronous systems, I have delivered production applications handling real-world concurrency, responsive client interfaces, and robust API workflows.
-
-I would love the opportunity to discuss how my hands-on full-stack engineering skills can support ${cComp}'s upcoming engineering goals.
-
-My resume is attached for your review. Are you available for a brief conversation this week?
-
-Best regards,
-${cName}`
+          body: `Hi ${cComp} Team,\n\nI saw your opening for the ${cRole} position and wanted to reach out directly. I've been actively developing full-stack web applications with TypeScript, Node.js, and React, focusing on clean REST APIs, responsive client state, and solid database persistence.\n\nRecently, I built and deployed full-stack systems with real-time UI updates, secure data persistence, and robust error handling. I'd love to bring this hands-on engineering focus to ${cComp}.\n\nI've attached my resume and would love to chat if my background sounds like a fit for what you're building.\n\n${signOff}`
         };
       }
     }

@@ -1280,16 +1280,17 @@ function buildSignatureLinks(profile, trackClick = (url) => url) {
   return links.join(' | ');
 }
 
-function buildPlainTextSignature(profile) {
+function buildPlainTextSignature(profile, trackClick = (url) => url) {
   const portfolioUrl = getEffectivePortfolio(profile);
   const links = [];
-  if (profile && profile.linkedin) links.push(`LinkedIn: ${profile.linkedin}`);
-  if (profile && profile.github) links.push(`GitHub: ${profile.github}`);
-  if (portfolioUrl) links.push(`Portfolio: ${portfolioUrl}`);
+  if (profile && profile.linkedin) links.push(`[LinkedIn](${trackClick(profile.linkedin)})`);
+  if (profile && profile.github) links.push(`[GitHub](${trackClick(profile.github)})`);
+  if (portfolioUrl) links.push(`[Portfolio](${trackClick(portfolioUrl)})`);
 
-  const phoneLine = profile && profile.phone ? `📞 ${profile.phone}\n` : '';
+  const name = profile?.name || 'Akash V';
+  const phone = profile?.phone ? `${profile.phone}\n` : '';
   const linksLine = links.length > 0 ? `${links.join(' | ')}` : '';
-  return `\n\nYours Sincerely,\n${profile?.name || 'Akash V'}\n${profile?.title || 'Software Developer'}\n${phoneLine}${linksLine}`.trim();
+  return `Best,\n${name}\n${phone}${linksLine}`.trim();
 }
 
 module.exports = {

@@ -545,7 +545,257 @@
     }, duration);
   }
 
-  // 5. Job Details Extractor from Page
+  // 5. Job Details Extractor from Page (Intelligent Multi-Strategy Detection)
+  const JOB_PORTAL_BLACKLIST = [
+    'firstoffer', 'first offer', 'firstoffer.online',
+    'wellfound', 'angellist', 'angel list',
+    'y combinator', 'work at a startup', 'yc',
+    'linkedin', 'indeed', 'glassdoor',
+    'naukri', 'naukri.com', 'foundit', 'monster',
+    'cutshort', 'instahyre', 'hirist', 'shine', 'freshersworld',
+    'hiringcafe', 'otta', 'built in', 'builtin',
+    'internshala', 'unstop', 'cuvette', 'techfetch', 'dice',
+    'ziprecruiter', 'google jobs', 'remoteok', 'weworkremotely',
+    'jobicy', 'simplyhired', 'careerbuilder', 'join.com',
+    'breezy', 'greenhouse', 'lever', 'workday', 'ashby',
+    'smartrecruiters', 'workable', 'recruitee', 'jobvite', 'bamboohr',
+    'applytojob', 'taleo', 'icims', 'myworkdayjobs'
+  ];
+
+  function isPortalName(str) {
+    if (!str || typeof str !== 'string') return true;
+    const clean = str.trim().toLowerCase();
+    if (!clean || clean.length < 2 || clean === 'company' || clean === 'hiring company' || clean === 'unknown' || clean === 'applicant') return true;
+    const alphaNum = clean.replace(/[^a-z0-9]/g, '');
+    const hostCore = (window.location.hostname || '').toLowerCase().replace(/^(?:www|jobs?|careers?)\./i, '').split('.')[0];
+    if (hostCore && (alphaNum === hostCore || clean.includes(hostCore))) return true;
+
+    for (const p of JOB_PORTAL_BLACKLIST) {
+      const pClean = p.replace(/[^a-z0-9]/g, '');
+      if (alphaNum === pClean || clean === p) return true;
+      if (alphaNum.length <= pClean.length + 3 && pClean.length <= alphaNum.length + 3 && alphaNum.includes(pClean)) return true;
+    }
+    return false;
+  }
+
+  function extractFromJsonLd() {
+    try {
+      const scripts = document.querySelectorAll('script[type="application/ld+json"]');
+      for (const s of scripts) {
+        try {
+          const raw = s.textContent?.trim();
+          if (!raw) continue;
+          const parsed = JSON.parse(raw);
+          const items = Array.isArray(parsed) ? parsed : (parsed['@graph'] || [parsed]);
+          for (const item of items) {
+            if (!item) continue;
+            const t = (item['@type'] || '').toString();
+            if (t.includes('JobPosting')) {
+              let comp = '';
+              const org = item.hiringOrganization || item.hiringOrganizationName;
+              if (typeof org === 'string') comp = org;
+              else if (org && typeof org === 'object') comp = org.name || org.legalName || '';
+
+              const title = item.title || item.name || '';
+              let desc = item.description || '';
+              if (desc.includes('<')) {
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = desc;
+                desc = tempDiv.innerText || tempDiv.textContent || desc;
+              }
+              const skills = item.skills || item.experienceRequirements || '';
+              return {
+                company: comp?.trim(),
+                role: title?.trim(),
+                description: desc?.trim(),
+                skills: typeof skills === 'string' ? skills : (Array.isArray(skills) ? skills.join(', ') : '')
+              };
+            }
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  function extractFromTitleAndUrl() {
+    const candidates = [
+      decodeURIComponent(window.location.pathname || '').replace(/^\/+|\/+$/g, '').replace(/[-_]/g, ' '),
+      document.title || ''
+    ];
+
+    for (const text of candidates) {
+      if (!text || text.length < 5) continue;
+
+      // Pattern 1: Role at Company (e.g. "Software Fullstack Developer Intern at GreedyGame")
+      const atMatch = text.match(/^(?:.*?\/\s*)?(.*?)\s+(?:at|@|with)\s+([A-Za-z0-9\s&.,'-]+?)(?:\s*[-–—|•·]|\s*$|\s*\(|\s*\[|\s*\d{4})/i);
+      if (atMatch && atMatch[1] && atMatch[2]) {
+        const potentialRole = atMatch[1].replace(/^(?:careers?|jobs?|openings?)\s*[-–—|•·:]\s*/i, '').trim();
+        const potentialComp = atMatch[2].trim();
+        if (!isPortalName(potentialComp) && potentialRole.length > 2) {
+          return { role: potentialRole, company: potentialComp };
+        }
+      }
+
+      // Pattern 2: Company is hiring Role (e.g. "GreedyGame is hiring Software Fullstack Developer Intern")
+      const hiringMatch = text.match(/^([A-Za-z0-9\s&.,'-]+?)\s+(?:is\s+hiring|hiring\s+for)\s+(?:a\s+|an\s+)?(.*?)(?:\s*[-–—|•·]|\s*$)/i);
+      if (hiringMatch && hiringMatch[1] && hiringMatch[2]) {
+        const potentialComp = hiringMatch[1].trim();
+        const potentialRole = hiringMatch[2].trim();
+        if (!isPortalName(potentialComp) && potentialRole.length > 2) {
+          return { role: potentialRole, company: potentialComp };
+        }
+      }
+
+      // Pattern 3: Delimited by - | • – —
+      const parts = text.split(/\s*[-–—|•·]\s*/).map(p => p.trim()).filter(Boolean);
+      if (parts.length >= 2) {
+        const isPart0Role = /developer|engineer|intern|designer|manager|architect|lead|analyst|specialist|consultant|fullstack|frontend|backend/i.test(parts[0]);
+        const isPart1Role = /developer|engineer|intern|designer|manager|architect|lead|analyst|specialist|consultant|fullstack|frontend|backend/i.test(parts[1]);
+
+        if (isPart0Role && !isPortalName(parts[1])) {
+          return { role: parts[0], company: parts[1].replace(/careers?|jobs?/i, '').trim() };
+        } else if (isPart1Role && !isPortalName(parts[0])) {
+          return { role: parts[1], company: parts[0].replace(/careers?|jobs?/i, '').trim() };
+        }
+      }
+    }
+    return null;
+  }
+
+  function extractCompanyFromDom() {
+    // 1. Check Schema.org / Microdata
+    const metaHiringOrg = document.querySelector('[itemprop="hiringOrganization"] [itemprop="name"], [itemprop="hiringOrganization"], [data-company], [data-company-name="true"], [data-automation-id="companyName"]');
+    if (metaHiringOrg) {
+      const c = metaHiringOrg.textContent?.trim();
+      if (c && !isPortalName(c)) return c;
+    }
+
+    // 2. Check company links: a[href*="/company/"], a[href*="/companies/"], a[href*="/employer/"]
+    const companyLinks = Array.from(document.querySelectorAll('a[href*="/company/"], a[href*="/companies/"], a[href*="/employer/"]'))
+      .filter(a => !a.closest('#ai-copilot-sidebar') && !a.closest('#ai-copilot-dock-tab'));
+    for (const a of companyLinks) {
+      const txt = a.textContent?.trim();
+      if (txt && txt.length >= 2 && txt.length < 50 && !isPortalName(txt)) {
+        return txt;
+      }
+    }
+
+    // 3. Check text before h1 or inside h1 container
+    const h1 = document.querySelector('h1, [class*="job-title" i], [class*="role-title" i]');
+    if (h1 && h1.parentElement) {
+      // Check previous siblings of h1 (like company badge "[GR] GreedyGame")
+      let prev = h1.previousElementSibling;
+      while (prev) {
+        const txt = prev.textContent?.trim();
+        if (txt && txt.length >= 2 && txt.length < 40 && !isPortalName(txt)) {
+          const cleanTxt = txt.replace(/^[A-Z]{1,3}\s+/, '').trim();
+          if (cleanTxt && !isPortalName(cleanTxt)) return cleanTxt;
+        }
+        prev = prev.previousElementSibling;
+      }
+
+      // Check text in section matching "at <Company>" or "- at <Company> ·"
+      const parentText = h1.parentElement.innerText || '';
+      const atMatch = parentText.match(/(?:at|@)\s+([A-Z][A-Za-z0-9\s&.,'-]{1,35}?)(?:\s*[·•–—|-]|\s*,|\s*\n|\s*$)/);
+      if (atMatch && atMatch[1] && !isPortalName(atMatch[1])) {
+        return atMatch[1].trim();
+      }
+    }
+
+    // 4. Check elements with company class
+    const compElements = Array.from(document.querySelectorAll('[class*="company" i], [class*="employer" i]'))
+      .filter(el => !el.closest('#ai-copilot-sidebar') && !el.closest('#ai-copilot-dock-tab') && !el.closest('form'));
+    for (const el of compElements) {
+      if (el.children.length > 3 || (el.textContent?.trim().length || 0) > 60) continue;
+      const txt = el.textContent?.trim();
+      if (txt && txt.length >= 2 && !isPortalName(txt) && !txt.toLowerCase().includes('job') && !txt.toLowerCase().includes('filter')) {
+        return txt;
+      }
+    }
+
+    // 5. Check breadcrumbs
+    const breadcrumb = document.querySelector('.breadcrumb, [class*="breadcrumb" i], nav[aria-label*="breadcrumb" i]');
+    if (breadcrumb) {
+      const bcText = breadcrumb.innerText || '';
+      const bcMatch = bcText.match(/(?:at|@)\s+([A-Za-z0-9\s&.,'-]{2,35})/i);
+      if (bcMatch && !isPortalName(bcMatch[1])) return bcMatch[1].trim();
+    }
+
+    return '';
+  }
+
+  function cleanRole(rawRole) {
+    if (!rawRole) return '';
+    let r = rawRole.trim();
+    r = r.replace(/\s*[-–—|]\s*(?:FirstOffer|LinkedIn|Indeed|Naukri|Glassdoor|Wellfound|Cutshort|Instahyre|Hirist).*$/i, '');
+    r = r.replace(/\s+(?:at|@|with)\s+[A-Za-z0-9\s&.,'-]+$/i, '');
+    r = r.replace(/\s*\(Batch\s*[^\)]*\)/i, '');
+    r = r.replace(/\s*[-–—]\s*Batch\s*[\d/]+/i, '');
+    return r.trim();
+  }
+
+  function extractDescriptionAndSkills() {
+    let description = '';
+    const skills = [];
+
+    // 1. Collect skills from pills / badges / tags
+    const skillPills = Array.from(document.querySelectorAll('.pill, .tag, .badge, [class*="pill" i], [class*="tag" i], [class*="badge" i], [class*="skill" i]'))
+      .filter(p => !p.closest('#ai-copilot-sidebar') && !p.closest('#ai-copilot-dock-tab'))
+      .map(p => p.textContent.trim())
+      .filter(t => t.length >= 2 && t.length < 35 && !t.includes('\n') && !/apply|applied|save|share|report|login|sign/i.test(t));
+    if (skillPills.length > 0) {
+      skills.push(...Array.from(new Set(skillPills)));
+    }
+
+    // 2. Look for specialized JD containers
+    const jdContainers = Array.from(document.querySelectorAll(
+      '.job-details, .job-description, .post-body, .company-overview, ' +
+      '[class*="job-details" i], [class*="jobDescription" i], [class*="job-description" i], ' +
+      '[class*="description" i], [class*="opportunity" i], [class*="prose" i], article, main'
+    )).filter(c => !c.closest('#ai-copilot-sidebar') && !c.closest('#ai-copilot-dock-tab'));
+
+    if (jdContainers.length > 0) {
+      const sorted = jdContainers.sort((a, b) => (b.innerText?.length || 0) - (a.innerText?.length || 0));
+      description = sorted[0].innerText || '';
+    }
+
+    // 3. Look for explicit headings ("ABOUT THE OPPORTUNITY", "REQUIRED SKILLS", etc.)
+    const headings = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, [class*="heading" i], [class*="title" i]'))
+      .filter(h => !h.closest('#ai-copilot-sidebar') && !h.closest('#ai-copilot-dock-tab'));
+
+    const structuredSections = [];
+    for (const h of headings) {
+      const hText = h.textContent?.trim();
+      if (!hText) continue;
+      if (/about the opportunity|required skills|skills required|key skills|requirements|responsibilities|qualifications|about the role|what you'll do|what you will do|about the company/i.test(hText)) {
+        let sibling = h.nextElementSibling;
+        let secContent = '';
+        while (sibling && !/^H[1-4]$/i.test(sibling.tagName) && !sibling.querySelector('h1, h2, h3, h4')) {
+          secContent += (sibling.innerText || sibling.textContent || '') + '\n';
+          sibling = sibling.nextElementSibling;
+        }
+        if (secContent.trim()) {
+          structuredSections.push(`${hText.toUpperCase()}:\n${secContent.trim()}`);
+        }
+      }
+    }
+
+    if (structuredSections.length > 0) {
+      description = structuredSections.join('\n\n') + '\n\n' + (description.length > 2500 ? description.slice(0, 2500) : description);
+    }
+
+    if (!description || description.length < 50) {
+      description = document.body.innerText.slice(0, 2500);
+    }
+
+    if (skills.length > 0) {
+      description += '\n\nKey Skills & Technologies: ' + Array.from(new Set(skills)).slice(0, 20).join(', ');
+    }
+
+    return { description: description.trim(), skills };
+  }
+
   function extractJobDetails() {
     let company = '';
     let role = '';
@@ -623,31 +873,19 @@
       } else {
         company = titleParts[0] || 'Company';
       }
-      // Grab description from form header area
       const formDesc = document.querySelector('.freebirdFormviewerViewHeaderDescription, .m7sMe');
       description = formDesc?.innerText || document.body.innerText.slice(0, 2000);
     }
     // Y Combinator & Work at a Startup
     else if (host.includes('workatastartup.com') || host.includes('ycombinator.com')) {
-      // 1. Role Detection
       const roleElem = document.querySelector('.job-title, [class*="job-title" i], [class*="role-title" i], .posting-headline, h1');
       if (roleElem) {
-        role = roleElem.textContent.trim();
-        role = role.replace(/\s*[-–—|]\s*(Work at a Startup|Y Combinator|YC).*$/i, '').trim();
-      }
-      if (!role) {
-        const titleParts = document.title.split(/[-–—|]/);
-        if (titleParts.length > 0) {
-          role = titleParts[0].replace(/\s*\(YC[^\)]*\)/i, '').trim();
-        }
+        role = roleElem.textContent.trim().replace(/\s*[-–—|]\s*(Work at a Startup|Y Combinator|YC).*$/i, '').trim();
       }
 
-      // 2. Company Detection
       const modalHeader = document.querySelector('h1, h2, h3, [role="dialog"] h3, .modal h3');
       const reachMatch = modalHeader?.textContent?.match(/Reach out to the team at\s+([A-Za-z0-9\s&]+)/i);
-      if (reachMatch) {
-        company = reachMatch[1].trim();
-      }
+      if (reachMatch) company = reachMatch[1].trim();
 
       if (!company) {
         const aboutHeadings = Array.from(document.querySelectorAll('h2, h3, h4, .company-name, [class*="company-name" i]'));
@@ -663,69 +901,57 @@
 
       if (!company) {
         const compLink = document.querySelector('a[href*="/companies/"], .company-name, [class*="company" i] a');
-        if (compLink) {
-          company = compLink.textContent.replace(/\s*\([A-Z]\d+\)/i, '').trim();
-        }
-      }
-
-      if (!company) {
-        const titleParts = document.title.split(/[-–—|]/);
-        if (titleParts.length > 1) {
-          company = titleParts[0].replace(/\s*\(YC[^\)]*\)/i, '').trim();
-        }
-      }
-
-      // 3. Description & Context
-      const descContainers = Array.from(document.querySelectorAll('.job-details, .job-description, .post-body, .company-overview, [class*="job-details" i], [class*="jobDescription" i], [class*="prose" i]'));
-      if (descContainers.length > 0) {
-        description = descContainers.map(c => c.innerText).join('\n\n');
-      } else {
-        const mainSections = Array.from(document.querySelectorAll('main, article, .content, #content, [class*="content" i], div:has(> h2), div:has(> h3)'));
-        for (const sec of mainSections) {
-          if (sec.closest('#ai-copilot-sidebar') || sec.closest('#ai-copilot-dock-tab')) continue;
-          const text = sec.innerText || '';
-          if (text.includes('About the role') || text.includes('Salary') || text.includes('Experience')) {
-            description = text;
-            break;
-          }
-        }
-      }
-
-      const skillPills = Array.from(document.querySelectorAll('.pill, .tag, .badge, [class*="pill" i], [class*="tag" i], [class*="badge" i]'))
-        .filter(p => !p.closest('#ai-copilot-sidebar') && !p.closest('#ai-copilot-dock-tab'))
-        .map(p => p.textContent.trim())
-        .filter(t => t.length > 1 && t.length < 30);
-      if (skillPills.length > 0) {
-        description += '\n\nKey Skills & Technologies: ' + Array.from(new Set(skillPills)).join(', ');
+        if (compLink) company = compLink.textContent.replace(/\s*\([A-Z]\d+\)/i, '').trim();
       }
     }
 
+    // ── High-Accuracy Universal Extraction for Portals & Direct Career Sites ──
+    // If company is missing or matched a known portal/aggregator name, look deeper!
+    if (!company || isPortalName(company)) {
+      // 1. Try Schema.org JSON-LD
+      const jsonLd = extractFromJsonLd();
+      if (jsonLd) {
+        if (jsonLd.company && !isPortalName(jsonLd.company)) company = jsonLd.company;
+        if (!role && jsonLd.role) role = jsonLd.role;
+        if (!description && jsonLd.description) description = jsonLd.description;
+      }
+    }
+
+    // 2. Try Title and URL heuristics (e.g. "Software Fullstack Developer Intern at GreedyGame")
+    if (!company || isPortalName(company) || !role) {
+      const titleUrlInfo = extractFromTitleAndUrl();
+      if (titleUrlInfo) {
+        if (!company || isPortalName(company)) company = titleUrlInfo.company;
+        if (!role) role = titleUrlInfo.role;
+      }
+    }
+
+    // 3. Try DOM Badges, Previous Siblings, Breadcrumbs
+    if (!company || isPortalName(company)) {
+      const domComp = extractCompanyFromDom();
+      if (domComp && !isPortalName(domComp)) {
+        company = domComp;
+      }
+    }
+
+    // 4. Role from h1 if still not determined
     if (!role) {
       const h1 = document.querySelector('h1, [class*="job-title" i], [class*="role-title" i], [data-automation-id*="jobTitle" i]');
       if (h1) role = h1.textContent.trim();
     }
-    if (!company) {
-      const ogSite = document.querySelector('meta[property="og:site_name"]')?.content;
-      const metaAuthor = document.querySelector('meta[name="author"]')?.content;
-      if (ogSite) {
-        company = ogSite.trim();
-      } else if (metaAuthor) {
-        company = metaAuthor.trim();
-      } else {
-        const titleParts = document.title.split(/[-|•–—]/);
-        if (titleParts.length > 1) {
-          if (role && titleParts[0].toLowerCase().includes(role.toLowerCase().slice(0, 10))) {
-            company = titleParts[1].replace(/careers?|jobs?/i, '').trim();
-          } else {
-            company = titleParts[0].replace(/careers?|jobs?/i, '').trim() || titleParts[1].trim();
-          }
-        } else {
-          company = host.replace(/^(careers?|jobs?|talent|recruiting|www)\./i, '').split('.')[0];
-        }
-      }
+
+    // Clean role (strip "at Company", "Batch 2025", portal suffixes)
+    role = cleanRole(role);
+
+    // 5. Rich Description & Skills Extraction across all pages
+    if (!description || description.length < 100) {
+      const extractedDesc = extractDescriptionAndSkills();
+      description = extractedDesc.description;
     }
-    if (!description) {
-      description = document.body.innerText.slice(0, 1500);
+
+    // Final safety check: NEVER return a portal name as the hiring company
+    if (isPortalName(company)) {
+      company = '';
     }
 
     let location = '';
@@ -743,7 +969,7 @@
 
     return {
       company: (company || 'Company').trim(),
-      role: (role || 'Applicant').trim(),
+      role: (role || 'Software Engineer').trim(),
       description: (description || '').trim(),
       location: (location || '').trim()
     };
