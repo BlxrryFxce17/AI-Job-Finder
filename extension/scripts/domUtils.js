@@ -4,6 +4,8 @@
 (() => {
   'use strict';
 
+  console.log('[AI Job Copilot] domUtils.js v1.0.1 initialized (location bug resolved)');
+
   // ── Global Shared State & Accessors ──────────────────────────────────────────
   window.AiCopilotState = window.AiCopilotState || {
     cachedProfile: null,
@@ -800,228 +802,337 @@
     let company = '';
     let role = '';
     let description = '';
+    let jobLocation = '';
+    let pageEmail = '';
 
-    const host = window.location.hostname.toLowerCase();
-    const url = window.location.href.toLowerCase();
+    try {
+      const host = window.location.hostname.toLowerCase();
+      const url = window.location.href.toLowerCase();
 
-    // Workday
-    if (host.includes('workday') || url.includes('workday') || !!document.querySelector('[data-automation-id]')) {
-      const headerElem = document.querySelector('[data-automation-id="jobPostingHeader"], [data-automation-id="pageHeader"], h2[data-automation-id="jobTitle"], h1');
-      if (headerElem) role = headerElem.textContent;
+      // FirstOffer (firstoffer.online)
+      if (host.includes('firstoffer')) {
+        const h1 = document.querySelector('h1, [class*="job-title" i], [class*="title" i]');
+        if (h1 && h1.textContent?.trim()) {
+          role = cleanRole(h1.textContent);
+        }
 
-      const companyElem = document.querySelector('[data-automation-id="companyName"], [data-automation-id="logo"] img, header img');
-      if (companyElem) company = companyElem.alt || companyElem.textContent;
+        // Try Next.js __NEXT_DATA__
+        try {
+          const nextScript = document.getElementById('__NEXT_DATA__');
+          if (nextScript) {
+            const nData = JSON.parse(nextScript.textContent || '{}');
+            const pProps = nData?.props?.pageProps;
+            const jData = pProps?.job || pProps?.jobData || pProps?.post || pProps?.opening || pProps?.data;
+            if (jData && typeof jData === 'object') {
+              if (jData.company_name || jData.company) company = jData.company_name || jData.company;
+              if (!role && (jData.title || jData.role)) role = jData.title || jData.role;
+              if (!description && (jData.description || jData.jd)) description = jData.description || jData.jd;
+              if (!jobLocation && jData.location) jobLocation = jData.location;
+              if (!pageEmail && (jData.apply_email || jData.email)) pageEmail = jData.apply_email || jData.email;
+            }
+          }
+        } catch (_) {}
 
-      const descElem = document.querySelector('[data-automation-id="jobPostingDescription"]');
-      if (descElem) description = descElem.innerText;
-    }
-    // Lever
-    else if (host.includes('lever.co')) {
-      company = document.querySelector('.main-header-logo img')?.alt ||
-        document.querySelector('.posting-headline h2')?.textContent ||
-        window.location.pathname.split('/')[1] || '';
-      role = document.querySelector('.posting-headline h2')?.textContent || '';
-      description = document.querySelector('.section-wrapper')?.innerText || '';
-    }
-    // Greenhouse
-    else if (host.includes('greenhouse.io')) {
-      company = document.querySelector('.company-name')?.textContent ||
-        document.querySelector('#header .logo img')?.alt ||
-        window.location.pathname.split('/')[1] || '';
-      role = document.querySelector('.app-title')?.textContent || '';
-      description = document.querySelector('#content')?.innerText || '';
-    }
-    // Ashby
-    else if (host.includes('ashbyhq.com')) {
-      company = document.querySelector('header img')?.alt ||
-        window.location.pathname.split('/')[1] || '';
-      role = document.querySelector('h1')?.textContent || '';
-      description = document.querySelector('.ashby-job-posting-container')?.innerText || '';
-    }
-    // LinkedIn
-    else if (host.includes('linkedin.com')) {
-      const modal = getActiveApplicationModal();
-      const modalHeader = modal?.querySelector('h3#jobs-apply-header, h2.artdeco-modal__header, .t-16.t-bold, h3, h2');
-      const modalTitle = modalHeader?.textContent?.trim() || '';
+        // Try Breadcrumb: "Home / Fresher Jobs / Forward Deployed Engineer at persistence.dev"
+        if (!company) {
+          const bc = document.querySelector('.breadcrumb, [class*="breadcrumb" i], nav');
+          if (bc) {
+            const bcText = bc.textContent || '';
+            const m = bcText.match(/(?:at|@)\s+([a-zA-Z0-9._-]+)/i);
+            if (m && !isPortalName(m[1])) company = m[1].trim();
+          }
+        }
 
-      role = document.querySelector('.job-details-jobs-unified-top-card__job-title, h1.jobs-unified-top-card__job-title, h1.t-24, .top-card-layout__title, a.job-card-list__title--link')?.textContent?.trim() ||
-        (modalTitle && !modalTitle.toLowerCase().includes('apply') && !modalTitle.toLowerCase().includes('step') ? modalTitle : '') || '';
+        // Try company element directly preceding h1 or in header
+        if (!company && h1 && h1.parentElement) {
+          let prev = h1.previousElementSibling;
+          while (prev) {
+            const txt = prev.textContent?.trim();
+            if (txt && txt.length >= 2 && txt.length < 50 && !isPortalName(txt)) {
+              const cleaned = txt.replace(/^[A-Z]{1,3}\s+/, '').trim();
+              if (cleaned && !isPortalName(cleaned)) {
+                company = cleaned;
+                break;
+              }
+            }
+            prev = prev.previousElementSibling;
+          }
+        }
 
-      company = document.querySelector('.job-details-jobs-unified-top-card__company-name, .jobs-unified-top-card__company-name, .topcard__flavor, a[href*="/company/"]')?.textContent?.trim() || '';
+        // Try URL or title: "Forward Deployed Engineer at persistence.dev"
+        if (!company) {
+          const pathOrTitle = (window.location.pathname + ' ' + (document.title || '')).replace(/[-_]/g, ' ');
+          const atM = pathOrTitle.match(/\bat\s+([a-zA-Z0-9._-]+\.[a-zA-Z]{2,}|[a-zA-Z0-9&.' -]{2,30})\b/i);
+          if (atM && !isPortalName(atM[1])) company = atM[1].trim();
+        }
 
-      description = document.querySelector('.jobs-description__content, .jobs-box__html-content, #job-details, .jobs-description')?.innerText || '';
-    }
-    // Indeed
-    else if (host.includes('indeed.com')) {
-      role = document.querySelector('h1.jobsearch-JobInfoHeader-title, .jobsearch-JobInfoHeader-title')?.textContent || '';
-      company = document.querySelector('[data-company-name="true"], .jobsearch-CompanyInfoContainer a, .jobsearch-JobInfoHeader-companyName')?.textContent || '';
-      description = document.querySelector('#jobDescriptionText')?.innerText || '';
-    }
-    // Naukri
-    else if (host.includes('naukri.com')) {
-      role = document.querySelector('h1.styles_jd-header-title__rZwM1, .jd-header-title, h1[title]')?.textContent || '';
-      company = document.querySelector('.styles_jd-header-comp-name__MvqAI a, .comp-name, a.pad-rt-8')?.textContent || '';
-      description = document.querySelector('.styles_JDC__dang-inner-html__h0K4t, .job-desc')?.innerText || '';
-    }
-    // Google Forms
-    else if (isGoogleForm()) {
-      const titleText = document.title || '';
-      const titleParts = titleText.split(/[—–-]/).map(s => s.trim());
-      if (titleParts.length >= 2) {
-        company = titleParts[0];
-        role = titleParts[1];
-      } else {
-        company = titleParts[0] || 'Company';
-      }
-      const formDesc = document.querySelector('.freebirdFormviewerViewHeaderDescription, .m7sMe');
-      description = formDesc?.innerText || document.body.innerText.slice(0, 2000);
-    }
-    // Y Combinator & Work at a Startup
-    else if (host.includes('workatastartup.com') || host.includes('ycombinator.com')) {
-      const roleElem = document.querySelector('.job-title, [class*="job-title" i], [class*="role-title" i], .posting-headline, h1');
-      if (roleElem) {
-        role = roleElem.textContent.trim().replace(/\s*[-–—|]\s*(Work at a Startup|Y Combinator|YC).*$/i, '').trim();
-      }
-
-      const modalHeader = document.querySelector('h1, h2, h3, [role="dialog"] h3, .modal h3');
-      const reachMatch = modalHeader?.textContent?.match(/Reach out to the team at\s+([A-Za-z0-9\s&]+)/i);
-      if (reachMatch) company = reachMatch[1].trim();
-
-      if (!company) {
-        const aboutHeadings = Array.from(document.querySelectorAll('h2, h3, h4, .company-name, [class*="company-name" i]'));
-        for (const h of aboutHeadings) {
-          const txt = h.textContent.trim();
-          const m = txt.match(/^About\s+([A-Za-z0-9\s&]+)/i);
-          if (m && !m[1].toLowerCase().includes('the role') && !m[1].toLowerCase().includes('our products') && !m[1].toLowerCase().includes('us')) {
-            company = m[1].trim();
-            break;
+        // Try location badge
+        if (!jobLocation) {
+          const badges = Array.from(document.querySelectorAll('[class*="badge" i], [class*="pill" i], [class*="tag" i], span, div'))
+            .filter(el => !el.closest('#ai-copilot-sidebar'));
+          for (const b of badges) {
+            const txt = b.textContent?.trim();
+            if (txt && /^(bangalore|bengaluru|mumbai|pune|hyderabad|delhi|noida|gurgaon|remote|chennai|san francisco|new york|london)$/i.test(txt)) {
+              jobLocation = txt;
+              break;
+            }
           }
         }
       }
+      // Workday
+      else if (host.includes('workday') || url.includes('workday') || !!document.querySelector('[data-automation-id]')) {
+        const headerElem = document.querySelector('[data-automation-id="jobPostingHeader"], [data-automation-id="pageHeader"], h2[data-automation-id="jobTitle"], h1');
+        if (headerElem) role = headerElem.textContent;
 
-      if (!company) {
-        const compLink = document.querySelector('a[href*="/companies/"], .company-name, [class*="company" i] a');
-        if (compLink) company = compLink.textContent.replace(/\s*\([A-Z]\d+\)/i, '').trim();
+        const companyElem = document.querySelector('[data-automation-id="companyName"], [data-automation-id="logo"] img, header img');
+        if (companyElem) company = companyElem.alt || companyElem.textContent;
+
+        const descElem = document.querySelector('[data-automation-id="jobPostingDescription"]');
+        if (descElem) description = descElem.innerText;
       }
-    }
-
-    // ── High-Accuracy Universal Extraction for Portals & Direct Career Sites ──
-    // If company is missing or matched a known portal/aggregator name, look deeper!
-    if (!company || isPortalName(company)) {
-      // 1. Try Schema.org JSON-LD
-      const jsonLd = extractFromJsonLd();
-      if (jsonLd) {
-        if (jsonLd.company && !isPortalName(jsonLd.company)) company = jsonLd.company;
-        if (!role && jsonLd.role) role = jsonLd.role;
-        if (!description && jsonLd.description) description = jsonLd.description;
+      // Lever
+      else if (host.includes('lever.co')) {
+        company = document.querySelector('.main-header-logo img')?.alt ||
+          document.querySelector('.posting-headline h2')?.textContent ||
+          window.location.pathname.split('/')[1] || '';
+        role = document.querySelector('.posting-headline h2')?.textContent || '';
+        description = document.querySelector('.section-wrapper')?.innerText || '';
       }
-    }
-
-    // 2. Try Title and URL heuristics (e.g. "Software Fullstack Developer Intern at GreedyGame")
-    if (!company || isPortalName(company) || !role) {
-      const titleUrlInfo = extractFromTitleAndUrl();
-      if (titleUrlInfo) {
-        if (!company || isPortalName(company)) company = titleUrlInfo.company;
-        if (!role) role = titleUrlInfo.role;
+      // Greenhouse
+      else if (host.includes('greenhouse.io')) {
+        company = document.querySelector('.company-name')?.textContent ||
+          document.querySelector('#header .logo img')?.alt ||
+          window.location.pathname.split('/')[1] || '';
+        role = document.querySelector('.app-title')?.textContent || '';
+        description = document.querySelector('#content')?.innerText || '';
       }
-    }
-
-    // 3. Try DOM Badges, Previous Siblings, Breadcrumbs
-    if (!company || isPortalName(company)) {
-      const domComp = extractCompanyFromDom();
-      if (domComp && !isPortalName(domComp)) {
-        company = domComp;
+      // Ashby
+      else if (host.includes('ashbyhq.com')) {
+        company = document.querySelector('header img')?.alt ||
+          window.location.pathname.split('/')[1] || '';
+        role = document.querySelector('h1')?.textContent || '';
+        description = document.querySelector('.ashby-job-posting-container')?.innerText || '';
       }
-    }
+      // LinkedIn
+      else if (host.includes('linkedin.com')) {
+        const modal = getActiveApplicationModal();
+        const modalHeader = modal?.querySelector('h3#jobs-apply-header, h2.artdeco-modal__header, .t-16.t-bold, h3, h2');
+        const modalTitle = modalHeader?.textContent?.trim() || '';
 
-    // 4. Role from h1 if still not determined
-    if (!role) {
-      const h1 = document.querySelector('h1, [class*="job-title" i], [class*="role-title" i], [data-automation-id*="jobTitle" i]');
-      if (h1) role = h1.textContent.trim();
-    }
+        role = document.querySelector('.job-details-jobs-unified-top-card__job-title, h1.jobs-unified-top-card__job-title, h1.t-24, .top-card-layout__title, a.job-card-list__title--link')?.textContent?.trim() ||
+          (modalTitle && !modalTitle.toLowerCase().includes('apply') && !modalTitle.toLowerCase().includes('step') ? modalTitle : '') || '';
 
-    // Clean role (strip "at Company", "Batch 2025", portal suffixes)
-    role = cleanRole(role);
+        company = document.querySelector('.job-details-jobs-unified-top-card__company-name, .jobs-unified-top-card__company-name, .topcard__flavor, a[href*="/company/"]')?.textContent?.trim() || '';
 
-    // 5. Rich Description & Skills Extraction across all pages
-    if (!description || description.length < 100) {
-      const extractedDesc = extractDescriptionAndSkills();
-      description = extractedDesc.description;
-    }
-
-    // Final safety check: NEVER return a portal name as the hiring company
-    if (isPortalName(company)) {
-      company = '';
-    }
-
-    const EMAIL_BLACKLIST = [
-      'support@firstoffer.online', 'help@wellfound.com', 'support@linkedin.com',
-      'support@indeed.com', 'help@naukri.com', 'feedback@', 'privacy@',
-      'legal@', 'abuse@', 'security@', 'postmaster@', 'noreply@', 'no-reply@',
-      'donotreply@', 'example@', 'domain@', 'test@', 'user@', 'yourname@',
-      'email@', 'name@', 'sentry.io', 'w3.org', 'schema.org', 'github.com',
-      'google.com', 'cloudflare.com', 'wixpress.com'
-    ];
-
-    function isValidJobEmail(emailStr) {
-      if (!emailStr || typeof emailStr !== 'string') return false;
-      const clean = emailStr.toLowerCase().trim().replace(/[.,;!?)]+$/, '');
-      if (!/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(clean)) return false;
-      if (clean.length < 6 || clean.length > 70) return false;
-      for (const b of EMAIL_BLACKLIST) {
-        if (b.endsWith('@') ? clean.startsWith(b) : clean.includes(b)) return false;
+        description = document.querySelector('.jobs-description__content, .jobs-box__html-content, #job-details, .jobs-description')?.innerText || '';
       }
-      return true;
-    }
-
-    function extractEmailFromPage(desc = '') {
-      // 1. Mailto links on page
-      const mailtoLinks = Array.from(document.querySelectorAll('a[href^="mailto:"]'));
-      for (const a of mailtoLinks) {
-        const raw = (a.getAttribute('href') || '').replace(/^mailto:/i, '').split('?')[0].trim();
-        if (isValidJobEmail(raw)) return raw.toLowerCase();
+      // Indeed
+      else if (host.includes('indeed.com')) {
+        role = document.querySelector('h1.jobsearch-JobInfoHeader-title, .jobsearch-JobInfoHeader-title')?.textContent || '';
+        company = document.querySelector('[data-company-name="true"], .jobsearch-CompanyInfoContainer a, .jobsearch-JobInfoHeader-companyName')?.textContent || '';
+        description = document.querySelector('#jobDescriptionText')?.innerText || '';
       }
+      // Naukri
+      else if (host.includes('naukri.com')) {
+        role = document.querySelector('h1.styles_jd-header-title__rZwM1, .jd-header-title, h1[title]')?.textContent || '';
+        company = document.querySelector('.styles_jd-header-comp-name__MvqAI a, .comp-name, a.pad-rt-8')?.textContent || '';
+        description = document.querySelector('.styles_JDC__dang-inner-html__h0K4t, .job-desc')?.innerText || '';
+      }
+      // Google Forms
+      else if (isGoogleForm()) {
+        const titleText = document.title || '';
+        const titleParts = titleText.split(/[—–-]/).map(s => s.trim());
+        if (titleParts.length >= 2) {
+          company = titleParts[0];
+          role = titleParts[1];
+        } else {
+          company = titleParts[0] || 'Company';
+        }
+        const formDesc = document.querySelector('.freebirdFormviewerViewHeaderDescription, .m7sMe');
+        description = formDesc?.innerText || document.body.innerText.slice(0, 2000);
+      }
+      // Y Combinator & Work at a Startup
+      else if (host.includes('workatastartup.com') || host.includes('ycombinator.com')) {
+        const roleElem = document.querySelector('.job-title, [class*="job-title" i], [class*="role-title" i], .posting-headline, h1');
+        if (roleElem) {
+          role = roleElem.textContent.trim().replace(/\s*[-–—|]\s*(Work at a Startup|Y Combinator|YC).*$/i, '').trim();
+        }
 
-      // 2. High-priority contextual regex ("send resume to ...", "apply at ...", "contact: ...")
-      const priorityRegex = /(?:send|email|forward|share|submit|reach|contact|write|apply|mail)(?:\s+[\w\s]{0,25})?\s*(?:to|at|via)?\s*[:\-]?\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/gi;
-      let match;
-      const textSources = [desc, document.body?.innerText || ''];
-      for (const text of textSources) {
-        if (!text) continue;
-        while ((match = priorityRegex.exec(text)) !== null) {
-          if (isValidJobEmail(match[1])) return match[1].toLowerCase().replace(/[.,;!?)]+$/, '');
+        const modalHeader = document.querySelector('h1, h2, h3, [role="dialog"] h3, .modal h3');
+        const reachMatch = modalHeader?.textContent?.match(/Reach out to the team at\s+([A-Za-z0-9\s&]+)/i);
+        if (reachMatch) company = reachMatch[1].trim();
+
+        if (!company) {
+          const aboutHeadings = Array.from(document.querySelectorAll('h2, h3, h4, .company-name, [class*="company-name" i]'));
+          for (const h of aboutHeadings) {
+            const txt = h.textContent.trim();
+            const m = txt.match(/^About\s+([A-Za-z0-9\s&]+)/i);
+            if (m && !m[1].toLowerCase().includes('the role') && !m[1].toLowerCase().includes('our products') && !m[1].toLowerCase().includes('us')) {
+              company = m[1].trim();
+              break;
+            }
+          }
+        }
+
+        if (!company) {
+          const compLink = document.querySelector('a[href*="/companies/"], .company-name, [class*="company" i] a');
+          if (compLink) company = compLink.textContent.replace(/\s*\([A-Z]\d+\)/i, '').trim();
         }
       }
 
-      // 3. Scan the description for any valid email
-      if (desc) {
-        const anyEmailRegex = /\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/g;
-        while ((match = anyEmailRegex.exec(desc)) !== null) {
-          if (isValidJobEmail(match[0])) return match[0].toLowerCase().replace(/[.,;!?)]+$/, '');
+      // ── Universal Multi-Strategy Extraction for Portals & Direct Career Sites ──
+      if (!company || isPortalName(company)) {
+        const jsonLd = extractFromJsonLd();
+        if (jsonLd) {
+          if (jsonLd.company && !isPortalName(jsonLd.company)) company = jsonLd.company;
+          if (!role && jsonLd.role) role = jsonLd.role;
+          if (!description && jsonLd.description) description = jsonLd.description;
         }
       }
 
-      // 4. Scan main job container
-      const container = document.querySelector('[class*="job-description" i], [class*="job-details" i], [class*="posting" i], main, article, #content, .content');
-      if (container) {
-        const anyEmailRegex = /\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/g;
-        const cText = container.innerText || '';
-        while ((match = anyEmailRegex.exec(cText)) !== null) {
-          if (isValidJobEmail(match[0])) return match[0].toLowerCase().replace(/[.,;!?)]+$/, '');
+      if (!company || isPortalName(company) || !role) {
+        const titleUrlInfo = extractFromTitleAndUrl();
+        if (titleUrlInfo) {
+          if (!company || isPortalName(company)) company = titleUrlInfo.company;
+          if (!role) role = titleUrlInfo.role;
         }
       }
 
-      return '';
+      if (!company || isPortalName(company)) {
+        const domComp = extractCompanyFromDom();
+        if (domComp && !isPortalName(domComp)) {
+          company = domComp;
+        }
+      }
+
+      if (!role) {
+        const h1 = document.querySelector('h1, [class*="job-title" i], [class*="role-title" i], [data-automation-id*="jobTitle" i]');
+        if (h1) role = h1.textContent.trim();
+      }
+
+      role = cleanRole(role);
+
+      if (!description || description.length < 100) {
+        const extractedDesc = extractDescriptionAndSkills();
+        description = extractedDesc.description;
+      }
+
+      if (isPortalName(company)) {
+        company = '';
+      }
+
+      const EMAIL_BLACKLIST = [
+        'support@firstoffer.online', 'help@wellfound.com', 'support@linkedin.com',
+        'support@indeed.com', 'help@naukri.com', 'feedback@', 'privacy@',
+        'legal@', 'abuse@', 'security@', 'postmaster@', 'noreply@', 'no-reply@',
+        'donotreply@', 'example@', 'domain@', 'test@', 'user@', 'yourname@',
+        'email@', 'name@', 'sentry.io', 'w3.org', 'schema.org', 'github.com',
+        'google.com', 'cloudflare.com', 'wixpress.com'
+      ];
+
+      function isValidJobEmail(emailStr) {
+        if (!emailStr || typeof emailStr !== 'string') return false;
+        const clean = emailStr.toLowerCase().trim().replace(/[.,;!?)]+$/, '');
+        if (!/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(clean)) return false;
+        if (clean.length < 6 || clean.length > 70) return false;
+        for (const b of EMAIL_BLACKLIST) {
+          if (b.endsWith('@') ? clean.startsWith(b) : clean.includes(b)) return false;
+        }
+        return true;
+      }
+
+      function extractEmailFromPage(desc = '', targetComp = '') {
+        try {
+          // 1. High priority: check buttons/links with text like "apply via email", "email apply", "apply by email"
+          const applyButtons = Array.from(document.querySelectorAll('a, button, [role="button"]'))
+            .filter(el => !el.closest('#ai-copilot-sidebar'));
+          for (const btn of applyButtons) {
+            const btnText = (btn.textContent || '').trim();
+            if (/apply\s+via\s+email|apply\s+by\s+email|email\s+apply|send\s+email|contact\s+recruiter|mail\s+application/i.test(btnText)) {
+              const href = btn.getAttribute('href') || btn.href || '';
+              if (href && href.includes('mailto:')) {
+                const raw = href.replace(/^.*mailto:/i, '').split('?')[0].trim();
+                if (isValidJobEmail(raw)) return raw.toLowerCase();
+              }
+              for (const attr of ['data-email', 'data-mailto', 'data-href', 'data-url', 'data-action', 'onclick']) {
+                const val = btn.getAttribute(attr) || '';
+                const m = val.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+                if (m && isValidJobEmail(m[1])) return m[1].toLowerCase();
+              }
+            }
+          }
+
+          // 2. Scan all mailto links on page
+          const mailtoLinks = Array.from(document.querySelectorAll('a[href*="mailto:" i]'))
+            .filter(a => !a.closest('#ai-copilot-sidebar'));
+          for (const a of mailtoLinks) {
+            const href = a.getAttribute('href') || a.href || '';
+            const raw = href.replace(/^.*mailto:/i, '').split('?')[0].trim();
+            if (isValidJobEmail(raw)) return raw.toLowerCase();
+          }
+
+          // 3. Scan elements with data-email or data-mailto
+          const emailElems = Array.from(document.querySelectorAll('[data-email], [data-mailto]'))
+            .filter(el => !el.closest('#ai-copilot-sidebar'));
+          for (const el of emailElems) {
+            const val = el.getAttribute('data-email') || el.getAttribute('data-mailto') || '';
+            if (isValidJobEmail(val)) return val.toLowerCase().trim();
+          }
+
+          // 4. High-priority contextual regex ("send resume to ...", "apply at ...", "share your cv with ...")
+          const priorityRegex = /(?:send|email|forward|share|submit|reach|contact|write|apply|mail)(?:\s+[\w\s]{0,25})?\s*(?:to|at|via)?\s*[:\-]?\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/gi;
+          let match;
+          const textSources = [desc, document.body?.innerText || ''];
+          for (const text of textSources) {
+            if (!text) continue;
+            while ((match = priorityRegex.exec(text)) !== null) {
+              if (isValidJobEmail(match[1])) return match[1].toLowerCase().replace(/[.,;!?)]+$/, '');
+            }
+          }
+
+          // 5. If company name is a domain (like "persistence.dev") or company is known:
+          if (targetComp && targetComp.includes('.')) {
+            const domain = targetComp.toLowerCase().trim();
+            const domainRegex = new RegExp(`\\b([a-zA-Z0-9._%+-]+@${domain.replace('.', '\\.')})\\b`, 'i');
+            const dMatch = (document.body?.innerText || '').match(domainRegex);
+            if (dMatch && isValidJobEmail(dMatch[1])) return dMatch[1].toLowerCase();
+          }
+
+          // 6. Scan description and main job container for any valid email
+          if (desc) {
+            const anyEmailRegex = /\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/g;
+            while ((match = anyEmailRegex.exec(desc)) !== null) {
+              if (isValidJobEmail(match[0])) return match[0].toLowerCase().replace(/[.,;!?)]+$/, '');
+            }
+          }
+
+          const container = document.querySelector('[class*="job-description" i], [class*="job-details" i], [class*="posting" i], main, article, #content, .content');
+          if (container) {
+            const anyEmailRegex = /\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/g;
+            const cText = container.innerText || '';
+            while ((match = anyEmailRegex.exec(cText)) !== null) {
+              if (isValidJobEmail(match[0])) return match[0].toLowerCase().replace(/[.,;!?)]+$/, '');
+            }
+          }
+        } catch (e) {
+          console.warn('[AI Copilot] extractEmailFromPage error:', e);
+        }
+        return '';
+      }
+
+      if (!pageEmail) {
+        pageEmail = extractEmailFromPage(description, company);
+      }
+    } catch (err) {
+      console.warn('[AI Copilot] Error in extractJobDetails:', err);
     }
-
-    const pageEmail = extractEmailFromPage(description);
 
     return {
       company: (company || 'Company').trim(),
       role: (role || 'Software Engineer').trim(),
       description: (description || '').trim(),
-      location: (location || '').trim(),
-      email: pageEmail
+      location: (typeof jobLocation === 'string' ? jobLocation : '').trim(),
+      email: pageEmail || ''
     };
   }
 

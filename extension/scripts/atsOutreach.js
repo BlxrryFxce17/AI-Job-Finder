@@ -58,40 +58,52 @@
   }
 
   function initMatchTabUI() {
-    const job = extractJobDetails();
-    const roleElem = document.getElementById('ai-ats-target-role');
-    const compElem = document.getElementById('ai-ats-target-company');
-    if (roleElem) roleElem.textContent = job.role || 'Software Engineer';
-    if (compElem) compElem.textContent = job.company || 'Target Company';
+    try {
+      const job = extractJobDetails();
+      const roleElem = document.getElementById('ai-ats-target-role');
+      const compElem = document.getElementById('ai-ats-target-company');
+      if (roleElem) roleElem.textContent = job.role || 'Software Engineer';
+      if (compElem) compElem.textContent = job.company || 'Target Company';
 
-    // Pre-fill subject line if empty
-    const subjectInp = document.getElementById('ai-outreach-subject');
-    if (subjectInp && !subjectInp.value) {
+      // Pre-fill subject line if empty or if containing default placeholder
+      const subjectInp = document.getElementById('ai-outreach-subject');
       const cName = cachedProfile?.name || cachedProfile?.firstName || 'Candidate';
-      subjectInp.value = `Application: ${job.role || 'Software Engineer'} – ${cName}`;
-    }
-
-    // Auto-attach detected email from page if present
-    const emailInp = document.getElementById('ai-recruiter-email');
-    const hint = document.getElementById('ai-email-hint');
-    const badge = document.getElementById('ai-email-source-badge');
-    if (emailInp && !emailInp.value && job.email) {
-      emailInp.value = job.email;
-      if (badge) {
-        badge.style.display = 'inline-block';
-        badge.textContent = 'Found on Page';
-        badge.style.background = 'rgba(16, 185, 129, 0.2)';
-        badge.style.color = '#34d399';
+      if (subjectInp && (!subjectInp.value || subjectInp.value.includes('Software Engineer - Your Name') || subjectInp.value.includes('Your Name'))) {
+        subjectInp.value = `Application: ${job.role || 'Software Engineer'} – ${cName}`;
       }
-      if (hint) {
-        hint.textContent = `✓ Auto-attached contact email directly from this page: ${job.email}`;
-        hint.style.color = '#34d399';
-      }
-    }
 
-    // Auto-analyze once if not analyzed yet
-    if (!currentAtsScoreData) {
-      analyzeAtsMatch();
+      // Auto-attach detected email from page if present
+      const emailInp = document.getElementById('ai-recruiter-email');
+      const hint = document.getElementById('ai-email-hint');
+      const badge = document.getElementById('ai-email-source-badge');
+      if (emailInp && job.email) {
+        if (!emailInp.value || emailInp.value === 'recruiter@company.com') {
+          emailInp.value = job.email;
+        }
+        if (badge) {
+          badge.style.display = 'inline-block';
+          badge.textContent = 'Found on Page';
+          badge.style.background = 'rgba(16, 185, 129, 0.2)';
+          badge.style.color = '#34d399';
+        }
+        if (hint) {
+          hint.textContent = `✓ Auto-attached contact email directly from this page: ${job.email}`;
+          hint.style.color = '#34d399';
+        }
+      }
+
+      // Auto-analyze once if not analyzed yet
+      if (!currentAtsScoreData) {
+        analyzeAtsMatch();
+      }
+
+      // Auto-draft cold outreach email if empty
+      const bodyTa = document.getElementById('ai-outreach-body');
+      if (bodyTa && !bodyTa.value) {
+        draftOutreachEmail();
+      }
+    } catch (err) {
+      console.warn('[AI Copilot] Error in initMatchTabUI:', err);
     }
   }
 
@@ -505,10 +517,14 @@
 
   // ── Cover Letter Methods ───────────────────────────────────────────────────
   function initCoverLetterTabUI() {
-    getActivePersona().then(p => updatePersonaBadges(p));
-    const text = document.getElementById('ai-cover-letter-text')?.value?.trim();
-    if (!text) {
-      generateCoverLetter();
+    try {
+      getActivePersona().then(p => updatePersonaBadges(p));
+      const text = document.getElementById('ai-cover-letter-text')?.value?.trim();
+      if (!text) {
+        generateCoverLetter();
+      }
+    } catch (err) {
+      console.warn('[AI Copilot] Error in initCoverLetterTabUI:', err);
     }
   }
 

@@ -1111,10 +1111,38 @@ router.post('/discover-email', async (req, res) => {
   }
 });
 
+// Job Portal Blacklist for backend sanitization across all extension endpoints
+const BACKEND_PORTAL_BLACKLIST = [
+  'firstoffer', 'firstoffer.online', 'first offer',
+  'wellfound', 'angellist', 'angel list',
+  'y combinator', 'work at a startup', 'yc',
+  'linkedin', 'indeed', 'glassdoor',
+  'naukri', 'naukri.com', 'foundit', 'monster',
+  'cutshort', 'instahyre', 'hirist', 'shine', 'freshersworld',
+  'hiringcafe', 'otta', 'built in', 'builtin',
+  'internshala', 'unstop', 'cuvette', 'techfetch', 'dice',
+  'ziprecruiter', 'google jobs', 'remoteok', 'weworkremotely',
+  'jobicy', 'simplyhired', 'careerbuilder', 'join.com',
+  'breezy', 'greenhouse', 'lever', 'workday', 'ashby',
+  'smartrecruiters', 'workable', 'recruitee', 'jobvite', 'bamboohr'
+];
+
+function isBackendPortalName(name) {
+  if (!name || typeof name !== 'string') return true;
+  const clean = name.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!clean || clean.length < 2 || clean === 'company' || clean === 'unknown') return true;
+  for (const p of BACKEND_PORTAL_BLACKLIST) {
+    const pClean = p.replace(/[^a-z0-9]/g, '');
+    if (clean === pClean || (clean.length <= pClean.length + 3 && pClean.length <= clean.length + 3 && clean.includes(pClean))) return true;
+  }
+  return false;
+}
+
 // ── 7. Draft Cold Outreach Email (Using AI Webapp Engine) ──────────────────
 router.post('/draft-email', async (req, res) => {
   try {
-    const { company, role, jobDescription, recipientEmail, persona } = req.body;
+    const { company, role, jobTitle, jobDescription, recipientEmail, persona } = req.body;
+    const effectiveRole = role || jobTitle || 'Software Engineer';
     let userId = null;
     let profile = null;
 
@@ -1128,35 +1156,9 @@ router.post('/draft-email', async (req, res) => {
         profile = await Profile.findOne({ userId });
       } catch (_) {}
     }
+    if (!profile && req.body.profile) profile = req.body.profile;
     if (!profile) profile = await Profile.findOne().sort({ updatedAt: -1 });
-    if (!profile) return res.status(404).json({ error: 'Profile not found. Please sync profile in extension.' });
-
-    // Job Portal Blacklist for backend sanitization
-    const BACKEND_PORTAL_BLACKLIST = [
-      'firstoffer', 'firstoffer.online', 'first offer',
-      'wellfound', 'angellist', 'angel list',
-      'y combinator', 'work at a startup', 'yc',
-      'linkedin', 'indeed', 'glassdoor',
-      'naukri', 'naukri.com', 'foundit', 'monster',
-      'cutshort', 'instahyre', 'hirist', 'shine', 'freshersworld',
-      'hiringcafe', 'otta', 'built in', 'builtin',
-      'internshala', 'unstop', 'cuvette', 'techfetch', 'dice',
-      'ziprecruiter', 'google jobs', 'remoteok', 'weworkremotely',
-      'jobicy', 'simplyhired', 'careerbuilder', 'join.com',
-      'breezy', 'greenhouse', 'lever', 'workday', 'ashby',
-      'smartrecruiters', 'workable', 'recruitee', 'jobvite', 'bamboohr'
-    ];
-
-    function isBackendPortalName(name) {
-      if (!name || typeof name !== 'string') return true;
-      const clean = name.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (!clean || clean.length < 2 || clean === 'company' || clean === 'unknown') return true;
-      for (const p of BACKEND_PORTAL_BLACKLIST) {
-        const pClean = p.replace(/[^a-z0-9]/g, '');
-        if (clean === pClean || (clean.length <= pClean.length + 3 && pClean.length <= clean.length + 3 && clean.includes(pClean))) return true;
-      }
-      return false;
-    }
+    if (!profile) profile = { name: req.body.candidateName || 'Akash V', skills: ['TypeScript', 'Node.js', 'React'] };
 
     function buildExtensionSignOff(p, candName) {
       const name = candName || p?.name || 'Akash V';
@@ -1199,7 +1201,7 @@ router.post('/draft-email', async (req, res) => {
       }
     }
 
-    const targetRole = (role || 'Software Engineer').trim();
+    const targetRole = effectiveRole.trim();
     const candidateName = profile.name || 'Candidate';
     const signOffBlock = buildExtensionSignOff(profile, candidateName);
 
@@ -1378,7 +1380,7 @@ router.post('/send-outreach-email', async (req, res) => {
 // ── 9. Tailored Cover Letter Generator ─────────────────────────────────────
 router.post('/generate-cover-letter', async (req, res) => {
   try {
-    const { company, role, jobDescription, persona } = req.body;
+    const { company, role, jobTitle, jobDescription, persona } = req.body;
     let userId = null;
     let profile = null;
 
@@ -1394,6 +1396,7 @@ router.post('/generate-cover-letter', async (req, res) => {
     }
     if (!profile && req.body.profile) profile = req.body.profile;
     if (!profile) profile = await Profile.findOne().sort({ updatedAt: -1 });
+    if (!profile) profile = { name: req.body.candidateName || 'Akash V.', skills: ['TypeScript', 'Node.js', 'React'] };
 
     let targetCompany = (company || '').trim();
     if (isBackendPortalName(targetCompany)) {
@@ -1404,7 +1407,7 @@ router.post('/generate-cover-letter', async (req, res) => {
         targetCompany = 'the engineering team';
       }
     }
-    const targetRole = role || 'Software Engineer';
+    const targetRole = role || jobTitle || 'Software Engineer';
     const candidateName = req.body.candidateName || profile?.name || 'Akash V.';
     const candidateEmail = profile?.email || req.body.candidateEmail || '';
     const candidatePhone = profile?.phone || req.body.candidatePhone || '';
