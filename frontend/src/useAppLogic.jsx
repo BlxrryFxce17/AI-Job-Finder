@@ -377,6 +377,7 @@ export function useAppLogic() {
       try {
         let discoveredEmail = job.emailRecipient;
         let deliverabilityScore = job.deliverabilityScore || 0;
+        let currentHrName = job.hrName || null;
 
         if (!discoveredEmail) {
           setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Running multi-layer email discovery & mailbox verification...`] }));
@@ -394,6 +395,7 @@ export function useAppLogic() {
           const discData = await discRes.json();
           discoveredEmail = discData.email || '';
           deliverabilityScore = discData.deliverabilityScore || 0;
+          if (discData.hrName) currentHrName = discData.hrName;
 
           if (discoveredEmail) {
             setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] ✅ Verified mailbox: ${discoveredEmail} (Deliverability: ${deliverabilityScore}%)`] }));
@@ -429,7 +431,7 @@ export function useAppLogic() {
           setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Generating tailored pitch citing verified GitHub projects...`] }));
           const genRes = await apiFetch(`${API_BASE}/api/generate-email`, {
              method: 'POST', headers: { 'Content-Type': 'application/json' },
-             body: JSON.stringify({ company: job.company, role: job.role, jd: job.jd, emailType: 'Cold Outreach / Networking' })
+             body: JSON.stringify({ company: job.company, role: job.role, jd: job.jd, emailType: 'Cold Outreach / Networking', hrName: currentHrName })
           });
           const genData = await genRes.json();
           

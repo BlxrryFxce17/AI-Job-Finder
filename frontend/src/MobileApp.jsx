@@ -2590,7 +2590,10 @@ export default function MobileApp(props) {
               <input name="role" className="form-input" placeholder="e.g. Engineer (Optional)" />
 
               <label className="mobile-label">Recipient Email</label>
-              <input name="recipientEmail" type="email" className="form-input" placeholder="e.g. hr@company.com (Optional — auto-detected from JD)" />
+              <input name="recipientEmail" type="email" className="form-input" placeholder="e.g. hr@company.com" />
+
+              <label className="mobile-label">HR / Recruiter Name</label>
+              <input name="hrName" className="form-input" placeholder="e.g. John Doe (Changes format)" />
 
               <label className="mobile-label">Job Description</label>
               <textarea name="jd" required className="form-input" style={{ minHeight: '200px' }} placeholder="Paste JD here..."></textarea>

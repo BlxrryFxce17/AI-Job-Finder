@@ -4427,9 +4427,15 @@ export default function DesktopApp(props) {
                   <input name="role" className="form-input" style={{ width: '100%' }} placeholder="e.g. Senior Software Engineer (Optional)" />
                 </div>
               </div>
-              <div>
-                <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-2)', fontSize: '13px' }}>Recipient Email</label>
-                <input name="recipientEmail" type="email" className="form-input" style={{ width: '100%' }} placeholder="e.g. hiring@company.com (Optional — auto-detected from JD if present)" />
+              <div className="form-row">
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-2)', fontSize: '13px' }}>Recipient Email</label>
+                  <input name="recipientEmail" type="email" className="form-input" style={{ width: '100%' }} placeholder="e.g. hiring@company.com" />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-2)', fontSize: '13px' }}>HR / Recruiter Name</label>
+                  <input name="hrName" className="form-input" style={{ width: '100%' }} placeholder="e.g. John Doe (Changes format to connection mail)" />
+                </div>
               </div>
               <div>
                 <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-2)', fontSize: '13px' }}>Job Description</label>

@@ -312,7 +312,7 @@ function resolveCleanCompany(rawCompany, jdText) {
 }
 
 router.post('/generate-email', requireAuth, async (req, res) => {
-  const { company, role, type, jd } = req.body;
+  const { company, role, type, jd, hrName } = req.body;
 
   try {
     const profile = await getProfile(req.user.id);
@@ -323,10 +323,11 @@ router.post('/generate-email', requireAuth, async (req, res) => {
     const gitInsightText = buildGitInsightText(profile, jd, role, company);
 
     const cleanCompany = resolveCleanCompany(company, jd);
-    const targetCompany = cleanCompany || 'the engineering team';
+    const targetCompany = cleanCompany || 'the team';
     const targetRole = role || 'the open role';
+    const targetRecipient = hrName ? hrName : `the engineering team at ${targetCompany}`;
 
-    const prompt = `You are a talented software engineer named "${profile.name}" writing a direct, natural cold email to the engineering team at ${targetCompany} for the "${targetRole}" position.
+    const prompt = `You are a talented software engineer named "${profile.name}" writing a direct, natural cold email to ${targetRecipient} for the "${targetRole}" position.
 Context: ${type}
 Tone: Confident, authentic, conversational software engineer talking directly to another technical lead. (ZERO corporate sycophancy, zero generic cover-letter filler, NO robotic AI slop).
 Here is the official Job Description:
@@ -375,10 +376,11 @@ CRITICAL RULES FOR WRITING A REAL, AUTHENTIC HUMAN COLD EMAIL:
 7. OUTPUT FORMAT:
 COMPANY: [Extracted Company Name or "${targetCompany}"]
 ROLE: [Extracted Job Title or "${targetRole}"]
-SUBJECT: [Exact subject requested in JD if any, or default "Application for [Role] - ${profile.name}"]
+SUBJECT: [Exact subject requested in JD if any, or default "${hrName ? `Connecting: ${targetRole} at ${targetCompany}` : `Application for ${targetRole} - ${profile.name}`}"]
 BODY:
-[If company is unknown/generic, start with: Hi there,]
-[Otherwise start with: Hi [Extracted Company Name] Team,]
+[If company is unknown/generic and no HR name, start with: Hi there,]
+[If HR name is provided, start with: Hi ${hrName ? hrName.split(' ')[0] : ''},]
+[Otherwise start with: Hi ${targetCompany} Team,]
 
 [Start of email body without any conversational filler or markdown blocks]`;
 
@@ -489,7 +491,7 @@ router.post('/send-email', requireAuth, async (req, res) => {
 });
 
 router.post('/single-draft', requireAuth, async (req, res) => {
-  const { company, role, jd, recipientEmail } = req.body;
+  const { company, role, jd, recipientEmail, hrName } = req.body;
 
   try {
     const profile = await getProfile(req.user.id, true);
@@ -502,10 +504,11 @@ router.post('/single-draft', requireAuth, async (req, res) => {
     const gitInsightText = buildGitInsightText(profile, jd, role, company);
 
     const cleanCompany = resolveCleanCompany(company, jd);
-    const targetCompany = cleanCompany || 'the engineering team';
+    const targetCompany = cleanCompany || 'the team';
     const targetRole = role || 'the open role';
+    const targetRecipient = hrName ? hrName : `the technical hiring team at ${targetCompany}`;
 
-    const prompt = `You are a talented software engineer named "${profile.name}" writing a direct, natural cold email to the technical hiring team at ${targetCompany} for the "${targetRole}" position. 
+    const prompt = `You are a talented software engineer named "${profile.name}" writing a direct, natural cold email to ${targetRecipient} for the "${targetRole}" position. 
 Context: Cold Outreach / Networking
 Tone: Confident, authentic, conversational software engineer talking directly to another technical lead. (ZERO corporate sycophancy, zero generic cover-letter filler, NO robotic AI slop).
 Here is the official Job Description:
@@ -551,10 +554,11 @@ CRITICAL RULES FOR WRITING A REAL, AUTHENTIC HUMAN COLD EMAIL:
 7. OUTPUT FORMAT:
 COMPANY: [Extracted Company Name or "${targetCompany}"]
 ROLE: [Extracted Job Title or "${targetRole}"]
-SUBJECT: [Exact subject requested in JD if any, or default "Application for [Role] - ${profile.name}"]
+SUBJECT: [Exact subject requested in JD if any, or default "${hrName ? `Connecting: ${targetRole} at ${targetCompany}` : `Application for ${targetRole} - ${profile.name}`}"]
 BODY:
-[If company is unknown/generic, start with: Hi there,]
-[Otherwise start with: Hi [Extracted Company Name] Team,]
+[If company is unknown/generic and no HR name, start with: Hi there,]
+[If HR name is provided, start with: Hi ${hrName ? hrName.split(' ')[0] : ''},]
+[Otherwise start with: Hi ${targetCompany} Team,]
 
 [Start of email body without any conversational filler or markdown blocks]`;
 
