@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken');
 const ApiUsage = require('../models/ApiUsage');
 const Job = require('../models/Job');
 const User = require('../models/User');
+const { getBestGroqModel, getBestGeminiModel } = require('../utils/ai');
 
 // Auth middleware helper: permissive so telemetry always loads reliably
 const optionalAuth = (req, res, next) => {
@@ -186,9 +187,12 @@ router.get('/usage', optionalAuth, async (req, res) => {
 
     const serperExhausted = Boolean(process.env.SERPER_API_KEY && (thirtyDayMap['Serper']?.requests || 0) > 2000);
 
+    const currentGroqModel = process.env.GROQ_MODEL || await getBestGroqModel();
+    const currentGeminiModel = process.env.GEMINI_MODEL || await getBestGeminiModel();
+
     const services = {
       groq: {
-        name: 'Groq (Qwen 3.8 27B)',
+        name: `Groq (${currentGroqModel})`,
         role: 'Primary AI Model',
         tokensToday: groqTokensToday,
         requestsToday: groqReqsToday,
@@ -199,7 +203,7 @@ router.get('/usage', optionalAuth, async (req, res) => {
         status: groqReqsToday > 14000 ? 'warning' : 'healthy'
       },
       gemini: {
-        name: 'Google Gemini (2.5 Flash)',
+        name: `Google Gemini (${currentGeminiModel})`,
         role: 'Autonomous Failover',
         tokensToday: geminiTokensToday,
         requestsToday: geminiReqsToday,
