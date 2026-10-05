@@ -44,71 +44,11 @@ const recordApiUsage = async ({
   }
 };
 
-let cachedGroqModel = null;
-let lastGroqFetch = 0;
-
-async function getBestGroqModel() {
-  if (cachedGroqModel && Date.now() - lastGroqFetch < 1000 * 60 * 60 * 24) {
-    return cachedGroqModel;
-  }
-  try {
-    const list = await groq.models.list();
-    const models = list.data.map(m => m.id);
-    const preferences = [
-      'llama-3.3-70b-versatile',
-      'llama-3.1-70b-versatile',
-      'qwen-2.5-32b-it',
-      'llama-3.2-90b-text-preview',
-      'mixtral-8x7b-32768',
-      'llama-3.1-8b-instant',
-      'llama3-70b-8192'
-    ];
-    for (const pref of preferences) {
-      if (models.includes(pref)) {
-        cachedGroqModel = pref;
-        lastGroqFetch = Date.now();
-        return pref;
-      }
-    }
-    const textModels = models.filter(m => !m.includes('whisper') && !m.includes('vision'));
-    if (textModels.length > 0) {
-      cachedGroqModel = textModels[0];
-      lastGroqFetch = Date.now();
-      return textModels[0];
-    }
-  } catch (err) {
-    console.warn("[Groq] Failed to fetch models list dynamically:", err.message);
-  }
-  return 'llama-3.3-70b-versatile';
-}
-
-let cachedGeminiModel = null;
-let lastGeminiFetch = 0;
-
-async function getBestGeminiModel() {
-  if (cachedGeminiModel && Date.now() - lastGeminiFetch < 1000 * 60 * 60 * 24) {
-    return cachedGeminiModel;
-  }
-  // Google's core endpoints are very stable, flash is always reliable, but we can verify dynamically if needed.
-  // For now, we will stick to known reliable models that do not break easily to avoid overhead,
-  // but let's implement dynamic discovery for Gemini too.
-  try {
-    // Note: Gemini SDK for node might not expose a simple listModels without rest API, but we'll try a fallback check
-    // Actually, gemini-1.5-flash is stable and rolling.
-    cachedGeminiModel = 'gemini-1.5-flash';
-    lastGeminiFetch = Date.now();
-    return cachedGeminiModel;
-  } catch(e) {
-    return 'gemini-1.5-flash';
-  }
-}
-
-
 const callAIWithRetry = async (prompt, retries = 5, delayMs = 3000, options = {}) => {
   const action = options.action || 'Cold Email Generation';
   const userId = options.userId || null;
-  const GROQ_MODEL = process.env.GROQ_MODEL || await getBestGroqModel();
-  const GEMINI_MODEL = process.env.GEMINI_MODEL || await getBestGeminiModel();
+  const GROQ_MODEL = process.env.GROQ_MODEL || 'qwen/qwen3.8-27b';
+  const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
   for (let i = 0; i < retries; i++) {
     try {
@@ -198,4 +138,4 @@ const callAIWithRetry = async (prompt, retries = 5, delayMs = 3000, options = {}
   }
 };
 
-module.exports = { callAIWithRetry, recordApiUsage, getBestGroqModel, getBestGeminiModel };
+module.exports = { callAIWithRetry, recordApiUsage };
