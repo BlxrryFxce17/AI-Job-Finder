@@ -10,7 +10,7 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const cron = require('node-cron');
 const { callAIWithRetry } = require('./utils/ai');
-const { checkGmailForReply, sendEmailViaAPI, formatEmailTextToHtml, cleanDraftEmailText, stripSignOff, generateFollowUpEmail, buildSignatureLinks, buildPlainTextSignature } = require('./utils/email');
+const { checkGmailForReply, processBounces, sendEmailViaAPI, formatEmailTextToHtml, cleanDraftEmailText, stripSignOff, generateFollowUpEmail, buildSignatureLinks, buildPlainTextSignature } = require('./utils/email');
 
 // Import Models
 const User = require('./models/User');
@@ -97,6 +97,9 @@ cron.schedule('0 9 * * *', async () => {
     const users = await User.find({ googleRefreshToken: { $exists: true, $ne: null } });
 
     for (const user of users) {
+      // Process incoming bounces for this user
+      await processBounces(user);
+
       const profile = await Profile.findOne({ userId: user._id });
       if (!profile) continue;
 

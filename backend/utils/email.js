@@ -282,6 +282,54 @@ async function checkGmailForReply(user, recipientEmail) {
   }
 }
 
+async function processBounces(user) {
+  if (!user.googleRefreshToken) return;
+
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET
+  );
+  oauth2Client.setCredentials({ refresh_token: user.googleRefreshToken });
+  const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+  try {
+    const res = await gmail.users.messages.list({
+      userId: 'me',
+      q: 'from:mailer-daemon OR from:postmaster subject:"Delivery Status Notification" OR subject:"Undeliverable" newer_than:1d',
+      maxResults: 20
+    });
+
+    if (!res.data.messages || res.data.messages.length === 0) return;
+    
+    // Require Job dynamically to avoid circular dependencies if any
+    const Job = require('../models/Job');
+
+    for (const msg of res.data.messages) {
+      const msgData = await gmail.users.messages.get({
+        userId: 'me',
+        id: msg.id,
+        format: 'full'
+      });
+      
+      const snippet = msgData.data.snippet || '';
+      const emailMatch = snippet.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+      if (emailMatch) {
+        const bouncedEmail = emailMatch[0].toLowerCase();
+        
+        const jobs = await Job.find({ emailRecipient: bouncedEmail, userId: user._id, status: { $ne: 'Bounced' } });
+        for (const job of jobs) {
+           job.status = 'Bounced';
+           await job.save();
+           await learnFromBounce(job.company, bouncedEmail);
+           console.log(`[Deliverability] Processed bounce for ${bouncedEmail} and blacklisted for company ${job.company}`);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error processing Gmail bounces:', err.message);
+  }
+}
+
 function stripQuotedEmailText(text) {
   if (!text) return { clean: '', quoted: '' };
   
@@ -1183,18 +1231,19 @@ ${job.emailDraft || 'Initial application sent for ' + roleName}
 ${dayGuidelines}
 
 CRITICAL RULES (ABSOLUTE COMPLIANCE REQUIRED):
-1. ZERO PLACEHOLDERS: NEVER output bracketed placeholders like [Your Name], [Name], [Candidate Name], [Company], [Link], [Phone], etc. Use real details or omit them entirely.
-2. STRICTLY NO SIGN-OFF OR CLOSING: DO NOT include any sign-off whatsoever (NO "Best regards,", "Sincerely,", "Warm regards,", "Cheers,", "Thanks,", and DO NOT include your name or "[Your Name]" at the end). The backend dispatch system will automatically append your verified signature with contact links. End IMMEDIATELY on the last sentence of your email body.
-3. ANTI-AI CLICHÉS (NO ROBOTIC CORPORATE FLUFF): NEVER write stiff phrases like:
+1. VARY YOUR TEMPLATES: NEVER use a static format. Write highly personalized, distinct messages tailored to the specific context. Avoid aggressive follow-up syntax, excessive hyperlinks, or repeating generic catchphrases.
+2. ZERO PLACEHOLDERS: NEVER output bracketed placeholders like [Your Name], [Name], [Candidate Name], [Company], [Link], [Phone], etc. Use real details or omit them entirely.
+3. STRICTLY NO SIGN-OFF OR CLOSING: DO NOT include any sign-off whatsoever (NO "Best regards,", "Sincerely,", "Warm regards,", "Cheers,", "Thanks,", and DO NOT include your name or "[Your Name]" at the end). The backend dispatch system will automatically append your verified signature with contact links. End IMMEDIATELY on the last sentence of your email body.
+4. ANTI-AI CLICHÉS (NO ROBOTIC CORPORATE FLUFF): NEVER write stiff phrases like:
    - "regarding my technical experience to assist in your decision-making process"
    - "I look forward to the possibility of discussing how my skills can benefit..."
    - "I am writing to follow up on my previous application"
    - "I hope this email finds you well"
    - "Please do not hesitate to contact me"
    Write in a genuine, confident, human developer voice.
-4. STARTING LINE: Start immediately with:
+5. STARTING LINE: Start immediately with:
 ${greeting}
-5. OUTPUT FORMAT: Return strictly the plain-text email body. No markdown fences (\`\`\`), no subject line, and no intro/outro commentary.`;
+6. OUTPUT FORMAT: Return strictly the plain-text email body. No markdown fences (\`\`\`), no subject line, and no intro/outro commentary.`;
 
   const response = await callAIWithRetry(prompt, 3, 2000);
   let rawText = response.text.replace(/```(?:html|json|markdown)?\s*([\s\S]*?)```/g, '$1').trim();
@@ -1296,6 +1345,7 @@ function buildPlainTextSignature(profile, trackClick = (url) => url) {
 module.exports = {
   sendEmailViaAPI,
   checkGmailForReply,
+  processBounces,
   getInboxReplies,
   discoverEmailForJob,
   resolveCompanyDomain,

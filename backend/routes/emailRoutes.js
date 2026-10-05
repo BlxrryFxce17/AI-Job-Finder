@@ -345,9 +345,11 @@ ${profile.linkedin ? `Candidate LinkedIn: ${profile.linkedin}` : ''}
 ${gitInsightText}
 
 CRITICAL RULES FOR WRITING A REAL, AUTHENTIC HUMAN COLD EMAIL:
-1. THE OPENING HOOK (ZERO FLATTERY, DIRECT RELEVANCE):
+1. VARY YOUR TEMPLATES & OPENING HOOK (ZERO FLATTERY, DIRECT RELEVANCE):
+   - ALWAYS vary the structure of your email. Do NOT use a static format with swapped-out keywords. Write highly personalized, distinct messages tailored specifically for this Job Description.
    - NEVER open with empty corporate praise like "Your mission to simplify ecosystems...", "I was excited to see...", or "I am writing to express interest in...". Tech leads delete these instantly.
    - Start immediately with a natural 1-2 sentence hook. State the open role and directly reference 1-2 core technologies or challenges from the Job Description.
+   - Avoid aggressive syntax, excessive hyperlinks, or repeating generic catchphrases. Keep it professional and distinct.
    - Example opening: "Hi ${targetCompany} Team, I saw you're hiring for a ${targetRole} and wanted to reach out directly. I've been actively building full-stack web applications with [relevant tech], focusing on [specific mechanism]."
 
 2. AUTHENTIC HUMAN VOICE & STRICTLY ZERO BULLET POINTS:
@@ -519,9 +521,11 @@ ${achText}
 ${gitInsightText}
 
 CRITICAL RULES FOR WRITING A REAL, AUTHENTIC HUMAN COLD EMAIL:
-1. THE OPENING HOOK (ZERO FLATTERY, DIRECT RELEVANCE):
+1. VARY YOUR TEMPLATES & OPENING HOOK (ZERO FLATTERY, DIRECT RELEVANCE):
+   - ALWAYS vary the structure of your email. Do NOT use a static format with swapped-out keywords. Write highly personalized, distinct messages tailored specifically for this Job Description.
    - NEVER open with empty corporate praise like "Your mission to simplify ecosystems...", "I was excited to see...", or "I am writing to express interest in...". Tech leads delete these instantly.
    - Start immediately with a natural 1-2 sentence hook. State the open role and directly reference 1-2 core technologies or challenges from the Job Description.
+   - Avoid aggressive syntax, excessive hyperlinks, or repeating generic catchphrases. Keep it professional and distinct.
    - Example opening: "Hi ${targetCompany} Team, I saw you're hiring for a ${targetRole} and wanted to reach out directly. I've been actively building full-stack web applications with [relevant tech], focusing on [specific mechanism]."
 
 2. AUTHENTIC HUMAN VOICE & STRICTLY ZERO BULLET POINTS:
