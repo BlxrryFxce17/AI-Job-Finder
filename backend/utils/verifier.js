@@ -569,30 +569,30 @@ async function verifyEmail(email, options = {}) {
   if (isRecruitmentInbox) {
     return finalizeResult({
       isValid: true,
-      score: 80,
-      deliverabilityScore: 80,
-      status: 'deliverable',
-      reason: 'Active corporate mail server verified with standard recruitment inbox',
-      canAutoSend: true
+      score: 55,
+      deliverabilityScore: 55,
+      status: 'risky',
+      reason: 'Standard recruitment inbox (unconfirmed by API/SMTP, risky)',
+      canAutoSend: false
     });
   }
 
   if (isHrNamedPattern) {
     return finalizeResult({
       isValid: true,
-      score: 75,
-      deliverabilityScore: 75,
-      status: 'deliverable',
-      reason: 'Active corporate mail server verified with recruiter profile pattern',
-      canAutoSend: true
+      score: 50,
+      deliverabilityScore: 50,
+      status: 'risky',
+      reason: 'Recruiter name pattern (unconfirmed by API/SMTP, risky)',
+      canAutoSend: false
     });
   }
 
   // Unconfirmed individual mailbox on verified corporate domain
   return finalizeResult({
     isValid: true,
-    score: 65,
-    deliverabilityScore: 65,
+    score: 40,
+    deliverabilityScore: 40,
     status: 'risky',
     reason: 'Active corporate mail server verified (individual mailbox unconfirmed by external API)',
     canAutoSend: false
