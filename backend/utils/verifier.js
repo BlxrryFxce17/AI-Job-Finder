@@ -569,22 +569,22 @@ async function verifyEmail(email, options = {}) {
   if (isRecruitmentInbox) {
     return finalizeResult({
       isValid: true,
-      score: 55,
-      deliverabilityScore: 55,
-      status: 'risky',
-      reason: 'Standard recruitment inbox (unconfirmed by API/SMTP, risky)',
-      canAutoSend: false
+      score: 65,
+      deliverabilityScore: 65,
+      status: 'deliverable',
+      reason: 'Standard recruitment inbox (unconfirmed by API/SMTP, but MX active)',
+      canAutoSend: true
     });
   }
 
   if (isHrNamedPattern) {
     return finalizeResult({
       isValid: true,
-      score: 50,
-      deliverabilityScore: 50,
-      status: 'risky',
-      reason: 'Recruiter name pattern (unconfirmed by API/SMTP, risky)',
-      canAutoSend: false
+      score: 65,
+      deliverabilityScore: 65,
+      status: 'deliverable',
+      reason: 'Recruiter name pattern (unconfirmed by API/SMTP, but MX active)',
+      canAutoSend: true
     });
   }
 

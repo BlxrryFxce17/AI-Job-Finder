@@ -363,7 +363,7 @@ export function useAppLogic() {
     
     while (batchQueueRef.current.length > 0 && isBatchingRef.current) {
       const jobId = batchQueueRef.current.shift();
-      const job = jobs.find(j => j.id === jobId);
+      const job = jobs.find(j => j.id === jobId || (j._id && j._id.toString() === jobId.toString()));
       if (!job) continue;
 
       processed++;

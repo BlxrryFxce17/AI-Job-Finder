@@ -3,7 +3,7 @@ const dns = require('dns');
 // Set reliable public DNS servers to prevent SRV lookup failures (ESERVFAIL) on local network resolvers
 try {
   dns.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4', '1.0.0.1']);
-} catch (e) {}
+} catch (e) { }
 
 const express = require('express');
 const cors = require('cors');
@@ -26,6 +26,7 @@ const trackingRoutes = require('./routes/trackingRoutes');
 const followupRoutes = require('./routes/followupRoutes');
 const aiRoutes = require('./routes/aiRoutes');
 const extensionRoutes = require('./routes/extensionRoutes');
+const blocklistRoutes = require('./routes/blocklistRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -84,6 +85,7 @@ app.use('/api', trackingRoutes); // track-open, track-click
 app.use('/api', followupRoutes); // send-followup, check-followups
 app.use('/api/ai', aiRoutes); // usage, credits, quotas, metrics
 app.use('/api/extension', extensionRoutes); // Extension profile, AI question answer, log job
+app.use('/api/blocklist', blocklistRoutes);
 
 // Keep-Alive Ping Endpoint
 app.get('/api/ping', (req, res) => {
@@ -118,7 +120,7 @@ cron.schedule('0 11 * * *', async () => {
         if (targetDay === 0) continue;
 
         const existingFollowUp = job.followUps && job.followUps.find(f => f.day === targetDay);
-        
+
         if (existingFollowUp && existingFollowUp.sent) {
           continue; // Already sent this day's follow-up
         }
@@ -196,7 +198,7 @@ cron.schedule('0 11 * * *', async () => {
             };
 
             const sendRes = await sendEmailViaAPI(user, mailOptions);
-            
+
             // Mark as sent
             const fUpIndex = job.followUps.findIndex(f => f.day === targetDay);
             if (fUpIndex !== -1) {
@@ -213,7 +215,7 @@ cron.schedule('0 11 * * *', async () => {
       }
     }
     console.log('[Cron] Follow-up check complete.');
-    
+
     // Heartbeat ping to UptimeRobot
     if (process.env.UPTIMEROBOT_HEARTBEAT_URL) {
       const https = require('https');

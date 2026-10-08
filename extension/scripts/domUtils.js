@@ -981,6 +981,22 @@
       }
 
       // ── Universal Multi-Strategy Extraction for Portals & Direct Career Sites ──
+      
+      // LinkedIn Profile Special Handling
+      if (window.location.hostname.includes('linkedin.com') && window.location.pathname.includes('/in/')) {
+        const headlineEl = document.querySelector('div.text-body-medium.break-words');
+        if (headlineEl) role = headlineEl.textContent.trim();
+
+        const rightPanelBadge = document.querySelector('.pv-text-details__right-panel .pv-text-details__right-panel-item-link');
+        if (rightPanelBadge) {
+          company = rightPanelBadge.textContent.trim().replace(/\s+/g, ' ');
+        } else {
+          // Fallback to experience section
+          const expItem = document.querySelector('#experience ~ .pvs-list__outer-container .pvs-entity span[aria-hidden="true"]');
+          if (expItem) company = expItem.textContent.trim();
+        }
+      }
+
       if (!company || isPortalName(company)) {
         const jsonLd = extractFromJsonLd();
         if (jsonLd) {

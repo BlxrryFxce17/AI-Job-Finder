@@ -3,6 +3,7 @@ import { NAV, API_BASE } from './useAppLogic.jsx';
 import GitHubPortfolioCard from './GitHubPortfolioCard';
 import { cleanDraftText, cleanFollowUpDraft, stripSignOff } from './textCleaner';
 import AiUsageDashboard from './components/AiUsageDashboard';
+import BlocklistModal from './components/BlocklistModal';
 
 function cleanEmailBody(body) {
   if (!body) return { clean: '', quoted: '' };
@@ -421,6 +422,7 @@ export default function DesktopApp(props) {
     useApify, setUseApify
   } = props;
 
+  const [showBlocklistModal, setShowBlocklistModal] = React.useState(false);
   const [activeReplyIndex, setActiveReplyIndex] = React.useState(null);
   const [draftOptions, setDraftOptions] = React.useState([]);
   const [selectedDraft, setSelectedDraft] = React.useState('');
@@ -1102,6 +1104,27 @@ export default function DesktopApp(props) {
               title="Toggle Theme"
             >
               {theme === 'dark' ? '☀️' : '🌙'}
+            </button>
+
+            {/* Blocklist Button */}
+            <button
+              className="btn btn-secondary"
+              style={{
+                fontSize: '12px',
+                padding: '7px 14px',
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                cursor: 'pointer'
+              }}
+              onClick={() => setShowBlocklistModal(true)}
+              title="Deliverability Blocklist"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+              </svg>
+              Blocklist
             </button>
 
             {/* Logout Button */}
@@ -5539,6 +5562,11 @@ export default function DesktopApp(props) {
           </div>
         </div>
       )}
+
+      <BlocklistModal 
+        isOpen={showBlocklistModal} 
+        onClose={() => setShowBlocklistModal(false)} 
+      />
 
     </div>
   );

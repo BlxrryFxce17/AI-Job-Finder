@@ -1123,13 +1123,14 @@ async function discoverHRProfiles(query = 'software engineer', location = 'India
 Extract the recruiter's exact personal Name, current professional Recruiting Role, and current corporate Employer (Company).
 
 CRITICAL RULES:
-1. "name": The person's first and last name only (e.g. "Priyanka Reddy", "Abish Balakrishnan", "Divyalakshmi K").
-2. "role": Their professional recruiting title (e.g. "Senior Technical Recruiter", "Certified Technical Recruiter", "HR Manager").
-3. "company": The actual business or corporate entity they work at (e.g. "Workcog Inc", "Numentica", "VIVA USA Inc", "Teknowiz", "Professional Peers").
-   - Notice that headlines often contain buzzwords like "Sourcing Strategist" or "Data-Driven Hiring" which are NOT companies. Look closely at the snippet for the real company name!
-   - NEVER use job titles or experience phrases (e.g. "6+ Years Experience") as company.
-   - NEVER use "LinkedIn", "Data", "Tech Company", "India" as company.
-   - If no distinct corporate employer name exists in the title or snippet, set "company": null.
+1. "name": The person's first and last name only (e.g. "Priyanka Reddy", "Abish Balakrishnan").
+2. "role": Their professional recruiting title (e.g. "Senior Technical Recruiter", "HR Manager").
+3. "company": The strict corporate entity they work at (e.g. "Workcog Inc", "Google", "VIVA USA Inc").
+   - EXTREMELY IMPORTANT: Headlines often contain buzzwords, slogans, quotes, or statements (e.g., "Sourcing Strategist", "I say what others don't", "We are hiring", "statement is that he hates"). THESE ARE NOT COMPANIES.
+   - NEVER use quotes, sentences, or verbs as a company.
+   - NEVER use job titles, experience phrases, or locations (e.g. "6+ Years Experience", "India", "Remote") as a company.
+   - NEVER use generic portal names ("LinkedIn", "Naukri") as the company.
+   - If the snippet DOES NOT contain a distinct, proper-noun corporate employer name, YOU MUST set "company": null. DO NOT GUESS.
 
 Items:
 ${candidates.slice(0, 10).map((it, idx) => `[${idx}] Title: ${it.rawTitle || it.role}\nSnippet: ${it.snippet}`).join('\n\n')}

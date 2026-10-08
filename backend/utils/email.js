@@ -82,7 +82,7 @@ async function resolveCompanyDomain(company, applyLink = null) {
   // Clean company name: strip prefix fluff like "Jobs at", "Hiring for", legal suffixes
   let cleanName = rawComp
     .replace(/^(?:jobs|careers?|hiring|openings?|opportunity)\s+(?:at|for|in|with)\s+/i, '')
-    .replace(/\b(enterprises|technologies|solutions|software|systems|services|pvt|ltd|limited|private|llc|inc|corp|corporation|group|india)\b/gi, '')
+    .replace(/\b(pvt|ltd|limited|private|llc|inc|corp|corporation)\b/gi, '')
     .replace(/[^a-zA-Z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -190,6 +190,26 @@ async function sendEmailViaAPI(user, mailOptions, sendOptions = {}) {
 
   console.log(`\n======================================================`);
   console.log(`📤 [Outbound Outreach] Preparing email to: ${recipient}`);
+
+  // Enforce Blocklist
+  const Blocklist = require('../models/Blocklist');
+  const userId = user._id || user.id;
+  if (userId) {
+    const domain = recipient.split('@')[1]?.toLowerCase();
+    const cleanRecipient = recipient.toLowerCase();
+    const blocked = await Blocklist.findOne({
+      userId,
+      $or: [
+        { type: 'email', value: cleanRecipient },
+        { type: 'domain', value: domain }
+      ]
+    });
+    if (blocked) {
+      console.error(`🛑 [Blocklist] BLOCKED: "${recipient}" matched ${blocked.type} rule: ${blocked.value}`);
+      console.log(`======================================================\n`);
+      throw new Error(`Email send aborted: "${recipient}" is on your personal blocklist.`);
+    }
+  }
 
   if (!sendOptions.skipVerification) {
     console.log(`🛡️ [Deliverability Guard] Pre-send reputation check initiated...`);

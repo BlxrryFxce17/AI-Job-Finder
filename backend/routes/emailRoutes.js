@@ -383,9 +383,7 @@ COMPANY: [Extracted Company Name or "${targetCompany}"]
 ROLE: [Extracted Job Title or "${targetRole}"]
 SUBJECT: [Exact subject requested in JD if any, or default "${hrName ? `Connecting: ${targetRole} at ${targetCompany}` : `Application for ${targetRole} - ${profile.name}`}"]
 BODY:
-[If company is unknown/generic and no HR name, start with: Hi there,]
-[If HR name is provided, start with: Hi ${hrName ? hrName.split(' ')[0] : ''},]
-[Otherwise start with: Hi ${targetCompany} Team,]
+${hrName ? `Hi ${hrName.split(' ')[0]},` : (targetCompany && !['unknown company', 'unknown'].includes(targetCompany.toLowerCase()) ? `Hi ${targetCompany} Team,` : 'Hi there,')}
 
 [Start of email body without any conversational filler or markdown blocks]`;
 
@@ -566,9 +564,7 @@ COMPANY: [Extracted Company Name or "${targetCompany}"]
 ROLE: [Extracted Job Title or "${targetRole}"]
 SUBJECT: [Exact subject requested in JD if any, or default "${isHrNetworking ? `Connecting: Engineering Opportunities at ${targetCompany}` : (hrName ? `Connecting: ${targetRole} at ${targetCompany}` : `Application for ${targetRole} - ${profile.name}`)}"]
 BODY:
-[If company is unknown/generic and no HR name, start with: Hi there,]
-[If HR name is provided, start with: Hi ${hrName ? hrName.split(' ')[0] : ''},]
-[Otherwise start with: Hi ${targetCompany} Team,]
+${hrName ? `Hi ${hrName.split(' ')[0]},` : (targetCompany && !['unknown company', 'unknown'].includes(targetCompany.toLowerCase()) ? `Hi ${targetCompany} Team,` : 'Hi there,')}
 
 [Start of email body without any conversational filler or markdown blocks]`;
 
