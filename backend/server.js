@@ -90,8 +90,8 @@ app.get('/api/ping', (req, res) => {
   res.status(200).send('pong');
 });
 
-// Follow-Up Cron Job: Runs daily at 9:00 AM
-cron.schedule('0 9 * * *', async () => {
+// Follow-Up Cron Job: Runs daily at 11:00 AM IST
+cron.schedule('0 11 * * *', async () => {
   console.log('[Cron] Starting daily follow-up check...');
   try {
     const users = await User.find({ googleRefreshToken: { $exists: true, $ne: null } });
@@ -226,6 +226,9 @@ cron.schedule('0 9 * * *', async () => {
   } catch (err) {
     console.error('[Cron] Error during follow-up check:', err);
   }
+}, {
+  scheduled: true,
+  timezone: "Asia/Kolkata"
 });
 
 app.listen(PORT, () => {
