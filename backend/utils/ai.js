@@ -57,7 +57,11 @@ async function getBestGroqModel() {
     const preferences = [
       'llama-3.3-70b-versatile',
       'llama-3.1-70b-versatile',
+      'qwen/qwen3.8-27b',
       'qwen-2.5-32b-it',
+      'openai/gpt-oss-120b',
+      'openai/gpt-oss-20b',
+      'canopylabs/orpheus-v1-english',
       'llama-3.2-90b-text-preview',
       'mixtral-8x7b-32768',
       'llama-3.1-8b-instant',
@@ -94,12 +98,12 @@ async function getBestGeminiModel() {
   // but let's implement dynamic discovery for Gemini too.
   try {
     // Note: Gemini SDK for node might not expose a simple listModels without rest API, but we'll try a fallback check
-    // Actually, gemini-1.5-flash is stable and rolling.
-    cachedGeminiModel = 'gemini-1.5-flash';
+    // Actually, gemini-2.5-flash is stable and rolling.
+    cachedGeminiModel = 'gemini-2.5-flash';
     lastGeminiFetch = Date.now();
     return cachedGeminiModel;
   } catch(e) {
-    return 'gemini-1.5-flash';
+    return 'gemini-2.5-flash';
   }
 }
 
@@ -136,7 +140,12 @@ const callAIWithRetry = async (prompt, retries = 5, delayMs = 3000, options = {}
         status: 'success'
       });
 
-      return { text: completion.choices[0]?.message?.content || '' };
+      const textOutput = completion.choices[0]?.message?.content || '';
+      if (textOutput.trim().startsWith('Error:')) {
+        throw new Error(textOutput.trim());
+      }
+
+      return { text: textOutput };
     } catch (groqErr) {
       console.warn(`[Groq API] Failed:`, groqErr.message || groqErr);
       recordApiUsage({
@@ -174,7 +183,12 @@ const callAIWithRetry = async (prompt, retries = 5, delayMs = 3000, options = {}
           status: 'fallback'
         });
 
-        return { text: response.text };
+        const textOutput = response.text || '';
+        if (textOutput.trim().startsWith('Error:')) {
+          throw new Error(textOutput.trim());
+        }
+
+        return { text: textOutput };
       } catch (geminiErr) {
         console.warn(`[Gemini API] Failed:`, geminiErr.message || geminiErr);
         recordApiUsage({

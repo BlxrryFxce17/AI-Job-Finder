@@ -181,7 +181,7 @@ async function resolveCompanyDomain(company, applyLink = null) {
   return finalizeDomain(null);
 }
 
-async function sendEmailViaAPI(user, mailOptions) {
+async function sendEmailViaAPI(user, mailOptions, sendOptions = {}) {
   const recipient = (mailOptions.to || '').trim();
   if (!recipient) {
     console.warn('❌ [Send Guard] Aborted: Recipient address is empty');
@@ -190,30 +190,34 @@ async function sendEmailViaAPI(user, mailOptions) {
 
   console.log(`\n======================================================`);
   console.log(`📤 [Outbound Outreach] Preparing email to: ${recipient}`);
-  console.log(`🛡️ [Deliverability Guard] Pre-send reputation check initiated...`);
 
-  // Strict Deliverability Guard: Protect sender domain reputation from bounces (>5% bounce rate causes blacklisting)
-  const verification = await verifyEmail(recipient);
-  if (!verification.isValid || (verification.deliverabilityScore != null && verification.deliverabilityScore < 60) || verification.status === 'undeliverable') {
-    console.error(`🛑 [Deliverability Guard] BLOCKED: "${recipient}"`);
-    console.error(`   Status: ${verification.status} | Score: ${verification.deliverabilityScore}%`);
-    console.error(`   Reason: ${verification.reason || 'High bounce risk'}`);
-    console.error(`   Protection: Send aborted to shield domain from ESP blacklisting.`);
-    console.log(`======================================================\n`);
-    throw new Error(`Email send blocked by Deliverability Guard: "${recipient}" failed verification (Status: ${verification.status}, Score: ${verification.deliverabilityScore}%, Reason: ${verification.reason || 'High bounce risk'}). Sending aborted to protect domain reputation.`);
-  }
-
-  const domain = recipient.split('@')[1];
-  if (domain) {
-    const mxCheck = await checkMxRecords(domain);
-    if (!mxCheck.valid) {
-      console.error(`🛑 [Deliverability Guard] Domain @${domain} has no active MX servers.`);
+  if (!sendOptions.skipVerification) {
+    console.log(`🛡️ [Deliverability Guard] Pre-send reputation check initiated...`);
+    // Strict Deliverability Guard: Protect sender domain reputation from bounces (>5% bounce rate causes blacklisting)
+    const verification = await verifyEmail(recipient);
+    if (!verification.isValid || (verification.deliverabilityScore != null && verification.deliverabilityScore < 40) || verification.status === 'undeliverable') {
+      console.error(`🛑 [Deliverability Guard] BLOCKED: "${recipient}"`);
+      console.error(`   Status: ${verification.status} | Score: ${verification.deliverabilityScore}%`);
+      console.error(`   Reason: ${verification.reason || 'High bounce risk'}`);
+      console.error(`   Protection: Send aborted to shield domain from ESP blacklisting.`);
       console.log(`======================================================\n`);
-      throw new Error(`Email send aborted: Domain @${domain} has no active mail servers (MX records).`);
+      throw new Error(`Email send blocked by Deliverability Guard: "${recipient}" failed verification (Status: ${verification.status}, Score: ${verification.deliverabilityScore}%, Reason: ${verification.reason || 'High bounce risk'}). Sending aborted to protect domain reputation.`);
     }
-  }
 
-  console.log(`✅ [Deliverability Guard] APPROVED for dispatch! (Score: ${verification.deliverabilityScore}%, Status: ${verification.status})`);
+    const domain = recipient.split('@')[1];
+    if (domain) {
+      const mxCheck = await checkMxRecords(domain);
+      if (!mxCheck.valid) {
+        console.error(`🛑 [Deliverability Guard] Domain @${domain} has no active MX servers.`);
+        console.log(`======================================================\n`);
+        throw new Error(`Email send aborted: Domain @${domain} has no active mail servers (MX records).`);
+      }
+    }
+
+    console.log(`✅ [Deliverability Guard] APPROVED for dispatch! (Score: ${verification.deliverabilityScore}%, Status: ${verification.status})`);
+  } else {
+    console.log(`⚠️ [Deliverability Guard] Bypassed check for manual dispatch`);
+  }
   if (mailOptions.attachments && mailOptions.attachments.length > 0) {
     console.log(`📎 [Email Dispatch] Including ${mailOptions.attachments.length} attachment(s): ${mailOptions.attachments.map(a => a.filename).join(', ')}`);
   } else {

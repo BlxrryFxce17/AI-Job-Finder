@@ -324,10 +324,15 @@ router.post('/generate-email', requireAuth, async (req, res) => {
 
     const cleanCompany = resolveCleanCompany(company, jd);
     const targetCompany = cleanCompany || 'the team';
-    const targetRole = role || 'the open role';
+    
+    const isHrNetworking = /recruiter|talent|hr|human resources|sourcing|acquisition|headhunter/i.test(role) || cleanCompany === 'Direct Recruiter / Agency';
     const targetRecipient = hrName ? hrName : `the engineering team at ${targetCompany}`;
+    const targetRole = isHrNetworking ? 'engineering opportunities' : (role || 'the open role');
+    const emailIntent = isHrNetworking
+      ? `a direct, natural networking cold email to ${targetRecipient} at ${targetCompany} to inquire about open ${targetRole}`
+      : `a direct, natural cold email to ${targetRecipient} for the "${targetRole}" position`;
 
-    const prompt = `You are a talented software engineer named "${profile.name}" writing a direct, natural cold email to ${targetRecipient} for the "${targetRole}" position.
+    const prompt = `You are a talented software engineer named "${profile.name}" writing ${emailIntent}.
 Context: ${type}
 Tone: Confident, authentic, conversational software engineer talking directly to another technical lead. (ZERO corporate sycophancy, zero generic cover-letter filler, NO robotic AI slop).
 Here is the official Job Description:
@@ -351,7 +356,7 @@ CRITICAL RULES FOR WRITING A REAL, AUTHENTIC HUMAN COLD EMAIL:
    - NEVER open with empty corporate praise like "Your mission to simplify ecosystems...", "I was excited to see...", or "I am writing to express interest in...". Tech leads delete these instantly.
    - Start immediately with a natural 1-2 sentence hook. State the open role and directly reference 1-2 core technologies or challenges from the Job Description.
    - Avoid aggressive syntax, excessive hyperlinks, or repeating generic catchphrases. Keep it professional and distinct.
-   - Example opening: "Hi ${targetCompany} Team, I saw you're hiring for a ${targetRole} and wanted to reach out directly. I've been actively building full-stack web applications with [relevant tech], focusing on [specific mechanism]."
+   - Example opening: "Hi ${targetCompany} Team, ${isHrNetworking ? `I wanted to reach out to see if you are recruiting for any ${targetRole}.` : `I saw you're hiring for a ${targetRole} and wanted to reach out directly.`} I've been actively building full-stack web applications with [relevant tech], focusing on [specific mechanism]."
 
 2. AUTHENTIC HUMAN VOICE & STRICTLY ZERO BULLET POINTS:
    - ABSOLUTELY NO BULLET POINTS (no "*", no "•", no numbered lists). Bullet points in cold outreach scream "AI-generated template". Write in 2-3 short, clean, flowing paragraphs (strictly 90 to 140 words total).
@@ -505,10 +510,15 @@ router.post('/single-draft', requireAuth, async (req, res) => {
 
     const cleanCompany = resolveCleanCompany(company, jd);
     const targetCompany = cleanCompany || 'the team';
-    const targetRole = role || 'the open role';
-    const targetRecipient = hrName ? hrName : `the technical hiring team at ${targetCompany}`;
 
-    const prompt = `You are a talented software engineer named "${profile.name}" writing a direct, natural cold email to ${targetRecipient} for the "${targetRole}" position. 
+    const isHrNetworking = /recruiter|talent|hr|human resources|sourcing|acquisition|headhunter/i.test(role) || cleanCompany === 'Direct Recruiter / Agency';
+    const targetRecipient = hrName ? hrName : `the technical hiring team at ${targetCompany}`;
+    const targetRole = isHrNetworking ? 'engineering opportunities' : (role || 'the open role');
+    const emailIntent = isHrNetworking
+      ? `a direct, natural networking cold email to ${targetRecipient} at ${targetCompany} to inquire about open ${targetRole}`
+      : `a direct, natural cold email to ${targetRecipient} for the "${targetRole}" position`;
+
+    const prompt = `You are a talented software engineer named "${profile.name}" writing ${emailIntent}. 
 Context: Cold Outreach / Networking
 Tone: Confident, authentic, conversational software engineer talking directly to another technical lead. (ZERO corporate sycophancy, zero generic cover-letter filler, NO robotic AI slop).
 Here is the official Job Description:
@@ -529,7 +539,7 @@ CRITICAL RULES FOR WRITING A REAL, AUTHENTIC HUMAN COLD EMAIL:
    - NEVER open with empty corporate praise like "Your mission to simplify ecosystems...", "I was excited to see...", or "I am writing to express interest in...". Tech leads delete these instantly.
    - Start immediately with a natural 1-2 sentence hook. State the open role and directly reference 1-2 core technologies or challenges from the Job Description.
    - Avoid aggressive syntax, excessive hyperlinks, or repeating generic catchphrases. Keep it professional and distinct.
-   - Example opening: "Hi ${targetCompany} Team, I saw you're hiring for a ${targetRole} and wanted to reach out directly. I've been actively building full-stack web applications with [relevant tech], focusing on [specific mechanism]."
+   - Example opening: "Hi ${targetCompany} Team, ${isHrNetworking ? `I wanted to reach out to see if you are recruiting for any ${targetRole}.` : `I saw you're hiring for a ${targetRole} and wanted to reach out directly.`} I've been actively building full-stack web applications with [relevant tech], focusing on [specific mechanism]."
 
 2. AUTHENTIC HUMAN VOICE & STRICTLY ZERO BULLET POINTS:
    - ABSOLUTELY NO BULLET POINTS (no "*", no "•", no numbered lists). Bullet points in cold outreach scream "AI-generated template". Write in 2-3 short, clean, flowing paragraphs (strictly 90 to 140 words total).
@@ -554,7 +564,7 @@ CRITICAL RULES FOR WRITING A REAL, AUTHENTIC HUMAN COLD EMAIL:
 7. OUTPUT FORMAT:
 COMPANY: [Extracted Company Name or "${targetCompany}"]
 ROLE: [Extracted Job Title or "${targetRole}"]
-SUBJECT: [Exact subject requested in JD if any, or default "${hrName ? `Connecting: ${targetRole} at ${targetCompany}` : `Application for ${targetRole} - ${profile.name}`}"]
+SUBJECT: [Exact subject requested in JD if any, or default "${isHrNetworking ? `Connecting: Engineering Opportunities at ${targetCompany}` : (hrName ? `Connecting: ${targetRole} at ${targetCompany}` : `Application for ${targetRole} - ${profile.name}`)}"]
 BODY:
 [If company is unknown/generic and no HR name, start with: Hi there,]
 [If HR name is provided, start with: Hi ${hrName ? hrName.split(' ')[0] : ''},]
@@ -645,7 +655,7 @@ BODY:
 
     await attachResumeToMailOptions(mailOptions, profile, req.user.id);
 
-    await sendEmailViaAPI(user, mailOptions);
+    await sendEmailViaAPI(user, mailOptions, { skipVerification: true });
 
     const newJob = new Job({
       userId: req.user.id,

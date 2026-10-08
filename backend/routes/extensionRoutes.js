@@ -1234,7 +1234,13 @@ router.post('/draft-email', async (req, res) => {
   * Resilient Production Architectures (CI/CD, REST APIs, database persistence, asynchronous workflows)`;
     }
 
-    const prompt = `You are a talented software engineer named ${candidateName} writing a direct, high-impact cold email to the engineering team at ${targetCompany} for the "${targetRole}" opening.
+    const isHrNetworking = /recruiter|talent|hr|human resources|sourcing|acquisition|headhunter/i.test(targetRole) || targetCompany === 'Direct Recruiter / Agency';
+    const targetRecipient = isHrNetworking ? targetRole : `the engineering team at ${targetCompany}`;
+    const emailIntent = isHrNetworking 
+      ? `a direct, high-impact networking cold email to ${targetRecipient} at ${targetCompany} to inquire about open engineering roles`
+      : `a direct, high-impact cold email to ${targetRecipient} for the "${targetRole}" opening`;
+
+    const prompt = `You are a talented software engineer named ${candidateName} writing ${emailIntent}.
 Discipline Focus: ${personaEmphasis}
 
 Target Job Context:
@@ -1258,7 +1264,7 @@ GUIDELINES FOR A REAL, COMPELLING HUMAN EMAIL (ZERO AI SLOP):
 ${signOffBlock}
 
 Output format:
-SUBJECT: Application for ${targetRole} - ${candidateName}
+SUBJECT: ${isHrNetworking ? `Connecting: Engineering Opportunities at ${targetCompany}` : `Application for ${targetRole} - ${candidateName}`}
 BODY:
 Hi ${targetCompany} Team,
 
@@ -1266,7 +1272,7 @@ Hi ${targetCompany} Team,
 
 ${signOffBlock}`;
 
-    let subject = `Application for ${targetRole} - ${candidateName}`;
+    let subject = isHrNetworking ? `Connecting: Engineering Opportunities at ${targetCompany}` : `Application for ${targetRole} - ${candidateName}`;
     let body = '';
 
     try {
@@ -1288,7 +1294,10 @@ ${signOffBlock}`;
       const s1 = profile.skills?.[0] || 'TypeScript';
       const s2 = profile.skills?.[1] || 'Node.js';
       const s3 = profile.skills?.[2] || 'React';
-      body = `Hi ${targetCompany} Team,\n\nI saw the opening for the ${targetRole} position and wanted to reach out directly. I've been actively developing full-stack web applications using ${s1}, ${s2}, and ${s3}, with a focus on building clean REST APIs and responsive user interfaces.\n\nRecently, I built and deployed full-stack projects handling real-time state, backend database persistence, and robust error handling. I'd love to bring this hands-on engineering mindset to ${targetCompany}.\n\nI've attached my resume and would love to chat if my background sounds like a fit for your team.\n\n${signOffBlock}`;
+      const hookText = isHrNetworking 
+        ? `I wanted to reach out to see if you are recruiting for any engineering roles.`
+        : `I saw the opening for the ${targetRole} position and wanted to reach out directly.`;
+      body = `Hi ${targetCompany} Team,\n\n${hookText} I've been actively developing full-stack web applications using ${s1}, ${s2}, and ${s3}, with a focus on building clean REST APIs and responsive user interfaces.\n\nRecently, I built and deployed full-stack projects handling real-time state, backend database persistence, and robust error handling. I'd love to bring this hands-on engineering mindset to ${targetCompany}.\n\nI've attached my resume and would love to chat if my background sounds like a fit for your team.\n\n${signOffBlock}`;
     }
 
     res.json({
