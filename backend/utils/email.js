@@ -382,6 +382,31 @@ async function findThreadForRecipient(user, recipientEmail, options = {}) {
   return null;
 }
 
+async function autoBlockBouncedEmail(userId, email, company = '') {
+  if (!userId || !email) return;
+  try {
+    const Blocklist = require('../models/Blocklist');
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanUserId = userId.toString();
+    const existing = await Blocklist.findOne({
+      userId: cleanUserId,
+      type: 'email',
+      value: cleanEmail
+    });
+    if (!existing) {
+      await Blocklist.create({
+        userId: cleanUserId,
+        value: cleanEmail,
+        type: 'email',
+        reason: company ? `Automatic: Email bounced for ${company}` : 'Automatic: Email bounced'
+      });
+      console.log(`🛑 [Blocklist] Automatically added bounced email "${cleanEmail}" to Blocklist for user ${cleanUserId}`);
+    }
+  } catch (err) {
+    console.warn(`[Blocklist] Failed to auto-block bounced email ${email}:`, err.message);
+  }
+}
+
 async function processBounces(user) {
   if (!user.googleRefreshToken) return;
 
@@ -416,6 +441,8 @@ async function processBounces(user) {
       if (emailMatch) {
         const bouncedEmail = emailMatch[0].toLowerCase();
         
+        await autoBlockBouncedEmail(user._id, bouncedEmail);
+
         const jobs = await Job.find({ emailRecipient: bouncedEmail, userId: user._id, status: { $ne: 'Bounced' } });
         for (const job of jobs) {
            job.status = 'Bounced';
@@ -734,6 +761,7 @@ async function getInboxReplies(user, options = {}) {
                       userId: user._id || user.id,
                       $or: [{ emailRecipient: bEmail }, { recruiterEmail: bEmail }]
                     });
+                    await autoBlockBouncedEmail(user._id || user.id, bEmail, matchedJob?.company);
                     if (matchedJob) {
                       matchedJob.status = 'Bounced';
                       matchedJob.deliverabilityStatus = 'bounced';
@@ -1447,6 +1475,7 @@ module.exports = {
   checkGmailForReply,
   findThreadForRecipient,
   processBounces,
+  autoBlockBouncedEmail,
   getInboxReplies,
   discoverEmailForJob,
   resolveCompanyDomain,

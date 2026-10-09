@@ -19,7 +19,7 @@ const {
   normalizeHrName,
   isOlderThan12Hours
 } = require('../utils/scraper');
-const { discoverEmailForJob, sendEmailViaAPI, resolveCompanyDomain } = require('../utils/email');
+const { discoverEmailForJob, sendEmailViaAPI, resolveCompanyDomain, autoBlockBouncedEmail } = require('../utils/email');
 const { callAIWithRetry } = require('../utils/ai');
 const { learnFromBounce } = require('../utils/learningEngine');
 const Profile = require('../models/Profile');
@@ -960,6 +960,8 @@ router.get('/check-bounces', requireAuth, async (req, res) => {
 
         if (failedRecipient) {
           failedRecipient = failedRecipient.trim().toLowerCase();
+
+          await autoBlockBouncedEmail(user._id, failedRecipient);
 
           const bouncedJobs = await Job.find({
             userId: user._id,
