@@ -75,7 +75,7 @@ router.post('/send-followup', requireAuth, async (req, res) => {
 
     if ((!job.matchedThreadId || !job.rfcMessageId) && user.googleRefreshToken) {
       try {
-        const threadInfo = await findThreadForRecipient(user, job.emailRecipient);
+        const threadInfo = await findThreadForRecipient(user, job.emailRecipient, { role: job.role, company: job.company });
         if (threadInfo) {
           if (!job.matchedThreadId && threadInfo.threadId) job.matchedThreadId = threadInfo.threadId;
           if (!job.rfcMessageId && threadInfo.rfcMessageId) job.rfcMessageId = threadInfo.rfcMessageId;

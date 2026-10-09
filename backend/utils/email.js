@@ -306,7 +306,7 @@ async function checkGmailForReply(user, recipientEmail) {
   }
 }
 
-async function findThreadForRecipient(user, recipientEmail) {
+async function findThreadForRecipient(user, recipientEmail, options = {}) {
   if (!user?.googleRefreshToken || !recipientEmail) return null;
 
   const oauth2Client = new google.auth.OAuth2(
@@ -317,33 +317,64 @@ async function findThreadForRecipient(user, recipientEmail) {
   const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
   try {
-    const res = await gmail.users.messages.list({
+    let q = `to:${recipientEmail}`;
+    if (options.role) {
+      q += ` "Application for ${options.role}"`;
+    }
+
+    let res = await gmail.users.messages.list({
       userId: 'me',
-      q: `to:${recipientEmail}`,
-      maxResults: 1
+      q,
+      maxResults: 10
     });
 
-    if (res.data.messages && res.data.messages.length > 0) {
-      const msgMeta = res.data.messages[0];
-      let rfcMessageId = '';
-      try {
-        const fullMsg = await gmail.users.messages.get({
-          userId: 'me',
-          id: msgMeta.id,
-          format: 'metadata',
-          metadataHeaders: ['Message-ID', 'Message-Id']
-        });
-        const header = fullMsg.data.payload?.headers?.find(h => h.name.toLowerCase() === 'message-id');
-        if (header) {
-          rfcMessageId = header.value;
-        }
-      } catch (_) {}
+    if (!res.data.messages || res.data.messages.length === 0) {
+      res = await gmail.users.messages.list({
+        userId: 'me',
+        q: `to:${recipientEmail}`,
+        maxResults: 10
+      });
+    }
 
-      return {
-        messageId: msgMeta.id,
-        threadId: msgMeta.threadId,
-        rfcMessageId
-      };
+    if (res.data.messages && res.data.messages.length > 0) {
+      const messages = res.data.messages;
+      let rootCandidate = null;
+      let oldestCandidate = null;
+
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i];
+        try {
+          const fullMsg = await gmail.users.messages.get({
+            userId: 'me',
+            id: m.id,
+            format: 'metadata',
+            metadataHeaders: ['Message-ID', 'Message-Id', 'Subject']
+          });
+          const headers = fullMsg.data.payload?.headers || [];
+          const subject = headers.find(h => h.name.toLowerCase() === 'subject')?.value || '';
+          const rfcId = headers.find(h => h.name.toLowerCase() === 'message-id')?.value || '';
+
+          const candidate = {
+            messageId: m.id,
+            threadId: m.threadId,
+            rfcMessageId: rfcId,
+            subject
+          };
+
+          if (!oldestCandidate) oldestCandidate = candidate;
+
+          // Found the authentic original application email (not a "Re:" follow-up)
+          if (subject && !subject.trim().toLowerCase().startsWith('re:')) {
+            rootCandidate = candidate;
+            break;
+          }
+        } catch (_) {}
+      }
+
+      const target = rootCandidate || oldestCandidate;
+      if (target) {
+        return target;
+      }
     }
   } catch (err) {
     console.warn('[findThreadForRecipient] Unable to fetch thread for', recipientEmail, err.message);
