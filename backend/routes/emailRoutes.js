@@ -448,8 +448,8 @@ router.post('/send-email', requireAuth, async (req, res) => {
       <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
         ${formattedDraft}
         <br/><br/>
-        Best,<br/>
-        <b>${profile.name}</b><br/>
+        Best Regards,<br/>
+        ${profile.name ? `<b>${profile.name}</b><br/>` : ''}
         ${profile.phone ? `${profile.phone}<br/>` : ''}
         ${linksHtml}
         <br/>
@@ -638,8 +638,8 @@ ${hrName ? `Hi ${hrName.split(' ')[0]},` : (targetCompany && !['unknown company'
       <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
         ${formattedDraft}
         <br/><br/>
-        Best,<br/>
-        <b>${profile.name}</b><br/>
+        Best Regards,<br/>
+        ${profile.name ? `<b>${profile.name}</b><br/>` : ''}
         ${profile.phone ? `${profile.phone}<br/>` : ''}
         ${linksHtml}
         <br/>
@@ -737,8 +737,8 @@ ${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructio
       <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
         ${formattedDraft}
         <br/><br/>
-        Best,<br/>
-        <b>${profile.name}</b><br/>
+        Best Regards,<br/>
+        ${profile.name ? `<b>${profile.name}</b><br/>` : ''}
         ${profile.phone ? `${profile.phone}<br/>` : ''}
         ${linksHtml}
         <br/>
@@ -1081,7 +1081,7 @@ router.post('/inbox/draft-reply', requireAuth, async (req, res) => {
       intentGuidance = 'Thank the recruiter warmly, confirm interest in the role, and ask 1-2 thoughtful, insightful questions regarding the team technical stack, engineering culture, or next steps in the process.';
     }
 
-    const prompt = `You are an elite software engineer named ${profile.name || 'Akash V'}.
+    const prompt = `You are an elite software engineer named ${profile.name || 'Candidate'}.
 Candidate Title: ${profile.title || 'Software Developer'}
 Candidate Skills: ${(profile.skills || []).join(', ') || 'React, Node.js, Python, MongoDB'}
 Candidate Phone: ${profile.phone || ''}
@@ -1155,8 +1155,8 @@ router.post('/inbox/send-reply', requireAuth, async (req, res) => {
       <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
         ${formattedDraft}
         <br/><br/>
-        Best,<br/>
-        <b>${profile.name}</b><br/>
+        Best Regards,<br/>
+        ${profile.name ? `<b>${profile.name}</b><br/>` : ''}
         ${profile.phone ? `${profile.phone}<br/>` : ''}
         ${linksHtml}
       </div>

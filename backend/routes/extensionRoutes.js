@@ -1158,10 +1158,10 @@ router.post('/draft-email', async (req, res) => {
     }
     if (!profile && req.body.profile) profile = req.body.profile;
     if (!profile) profile = await Profile.findOne().sort({ updatedAt: -1 });
-    if (!profile) profile = { name: req.body.candidateName || 'Akash V', skills: ['TypeScript', 'Node.js', 'React'] };
+    if (!profile) profile = { name: req.body.candidateName || 'Candidate', skills: ['TypeScript', 'Node.js', 'React'] };
 
     function buildExtensionSignOff(p, candName) {
-      const name = candName || p?.name || 'Akash V';
+      const name = candName || p?.name || 'Candidate';
       const phone = (p?.phone || '').trim();
       const baseUrl = (process.env.PUBLIC_URL || 'https://ai-job-finder-7dr8.onrender.com').replace(/\/+$/, '');
       const clickId = Date.now().toString() + Math.random().toString().substring(2, 6);
@@ -1184,7 +1184,7 @@ router.post('/draft-email', async (req, res) => {
         links.push(`[Portfolio](${trackClick(portfolioUrl)})`);
       }
 
-      const lines = ['Best,', name];
+      const lines = ['Best Regards,', name];
       if (phone) lines.push(phone);
       if (links.length > 0) lines.push(links.join(' | '));
 
@@ -1412,7 +1412,7 @@ router.post('/generate-cover-letter', async (req, res) => {
     }
     if (!profile && req.body.profile) profile = req.body.profile;
     if (!profile) profile = await Profile.findOne().sort({ updatedAt: -1 });
-    if (!profile) profile = { name: req.body.candidateName || 'Akash V.', skills: ['TypeScript', 'Node.js', 'React'] };
+    if (!profile) profile = { name: req.body.candidateName || 'Candidate', skills: ['TypeScript', 'Node.js', 'React'] };
 
     let targetCompany = (company || '').trim();
     if (isBackendPortalName(targetCompany)) {
@@ -1424,7 +1424,7 @@ router.post('/generate-cover-letter', async (req, res) => {
       }
     }
     const targetRole = role || jobTitle || 'Software Engineer';
-    const candidateName = req.body.candidateName || profile?.name || 'Akash V.';
+    const candidateName = req.body.candidateName || profile?.name || 'Candidate';
     const candidateEmail = profile?.email || req.body.candidateEmail || '';
     const candidatePhone = profile?.phone || req.body.candidatePhone || '';
 

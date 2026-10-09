@@ -1199,7 +1199,7 @@ function cleanDraftEmailText(text, profile = {}, company = '', role = '', option
   const github = (profile && profile.github) || '';
   const linkedin = (profile && profile.linkedin) || '';
   const portfolio = (profile && (profile.portfolio || profile.github || profile.linkedin)) || '';
-  const candName = (profile && profile.name) || 'Akash V';
+  const candName = (profile && profile.name) || '';
   const phone = (profile && profile.phone) || '';
   const title = (profile && profile.title) || '';
 
@@ -1323,7 +1323,7 @@ async function generateFollowUpEmail({ job, targetDay, profile = {}, callAIWithR
     : '';
   const greeting = companyName ? `Dear Hiring Manager at ${companyName},` : `Dear Hiring Manager,`;
   const roleName = job.role || 'the open engineering role';
-  const candidateName = profile.name || 'Akash V';
+  const candidateName = profile.name || 'Candidate';
   const candidateTitle = profile.title || 'Software Developer';
   const candidateSkills = (profile.skills && profile.skills.length > 0)
     ? profile.skills.slice(0, 5).join(', ')
@@ -1464,10 +1464,11 @@ function buildPlainTextSignature(profile, trackClick = (url) => url) {
   if (profile && profile.github) links.push(`[GitHub](${trackClick(profile.github)})`);
   if (portfolioUrl) links.push(`[Portfolio](${trackClick(portfolioUrl)})`);
 
-  const name = profile?.name || 'Akash V';
+  const name = profile?.name || '';
   const phone = profile?.phone ? `${profile.phone}\n` : '';
   const linksLine = links.length > 0 ? `${links.join(' | ')}` : '';
-  return `Best,\n${name}\n${phone}${linksLine}`.trim();
+  const nameLine = name ? `${name}\n` : '';
+  return `Best Regards,\n${nameLine}${phone}${linksLine}`.trim();
 }
 
 module.exports = {

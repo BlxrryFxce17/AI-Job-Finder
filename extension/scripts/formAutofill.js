@@ -1489,7 +1489,7 @@
 
     // Helper to generate a compelling, human founder pitch note (>= 50 chars for YC)
   function buildFounderOutreachNote(profile, jobInfo) {
-    const candidateName = profile?.fullName || `${profile?.firstName || ''} ${profile?.lastName || ''}`.trim() || 'Akash V';
+    const candidateName = profile?.fullName || `${profile?.firstName || ''} ${profile?.lastName || ''}`.trim() || profile?.name || 'Candidate';
     const compName = jobInfo?.company || 'your';
     const roleName = jobInfo?.role || 'Full-Stack Developer';
     const title = profile?.title || 'Full-Stack & AI Engineer';

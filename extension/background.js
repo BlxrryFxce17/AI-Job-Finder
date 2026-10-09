@@ -91,7 +91,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // Adaptive, role-specific, JD-grounded cover letter generator
 function generateAdaptiveCoverLetter(payload) {
   const { company, role, jobDescription, candidateName, profile } = payload || {};
-  const cName = candidateName || profile?.name || 'Akash V.';
+  const cName = candidateName || profile?.name || 'Candidate';
   const cComp = (company || 'your company').trim();
   const cRole = (role || 'Software Engineer').trim();
   const jd = (jobDescription || '').toLowerCase();
@@ -664,7 +664,7 @@ async function handleRequest(request, sender) {
 
       function getBenchmarkAnswer() {
         if (isFounderNote) {
-          const cName = profile.fullName || `${profile.firstName || ''} ${profile.lastName || ''}`.trim() || 'Akash V';
+          const cName = profile.fullName || `${profile.firstName || ''} ${profile.lastName || ''}`.trim() || profile?.name || 'Candidate';
           const comp = company ? company.replace(/\s*\([A-Z]\d+\)/i, '').trim() : 'your';
           const r = role || 'Full-Stack Developer';
           return `Hi ${comp} team,\n\nI\'m ${cName}, a Full-Stack & AI Engineer specializing in TypeScript, React, Node.js, and Python. I am very interested in the ${r} position at ${comp}.\n\nMy engineering background centers on building resilient full-stack systems and high-performance product architectures (including offline-first mobile apps and asynchronous data pipelines). I thrive in high-ownership startup environments where I can partner closely with founders to design and ship reliable product features end-to-end.\n\nI would love the opportunity to connect and discuss how my skills and proactive approach can contribute to ${comp}.\n\nBest regards,\n${cName}`;
@@ -1243,7 +1243,7 @@ ${intentGuidance ? intentGuidance + '\n\n' : ''}CRITICAL RULES — READ CAREFULL
         const portfolio = profile?.portfolio || profile?.portfolioUrl || (profile?.githubInsights?.username ? `https://${profile.githubInsights.username}.github.io` : '');
         if (portfolio) links.push(`[Portfolio](${trackClick(portfolio)})`);
 
-        const signOffLines = ['Best,', cName];
+        const signOffLines = ['Best Regards,', cName];
         if (phone) signOffLines.push(phone);
         if (links.length > 0) signOffLines.push(links.join(' | '));
         const signOff = signOffLines.join('\n');

@@ -31,7 +31,7 @@
   //
   // Thank you for your time, and I look forward to speaking more!
   //
-  // Best,
+  // Best Regards,
   // [Your Name]
   function formatCoverLetterText(opts) {
     let { name, address, contact, date, hiringManager, company, role, rawBody } = opts;
@@ -138,9 +138,9 @@
       }
     }
 
-    const finalName = (name && name !== 'Candidate Name' && name !== 'Candidate') ? name : 'Akash V.';
+    const finalName = (name && name !== 'Candidate Name' && name !== 'Candidate') ? name : 'Candidate';
     const closing = 'Thank you for your time, and I look forward to speaking more!';
-    const signOff = `Best,\n${finalName}`;
+    const signOff = `Best Regards,\n${finalName}`;
 
     return {
       name: finalName,
@@ -232,8 +232,8 @@
     renderLines.push({ text: formatted.closing, isBold: false, size: 10 });
     renderLines.push({ text: '', size: 10 });
 
-    // 8. Best, [Your Name]
-    renderLines.push({ text: 'Best,', isBold: false, size: 10 });
+    // 8. Best Regards, [Your Name]
+    renderLines.push({ text: 'Best Regards,', isBold: false, size: 10 });
     renderLines.push({ text: formatted.name, isBold: false, size: 10 });
 
     // Multi-page splitting if content is long
@@ -446,7 +446,7 @@
           </div>
           <div class="cl-closing">${escapeHtml(formatted.closing)}</div>
           <div class="cl-signoff">
-            Best,<br/>
+            Best Regards,<br/>
             ${escapeHtml(formatted.name)}
           </div>
         </div>
@@ -483,7 +483,7 @@
       '',
       formatted.closing,
       '',
-      'Best,',
+      'Best Regards,',
       formatted.name
     ].filter(l => l !== undefined).join('\n');
 

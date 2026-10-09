@@ -60,9 +60,9 @@ router.post('/send-followup', requireAuth, async (req, res) => {
       <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
         ${formattedDraft}
         <br/><br/>
-        Yours Sincerely,<br/>
-        <b>${profile.name}</b><br/>
-        ${profile.title}<br/>
+        Best Regards,<br/>
+        ${profile.name ? `<b>${profile.name}</b><br/>` : ''}
+        ${profile.title ? `${profile.title}<br/>` : ''}
         ${profile.phone ? `📞 ${profile.phone}<br/>` : ''}
         ${linksHtml}
         <br/>

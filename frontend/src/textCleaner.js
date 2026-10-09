@@ -83,7 +83,7 @@ export function cleanDraftText(text, profile = {}, options = {}) {
   const github = (profile && profile.github) || '';
   const linkedin = (profile && profile.linkedin) || '';
   const portfolio = getEffectivePortfolio(profile);
-  const candName = (profile && profile.name) || 'Akash V';
+  const candName = (profile && profile.name) || '';
   const phone = (profile && profile.phone) || '';
   const title = (profile && profile.title) || '';
 
@@ -172,14 +172,16 @@ export function cleanDraftText(text, profile = {}, options = {}) {
 
   // 9. Append standard signature if requested
   if (includeSignature && profile && (profile.name || profile.github || profile.linkedin || portfolio)) {
-    if (!cleaned.includes('Yours Sincerely')) {
+    if (!cleaned.includes('Best Regards') && !cleaned.includes('Yours Sincerely')) {
       const links = [];
       if (linkedin) links.push(`LinkedIn: ${linkedin}`);
       if (github) links.push(`GitHub: ${github}`);
       if (portfolio) links.push(`Portfolio: ${portfolio}`);
+      const nameLine = profile.name ? `${profile.name}\n` : '';
+      const titleLine = profile.title ? `${profile.title}\n` : '';
       const phoneLine = profile.phone ? `📞 ${profile.phone}\n` : '';
       const linksLine = links.length > 0 ? links.join(' | ') : '';
-      cleaned = `${cleaned.trim()}\n\nYours Sincerely,\n${profile.name || 'Akash V'}\n${profile.title || 'Software Developer'}\n${phoneLine}${linksLine}`;
+      cleaned = `${cleaned.trim()}\n\nBest Regards,\n${nameLine}${titleLine}${phoneLine}${linksLine}`.trim();
     } else if (portfolio && !/portfolio/i.test(cleaned)) {
       if (/(?:GitHub|LinkedIn):[^\r\n]+/i.test(cleaned)) {
         cleaned = cleaned.replace(/((?:GitHub|LinkedIn):[^\r\n]+)/i, (m) => `${m} | Portfolio: ${portfolio}`);

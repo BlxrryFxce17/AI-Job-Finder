@@ -548,7 +548,7 @@
     const locationFromInput = (document.getElementById('prof-location')?.value || 
       [document.getElementById('prof-city')?.value, document.getElementById('prof-state')?.value].filter(Boolean).join(', ') || '').trim();
 
-    const name = nameFromInput || p?.name || [p?.firstName, p?.lastName].filter(Boolean).join(' ') || 'Akash V.';
+    const name = nameFromInput || p?.name || [p?.firstName, p?.lastName].filter(Boolean).join(' ') || 'Candidate';
     const address = locationFromInput || p?.location || [p?.city, p?.state, p?.country].filter(Boolean).join(', ') || p?.addressLine1 || '';
     const contact = [emailFromInput || p?.email, phoneFromInput || p?.phone].filter(Boolean).join(' | ');
 
