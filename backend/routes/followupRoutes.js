@@ -8,6 +8,7 @@ const { callAIWithRetry } = require('../utils/ai');
 const {
   sendEmailViaAPI,
   checkGmailForReply,
+  findThreadForRecipient,
   formatEmailTextToHtml,
   cleanDraftEmailText,
   stripSignOff,
@@ -72,13 +73,27 @@ router.post('/send-followup', requireAuth, async (req, res) => {
     const plainTextSignature = buildPlainTextSignature(profile);
     const fullPlainText = `${cleanBody}\n\n${plainTextSignature}`;
 
+    if ((!job.matchedThreadId || !job.rfcMessageId) && user.googleRefreshToken) {
+      try {
+        const threadInfo = await findThreadForRecipient(user, job.emailRecipient);
+        if (threadInfo) {
+          if (!job.matchedThreadId && threadInfo.threadId) job.matchedThreadId = threadInfo.threadId;
+          if (!job.rfcMessageId && threadInfo.rfcMessageId) job.rfcMessageId = threadInfo.rfcMessageId;
+        }
+      } catch (_) {}
+    }
+
     const mailOptions = {
       from: `"${profile.name}" <${user.email || process.env.EMAIL_USER}>`,
       to: job.emailRecipient,
       subject: `Re: Application for ${job.role} - ${profile.name}`,
       text: fullPlainText,
       html: htmlBody,
-      attachments: []
+      attachments: [],
+      threadId: job.matchedThreadId || undefined,
+      inReplyTo: job.rfcMessageId || undefined,
+      references: job.rfcMessageId || undefined,
+      messageId: `<${require('crypto').randomUUID()}@${(user.email || 'aijobfinder').split('@')[1] || 'aijobfinder.local'}>`
     };
     if (!baseUrl && profile.resumePdf) {
       mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });

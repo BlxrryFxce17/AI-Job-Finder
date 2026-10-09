@@ -10,7 +10,7 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const cron = require('node-cron');
 const { callAIWithRetry } = require('./utils/ai');
-const { checkGmailForReply, processBounces, sendEmailViaAPI, formatEmailTextToHtml, cleanDraftEmailText, stripSignOff, generateFollowUpEmail, buildSignatureLinks, buildPlainTextSignature } = require('./utils/email');
+const { checkGmailForReply, findThreadForRecipient, processBounces, sendEmailViaAPI, formatEmailTextToHtml, cleanDraftEmailText, stripSignOff, generateFollowUpEmail, buildSignatureLinks, buildPlainTextSignature } = require('./utils/email');
 
 // Import Models
 const User = require('./models/User');
@@ -186,6 +186,17 @@ cron.schedule('0 11 * * *', async () => {
                 ${linksHtml}
               </div>
             `;
+
+            if ((!job.matchedThreadId || !job.rfcMessageId) && user.googleRefreshToken) {
+              try {
+                const threadInfo = await findThreadForRecipient(user, job.emailRecipient);
+                if (threadInfo) {
+                  if (!job.matchedThreadId && threadInfo.threadId) job.matchedThreadId = threadInfo.threadId;
+                  if (!job.rfcMessageId && threadInfo.rfcMessageId) job.rfcMessageId = threadInfo.rfcMessageId;
+                }
+              } catch (_) {}
+            }
+
             const mailOptions = {
               from: user.email || process.env.EMAIL_USER,
               to: job.emailRecipient,
@@ -193,8 +204,10 @@ cron.schedule('0 11 * * *', async () => {
               text: fullPlainText,
               html: htmlBody,
               replyTo: user.email || process.env.EMAIL_USER,
-              inReplyTo: job.messageId || undefined,
-              references: job.messageId ? [job.messageId] : undefined
+              threadId: job.matchedThreadId || undefined,
+              inReplyTo: job.rfcMessageId || job.messageId || undefined,
+              references: job.rfcMessageId || job.messageId || undefined,
+              messageId: `<${require('crypto').randomUUID()}@${(user.email || 'aijobfinder').split('@')[1] || 'aijobfinder.local'}>`
             };
 
             const sendRes = await sendEmailViaAPI(user, mailOptions);

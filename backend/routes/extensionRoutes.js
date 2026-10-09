@@ -1340,6 +1340,9 @@ router.post('/send-outreach-email', async (req, res) => {
     if (!user) user = await User.findOne().sort({ createdAt: -1 });
     if (!profile) profile = await Profile.findOne().sort({ updatedAt: -1 });
 
+    const crypto = require('crypto');
+    const rfcMsgId = `<${crypto.randomUUID()}@${(user?.email || 'aijobfinder').split('@')[1] || 'aijobfinder.local'}>`;
+
     const mailOptions = {
       from: user?.email || process.env.EMAIL_USER,
       to: to.trim(),
@@ -1348,7 +1351,8 @@ router.post('/send-outreach-email', async (req, res) => {
       html: `<div style="font-family: Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #1e293b;">
         ${formatEmailTextToHtml(body.trim())}
       </div>`,
-      attachments: []
+      attachments: [],
+      messageId: rfcMsgId
     };
 
     if (profile?.resumePdf) {
@@ -1359,10 +1363,11 @@ router.post('/send-outreach-email', async (req, res) => {
       });
     }
 
-    await sendEmailViaAPI(user || {}, mailOptions);
+    const info = await sendEmailViaAPI(user || {}, mailOptions);
 
     try {
       const newJob = new Job({
+        id: crypto.randomUUID(),
         userId: user?._id || profile?.userId,
         company: (company || 'Company').trim(),
         role: (role || 'Software Engineer').trim(),
@@ -1371,6 +1376,8 @@ router.post('/send-outreach-email', async (req, res) => {
         emailRecipient: to.trim(),
         emailDraft: body.trim(),
         sentAt: new Date(),
+        matchedThreadId: info?.threadId || '',
+        rfcMessageId: rfcMsgId,
         notes: `Direct email sent from Copilot sidebar to ${to.trim()}`
       });
       await newJob.save();

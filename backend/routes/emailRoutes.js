@@ -467,7 +467,8 @@ router.post('/send-email', requireAuth, async (req, res) => {
       subject: subject || (job ? `Application for ${job.role} - ${profile.name}` : 'Job Application'),
       text: fullPlainText,
       html: htmlBody,
-      attachments: []
+      attachments: [],
+      messageId: `<${require('crypto').randomUUID()}@${(user.email || 'aijobfinder').split('@')[1] || 'aijobfinder.local'}>`
     };
 
     await attachResumeToMailOptions(mailOptions, profile, req.user.id);
@@ -479,6 +480,12 @@ router.post('/send-email', requireAuth, async (req, res) => {
       job.sentAt = new Date();
       job.tracked = !!baseUrl;
       job.emailDraft = fullPlainText; // Save the final cleaned draft with full signature sent
+      if (info.threadId) {
+        job.matchedThreadId = info.threadId;
+      }
+      if (mailOptions.messageId) {
+        job.rfcMessageId = mailOptions.messageId;
+      }
       if (to && to !== job.emailRecipient) {
         job.emailRecipient = to; // Update if changed manually
       }

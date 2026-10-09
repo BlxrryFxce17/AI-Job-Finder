@@ -28,6 +28,7 @@ const jobSchema = new mongoose.Schema({
   salary: { type: String, default: '' },
   recruiterEmail: { type: String, default: '' },
   matchedThreadId: { type: String, default: '' },
+  rfcMessageId: { type: String, default: '' },
   lastRepliedAt: { type: Date },
   deliverabilityScore: { type: Number, default: 0 },
   deliverabilityStatus: { type: String, default: 'unverified' }, // 'deliverable', 'risky', 'undeliverable', 'unverified'

@@ -271,7 +271,7 @@ async function sendEmailViaAPI(user, mailOptions, sendOptions = {}) {
         threadId: mailOptions.threadId || undefined
       },
     });
-    return { messageId: res.data.id };
+    return { messageId: res.data.id, threadId: res.data.threadId };
   } else {
     console.warn('[Warning] No Google Refresh Token found. Falling back to SMTP which may be blocked on Render Free Tier.');
     const transporter = nodemailer.createTransport({
@@ -304,6 +304,51 @@ async function checkGmailForReply(user, recipientEmail) {
     console.error('Error checking Gmail for reply:', err);
     return false;
   }
+}
+
+async function findThreadForRecipient(user, recipientEmail) {
+  if (!user?.googleRefreshToken || !recipientEmail) return null;
+
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET
+  );
+  oauth2Client.setCredentials({ refresh_token: user.googleRefreshToken });
+  const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+  try {
+    const res = await gmail.users.messages.list({
+      userId: 'me',
+      q: `to:${recipientEmail}`,
+      maxResults: 1
+    });
+
+    if (res.data.messages && res.data.messages.length > 0) {
+      const msgMeta = res.data.messages[0];
+      let rfcMessageId = '';
+      try {
+        const fullMsg = await gmail.users.messages.get({
+          userId: 'me',
+          id: msgMeta.id,
+          format: 'metadata',
+          metadataHeaders: ['Message-ID', 'Message-Id']
+        });
+        const header = fullMsg.data.payload?.headers?.find(h => h.name.toLowerCase() === 'message-id');
+        if (header) {
+          rfcMessageId = header.value;
+        }
+      } catch (_) {}
+
+      return {
+        messageId: msgMeta.id,
+        threadId: msgMeta.threadId,
+        rfcMessageId
+      };
+    }
+  } catch (err) {
+    console.warn('[findThreadForRecipient] Unable to fetch thread for', recipientEmail, err.message);
+  }
+  return null;
 }
 
 async function processBounces(user) {
@@ -1369,6 +1414,7 @@ function buildPlainTextSignature(profile, trackClick = (url) => url) {
 module.exports = {
   sendEmailViaAPI,
   checkGmailForReply,
+  findThreadForRecipient,
   processBounces,
   getInboxReplies,
   discoverEmailForJob,
