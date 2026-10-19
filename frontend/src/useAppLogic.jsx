@@ -379,7 +379,9 @@ export function useAppLogic() {
         let deliverabilityScore = job.deliverabilityScore || 0;
         let currentHrName = job.hrName || null;
 
-        if (!discoveredEmail) {
+        let targetRecipients = (job.allRecipients && job.allRecipients.length > 0) ? job.allRecipients : [];
+
+        if (!discoveredEmail || targetRecipients.length === 0) {
           setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Running multi-layer email discovery & mailbox verification...`] }));
           const discRes = await apiFetch(`${API_BASE}/api/discover-email`, {
              method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -395,10 +397,37 @@ export function useAppLogic() {
           const discData = await discRes.json();
           discoveredEmail = discData.email || '';
           deliverabilityScore = discData.deliverabilityScore || 0;
+          if (discData.allRecipients && discData.allRecipients.length > 0) {
+            targetRecipients = discData.allRecipients;
+          }
           if (discData.hrName) currentHrName = discData.hrName;
 
           if (discoveredEmail) {
-            setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] ✅ Verified mailbox: ${discoveredEmail} (Deliverability: ${deliverabilityScore}%)`] }));
+            const recipientSummary = targetRecipients.length > 1
+              ? `Found ${targetRecipients.length} company mailboxes (${targetRecipients.map(r => r.email).join(', ')})`
+              : `Verified mailbox: ${discoveredEmail} (Deliverability: ${deliverabilityScore}%)`;
+            setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] ✅ ${recipientSummary}`] }));
+
+            // Update job with allRecipients in DB and UI
+            apiFetch(`${API_BASE}/api/jobs/${job.id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                emailRecipient: discoveredEmail,
+                allRecipients: targetRecipients,
+                deliverabilityScore,
+                deliverabilityStatus: 'deliverable',
+                deliverabilityReason: discData.deliverabilityReason || 'Verified company mailboxes'
+              })
+            }).catch(() => {});
+
+            setJobs(prev => prev.map(j => j.id === job.id ? { 
+              ...j, 
+              emailRecipient: discoveredEmail,
+              allRecipients: targetRecipients,
+              deliverabilityScore,
+              deliverabilityStatus: 'deliverable'
+            } : j));
           } else {
             const reason = discData?.deliverabilityReason || 'No verified recipient mailbox found';
             setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] 🛡️ Deliverability Guard: Zero verified inboxes. Unverified guessing blocked to protect sender reputation.`] }));
@@ -409,6 +438,7 @@ export function useAppLogic() {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ 
                 emailRecipient: '',
+                allRecipients: [],
                 deliverabilityScore: 0,
                 deliverabilityStatus: 'undeliverable',
                 deliverabilityReason: reason
@@ -418,13 +448,17 @@ export function useAppLogic() {
             setJobs(prev => prev.map(j => j.id === job.id ? { 
               ...j, 
               emailRecipient: '',
+              allRecipients: [],
               deliverabilityScore: 0,
               deliverabilityStatus: 'undeliverable',
               deliverabilityReason: reason
             } : j));
           }
         } else {
-          setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Target email: ${discoveredEmail} (Score: ${deliverabilityScore > 0 ? deliverabilityScore + '%' : 'MX-checked'})`] }));
+          const recInfo = targetRecipients.length > 1 
+            ? `${targetRecipients.length} company mailboxes (${targetRecipients.map(r => r.email).join(', ')})`
+            : `${discoveredEmail} (Score: ${deliverabilityScore > 0 ? deliverabilityScore + '%' : 'MX-checked'})`;
+          setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Target recipients: ${recInfo}`] }));
         }
         
         if (discoveredEmail) {
@@ -436,15 +470,25 @@ export function useAppLogic() {
           const genData = await genRes.json();
           
           if (genData.draft) {
-            setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Pre-send deliverability check passed. Dispatching via Gmail API...`] }));
+            const recipientCount = targetRecipients.length > 1 ? targetRecipients.length : 1;
+            setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Pre-send deliverability check passed. Dispatching ${recipientCount > 1 ? `${recipientCount} individualized emails` : 'outreach'} via Gmail API...`] }));
             const sendRes = await apiFetch(`${API_BASE}/api/send-email`, {
                method: 'POST', headers: { 'Content-Type': 'application/json' },
-               body: JSON.stringify({ jobId: job.id, body: genData.draft, to: discoveredEmail })
+               body: JSON.stringify({ 
+                 jobId: job.id, 
+                 body: genData.draft, 
+                 to: discoveredEmail,
+                 recipients: targetRecipients.length > 0 ? targetRecipients : undefined,
+                 sendToAll: true 
+               })
             });
             const sendData = await sendRes.json();
             if (sendData.success) {
                updateStatus(job.id, 'Sent', discoveredEmail, sendData.emailDraft || genData.draft, sendData.tracked);
-               setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] 🚀 Successfully sent! Delivery verified (Tracked: ${sendData.tracked ? 'Yes' : 'No'})`] }));
+               const successMsg = sendData.sentCount && sendData.sentCount > 1
+                 ? `🚀 Successfully sent ${sendData.sentCount} tailored emails to: ${sendData.sentRecipients?.map(r => r.email).join(', ')}!`
+                 : `🚀 Successfully sent to ${discoveredEmail}! Delivery verified (Tracked: ${sendData.tracked ? 'Yes' : 'No'})`;
+               setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] ${successMsg}`] }));
             } else {
                setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] 🛑 Send blocked: ${sendData.error || 'High bounce risk detected'}`] }));
             }

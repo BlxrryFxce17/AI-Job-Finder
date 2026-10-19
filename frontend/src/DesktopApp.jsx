@@ -5068,6 +5068,24 @@ export default function DesktopApp(props) {
                                         </span>
                                       );
                                     })()}
+                                    {job.allRecipients && job.allRecipients.length > 1 && (
+                                      <span style={{
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        gap: "3px",
+                                        fontSize: "10px",
+                                        fontWeight: 600,
+                                        padding: "1px 5px",
+                                        borderRadius: "10px",
+                                        background: "rgba(56, 189, 248, 0.12)",
+                                        color: "#38bdf8",
+                                        border: "1px solid rgba(56, 189, 248, 0.3)",
+                                        whiteSpace: "nowrap",
+                                        cursor: "pointer"
+                                      }} title={`All discovered mailboxes to reach:\n${job.allRecipients.map(r => `• ${r.email}${r.hrName ? ` (${r.hrName})` : ""}`).join("\n")}`}>
+                                        ⚡ +{job.allRecipients.length - 1} more
+                                      </span>
+                                    )}
                                   </>
                                 ) : (
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'nowrap', maxWidth: '100%' }}>

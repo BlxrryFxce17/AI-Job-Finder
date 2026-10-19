@@ -6,7 +6,7 @@ const User = require('../models/User');
 const Profile = require('../models/Profile');
 const requireAuth = require('../middleware/requireAuth');
 const { callAIWithRetry } = require('../utils/ai');
-const { sendEmailViaAPI, discoverEmailForJob, resolveCompanyDomain, getInboxReplies, verifyEmail, formatEmailTextToHtml, cleanDraftEmailText, stripSignOff, getEffectivePortfolio, buildSignatureLinks, buildPlainTextSignature, extractPortfolioUrl } = require('../utils/email');
+const { sendEmailViaAPI, discoverEmailForJob, resolveCompanyDomain, isJobBoardOrAtsDomain, getInboxReplies, verifyEmail, formatEmailTextToHtml, cleanDraftEmailText, stripSignOff, getEffectivePortfolio, buildSignatureLinks, buildPlainTextSignature, extractPortfolioUrl, tailorDraftForRecipient } = require('../utils/email');
 const { findHROnLinkedIn } = require('../utils/scraper');
 const { generateTailoredResumePDF } = require('../utils/pdfGenerator');
 
@@ -427,7 +427,7 @@ ${hrName ? `Hi ${hrName.split(' ')[0]},` : (targetCompany && !['unknown company'
 
 
 router.post('/send-email', requireAuth, async (req, res) => {
-  const { jobId, to, subject, body } = req.body;
+  const { jobId, to, subject, body, recipients, sendToAll } = req.body;
 
   try {
     const job = await Job.findOne({ id: jobId, userId: req.user.id });
@@ -436,64 +436,122 @@ router.post('/send-email', requireAuth, async (req, res) => {
 
     const baseUrl = process.env.PUBLIC_URL;
     const resumeLinkUrl = baseUrl ? `${baseUrl}/api/profile/resume-pdf?userId=${req.user.id}` : null;
-
     const trackClick = (url) => (baseUrl && url) ? `${baseUrl}/api/track-click/${jobId}?url=${encodeURIComponent(url)}` : (url || '');
-    const linksHtml = buildSignatureLinks(profile, trackClick);
     const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${jobId}" width="1" height="1" style="display:none;" />` : '';
 
-    const cleanBodyHtml = stripSignOff(cleanDraftEmailText(body, profile, job?.company, job?.role, { preserveMarkdownLinks: true }), profile);
-    const formattedDraft = formatEmailTextToHtml(cleanBodyHtml, resumeLinkUrl);
+    // Determine target recipients list
+    let targetRecipients = [];
+    if (Array.isArray(recipients) && recipients.length > 0) {
+      targetRecipients = recipients;
+    } else if (sendToAll && job?.allRecipients && job.allRecipients.length > 0) {
+      targetRecipients = job.allRecipients;
+    } else if (to) {
+      targetRecipients = [{ email: to.trim(), hrName: job?.hrName || '' }];
+    } else if (job?.emailRecipient) {
+      targetRecipients = [{ email: job.emailRecipient.trim(), hrName: job?.hrName || '' }];
+    }
 
-    const htmlBody = `
-      <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
-        ${formattedDraft}
-        <br/><br/>
-        Best Regards,<br/>
-        ${profile.name ? `<b>${profile.name}</b><br/>` : ''}
-        ${profile.phone ? `${profile.phone}<br/>` : ''}
-        ${linksHtml}
-        <br/>
-        ${trackingPixel}
-      </div>
-    `;
+    if (targetRecipients.length === 0) {
+      return res.status(400).json({ error: 'No recipient email specified' });
+    }
 
-    const cleanBodyPlain = stripSignOff(cleanDraftEmailText(body, profile, job?.company, job?.role, { preserveMarkdownLinks: false }), profile);
-    const plainTextSignature = buildPlainTextSignature(profile, trackClick);
-    const fullPlainText = `${cleanBodyPlain}\n\n${plainTextSignature}`;
+    const sentResults = [];
+    let primaryDraftText = '';
+    let primaryInfo = null;
 
-    const mailOptions = {
-      from: user.email || process.env.EMAIL_USER,
-      to: (to || '').trim(),
-      subject: subject || (job ? `Application for ${job.role} - ${profile.name}` : 'Job Application'),
-      text: fullPlainText,
-      html: htmlBody,
-      attachments: [],
-      messageId: `<${require('crypto').randomUUID()}@${(user.email || 'aijobfinder').split('@')[1] || 'aijobfinder.local'}>`
-    };
+    for (let idx = 0; idx < targetRecipients.length; idx++) {
+      const rec = targetRecipients[idx];
+      const targetEmail = (typeof rec === 'string' ? rec : rec.email || '').trim();
+      if (!targetEmail) continue;
 
-    await attachResumeToMailOptions(mailOptions, profile, req.user.id);
+      // Generate minor content variations per recipient (greeting, department angle)
+      const tailoredBodyText = tailorDraftForRecipient(body, rec, job?.company, job?.role);
 
-    const info = await sendEmailViaAPI(user, mailOptions);
+      const cleanBodyHtml = stripSignOff(cleanDraftEmailText(tailoredBodyText, profile, job?.company, job?.role, { preserveMarkdownLinks: true }), profile);
+      const formattedDraft = formatEmailTextToHtml(cleanBodyHtml, resumeLinkUrl);
+      const linksHtml = buildSignatureLinks(profile, trackClick);
+
+      const htmlBody = `
+        <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
+          ${formattedDraft}
+          <br/><br/>
+          Best Regards,<br/>
+          ${profile.name ? `<b>${profile.name}</b><br/>` : ''}
+          ${profile.phone ? `${profile.phone}<br/>` : ''}
+          ${linksHtml}
+          <br/>
+          ${trackingPixel}
+        </div>
+      `;
+
+      const cleanBodyPlain = stripSignOff(cleanDraftEmailText(tailoredBodyText, profile, job?.company, job?.role, { preserveMarkdownLinks: false }), profile);
+      const plainTextSignature = buildPlainTextSignature(profile, trackClick);
+      const fullPlainText = `${cleanBodyPlain}\n\n${plainTextSignature}`;
+
+      if (idx === 0) {
+        primaryDraftText = fullPlainText;
+      }
+
+      const mailOptions = {
+        from: user.email || process.env.EMAIL_USER,
+        to: targetEmail,
+        subject: subject || (job ? `Application for ${job.role} - ${profile.name}` : 'Job Application'),
+        text: fullPlainText,
+        html: htmlBody,
+        attachments: [],
+        messageId: `<${require('crypto').randomUUID()}@${(user.email || 'aijobfinder').split('@')[1] || 'aijobfinder.local'}>`
+      };
+
+      await attachResumeToMailOptions(mailOptions, profile, req.user.id);
+      const info = await sendEmailViaAPI(user, mailOptions);
+      if (idx === 0) {
+        primaryInfo = info;
+      }
+
+      sentResults.push({ email: targetEmail, messageId: info.messageId, threadId: info.threadId });
+
+      // Update recipient status on job.allRecipients if present
+      if (job && job.allRecipients) {
+        const matchRec = job.allRecipients.find(r => r.email.toLowerCase() === targetEmail.toLowerCase());
+        if (matchRec) {
+          matchRec.status = 'sent';
+          matchRec.sentAt = new Date();
+        }
+      }
+
+      // Pacing delay between sequential dispatches to protect sender reputation
+      if (idx < targetRecipients.length - 1) {
+        await new Promise(r => setTimeout(r, 1200));
+      }
+    }
 
     if (job) {
       job.status = 'Sent';
       job.sentAt = new Date();
       job.tracked = !!baseUrl;
-      job.emailDraft = fullPlainText; // Save the final cleaned draft with full signature sent
-      if (info.threadId) {
-        job.matchedThreadId = info.threadId;
+      job.emailDraft = primaryDraftText || body;
+      if (primaryInfo?.threadId) {
+        job.matchedThreadId = primaryInfo.threadId;
       }
-      if (mailOptions.messageId) {
-        job.rfcMessageId = mailOptions.messageId;
+      if (primaryInfo?.messageId) {
+        job.rfcMessageId = primaryInfo.messageId;
       }
       if (to && to !== job.emailRecipient) {
-        job.emailRecipient = to; // Update if changed manually
+        job.emailRecipient = to;
       }
       job.deliverabilityStatus = 'deliverable';
       await job.save();
     }
 
-    res.json({ success: true, tracked: !!baseUrl, emailDraft: fullPlainText, message: 'Email sent successfully!', messageId: info.messageId });
+    res.json({
+      success: true,
+      tracked: !!baseUrl,
+      emailDraft: primaryDraftText,
+      message: sentResults.length > 1 ? `Sent ${sentResults.length} personalized emails successfully!` : 'Email sent successfully!',
+      messageId: primaryInfo?.messageId,
+      sentCount: sentResults.length,
+      sentRecipients: sentResults
+    });
   } catch (error) {
     console.error('Error sending email:', error);
     res.status(500).json({ error: error.message || 'Failed to send email. Check credentials.' });

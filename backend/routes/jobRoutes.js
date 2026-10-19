@@ -19,7 +19,7 @@ const {
   normalizeHrName,
   isOlderThan12Hours
 } = require('../utils/scraper');
-const { discoverEmailForJob, sendEmailViaAPI, resolveCompanyDomain, autoBlockBouncedEmail } = require('../utils/email');
+const { discoverEmailForJob, sendEmailViaAPI, resolveCompanyDomain, isJobBoardOrAtsDomain, autoBlockBouncedEmail } = require('../utils/email');
 const { callAIWithRetry } = require('../utils/ai');
 const { learnFromBounce } = require('../utils/learningEngine');
 const Profile = require('../models/Profile');
@@ -45,10 +45,12 @@ async function sanitizeExistingHRLeads(userId) {
         changed = true;
       }
 
-      // Clear fake emails generated for invalid/fabricated domains
+      // Clear fake emails generated for invalid/fabricated/directory domains
       if (job.emailRecipient) {
         const em = job.emailRecipient.toLowerCase();
+        const emDomain = em.split('@')[1] || '';
         if (
+          isJobBoardOrAtsDomain(emDomain, job.company) ||
           em.includes('@sourcingstrategist.') ||
           em.includes('@technicalrecruiter.') ||
           em.includes('@juniordeveloper.') ||
@@ -60,9 +62,10 @@ async function sanitizeExistingHRLeads(userId) {
           job.company === 'Direct Recruiter / Agency'
         ) {
           job.emailRecipient = '';
+          job.allRecipients = [];
           job.deliverabilityStatus = 'undeliverable';
           job.deliverabilityScore = 0;
-          job.deliverabilityReason = 'Fabricated or synthetic agency domain removed';
+          job.deliverabilityReason = 'Fabricated or aggregator directory domain removed';
           changed = true;
         }
       }
@@ -84,6 +87,9 @@ async function sanitizeExistingHRLeads(userId) {
             );
             if (emailRes && emailRes.email && (emailRes.deliverabilityScore >= 65 || emailRes.verification?.canAutoSend)) {
               job.emailRecipient = emailRes.email;
+              if (emailRes.allRecipients && emailRes.allRecipients.length > 0) {
+                job.allRecipients = emailRes.allRecipients;
+              }
               job.deliverabilityScore = emailRes.deliverabilityScore || 80;
               job.deliverabilityStatus = emailRes.deliverabilityStatus || 'deliverable';
               job.deliverabilityReason = emailRes.deliverabilityReason || 'Verified corporate email';
@@ -250,6 +256,9 @@ router.post('/check-all-emails', requireAuth, async (req, res) => {
 
             if (emailRes && emailRes.email && (emailRes.deliverabilityScore >= 65 || emailRes.verification?.canAutoSend)) {
               job.emailRecipient = emailRes.email;
+              if (emailRes.allRecipients && emailRes.allRecipients.length > 0) {
+                job.allRecipients = emailRes.allRecipients;
+              }
               job.deliverabilityScore = emailRes.deliverabilityScore || 80;
               job.deliverabilityStatus = emailRes.deliverabilityStatus || 'deliverable';
               job.deliverabilityReason = emailRes.deliverabilityReason || 'Verified corporate email';
@@ -258,6 +267,7 @@ router.post('/check-all-emails', requireAuth, async (req, res) => {
               updatedJobs.push({
                 id: job.id || job._id.toString(),
                 emailRecipient: job.emailRecipient,
+                allRecipients: job.allRecipients || [],
                 deliverabilityScore: job.deliverabilityScore,
                 deliverabilityStatus: job.deliverabilityStatus,
                 deliverabilityReason: job.deliverabilityReason

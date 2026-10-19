@@ -12,6 +12,14 @@ const jobSchema = new mongoose.Schema({
   location: { type: String, default: '' },
   emailDraft: { type: String, default: '' },
   emailRecipient: { type: String, default: '' },
+  allRecipients: [{
+    email: { type: String, required: true },
+    hrName: { type: String, default: '' },
+    type: { type: String, default: 'inbox' },
+    deliverabilityScore: { type: Number, default: 65 },
+    status: { type: String, default: 'pending' },
+    sentAt: { type: Date }
+  }],
   hrName: { type: String, default: '' },
   hrLinkedIn: { type: String, default: '' },
   failedEmails: { type: [String], default: [] },

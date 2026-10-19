@@ -20,11 +20,27 @@ let serperCreditsExhaustedUntil = 0;
  * Checks if a domain belongs to a job aggregator, job board, ATS platform, or social network.
  * These domains must NEVER be treated as the employer's official email domain.
  */
-function isJobBoardOrAtsDomain(host) {
+function isJobBoardOrAtsDomain(host, company = '') {
   if (!host || typeof host !== 'string') return false;
   const clean = host.toLowerCase().trim().replace(/^www\./, '');
-  const jobBoardPattern = /\b(adzuna|indeed|naukri|linkedin|glassdoor|internshala|foundit|monster|shine|timesjobs|hirist|instahyre|cuvette|unstop|wellfound|angel\.co|ziprecruiter|simplyhired|careerbuilder|dice|apify|google|facebook|twitter|instagram|youtube|wikipedia|github|medium|zaubacorp|tofler|ambitionbox|zoominfo|greenhouse|lever|workday|myworkdayjobs|smartrecruiters|ashbyhq|breezy|recruitee|jobvite|bamboohr|workable)\b/i;
-  return jobBoardPattern.test(clean);
+  const jobBoardPattern = /\b(adzuna|indeed|naukri|linkedin|glassdoor|internshala|foundit|monster|shine|timesjobs|hirist|instahyre|cuvette|unstop|wellfound|angel\.co|ziprecruiter|simplyhired|careerbuilder|dice|apify|google|facebook|twitter|instagram|youtube|wikipedia|github|medium|zaubacorp|tofler|ambitionbox|zoominfo|greenhouse|lever|workday|myworkdayjobs|smartrecruiters|ashbyhq|breezy|recruitee|jobvite|bamboohr|workable|tracxn|leadiq|rocketreach|tradekey|textranch|firestormirc|nnedv|crunchbase|pitchbook|apollo|lusha|signalhire|contactout|clearbit|hunter|owler|dnb|kompass|indiamart|justdial|yellowpages|bloomberg|reuters|craft\.co|upwork|fiverr|freelancer)\b/i;
+  if (jobBoardPattern.test(clean)) return true;
+
+  // Block .edu / .ac.in / .edu.in unless company is an academic institution
+  if (/\.(edu|ac\.in|edu\.in)$/i.test(clean)) {
+    const compLower = (company || '').toLowerCase();
+    const isAcademic = /\b(university|college|school|institute|academy|campus|polytechnic)\b/i.test(compLower);
+    if (!isAcademic) return true;
+  }
+
+  // Block .org unless company is a non-profit/foundation/trust
+  if (/\.org$/i.test(clean)) {
+    const compLower = (company || '').toLowerCase();
+    const isNonProfit = /\b(foundation|trust|society|association|charity|council|federation|nonprofit|ngo)\b/i.test(compLower);
+    if (!isNonProfit) return true;
+  }
+
+  return false;
 }
 
 async function resolveCompanyDomain(company, applyLink = null) {
@@ -867,18 +883,37 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
 
   const isGenericOrgName = !hrName || /\b(talent|acquisition|recruitment|recruiter|hiring|team|lead|manager|human resources|resources|staffing|agency)\b/i.test(hrName) || hrName.toLowerCase().includes(company.toLowerCase());
 
+  const allDiscoveredRecipients = [];
+  const seenEmails = new Set();
+
+  function addDiscoveredRecipient(email, recipientHrName, type, deliverabilityScore, reason) {
+    const cleanEmail = email.toLowerCase().trim();
+    if (!cleanEmail || seenEmails.has(cleanEmail)) return;
+    seenEmails.add(cleanEmail);
+    allDiscoveredRecipients.push({
+      email: cleanEmail,
+      hrName: recipientHrName || '',
+      type: type || 'inbox',
+      deliverabilityScore: deliverabilityScore || 65,
+      status: 'pending',
+      reason: reason || 'Verified corporate mailbox'
+    });
+  }
+
   // Helper to test and accept candidate email
-  async function testCandidate(candidate, sourceName, isExplicitJd = false, allowDomainMismatch = false) {
-    if (!candidate || failedEmails.includes(candidate.toLowerCase().trim())) return false;
+  async function testCandidate(candidate, sourceName, isExplicitJd = false, allowDomainMismatch = false, inboxType = 'recruiter') {
+    if (!candidate) return false;
+    const cleanCand = candidate.toLowerCase().trim();
+    if (failedEmails.includes(cleanCand) || seenEmails.has(cleanCand)) return false;
     
     // Strict Filter: Block system non-recipient inboxes (noreply@, mailer-daemon@, support@, etc.)
-    if (isNonRecipientEmail(candidate)) {
-      console.log(`[Email Rejected] Discarded non-recipient address "${candidate}"`);
+    if (isNonRecipientEmail(cleanCand)) {
+      console.log(`[Email Rejected] Discarded non-recipient address "${cleanCand}"`);
       return false;
     }
 
     // Strict Domain Match: Prevent cross-company contamination
-    const candidateDomain = (candidate.split('@')[1] || '').toLowerCase().trim();
+    const candidateDomain = (cleanCand.split('@')[1] || '').toLowerCase().trim();
     if (!allowDomainMismatch && cleanDomain && candidateDomain) {
       const cleanRoot = cleanDomain.split('.')[0];
       const candidateRoot = candidateDomain.split('.')[0];
@@ -891,28 +926,33 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
       if (isPersonalMail) {
         if (!hrName) return false;
         const hrFirstName = hrName.toLowerCase().split(' ')[0];
-        if (!candidate.toLowerCase().includes(hrFirstName)) {
-          console.log(`[Email Rejected] Personal email ${candidate} does not match recruiter name ${hrName}`);
+        if (!cleanCand.toLowerCase().includes(hrFirstName)) {
+          console.log(`[Email Rejected] Personal email ${cleanCand} does not match recruiter name ${hrName}`);
           return false;
         }
       } else if (!isDomainMatch) {
-        console.log(`[Email Rejected] Domain mismatch for "${candidate}" (expected "${cleanDomain}", got "${candidateDomain}")`);
+        console.log(`[Email Rejected] Domain mismatch for "${cleanCand}" (expected "${cleanDomain}", got "${candidateDomain}")`);
         return false;
       }
     }
 
-    const result = await verifyEmail(candidate, { isFromJd: isExplicitJd, hrName: isGenericOrgName ? null : hrName });
+    const result = await verifyEmail(cleanCand, { isFromJd: isExplicitJd, hrName: isGenericOrgName ? null : hrName });
     // Require strict deliverability confirmation to prevent bounces:
     // Explicit JD emails allowed if isValid === true and deliverabilityScore >= 60.
     // Inferred/scraped emails require deliverabilityScore >= 65 and isValid === true.
     const threshold = isExplicitJd ? 60 : 65;
     if (result.isValid && result.deliverabilityScore >= threshold && result.status !== 'undeliverable') {
-      discoveredEmail = candidate.trim();
-      source = `${sourceName} [Verified ${result.deliverabilityScore}%]`;
-      verificationInfo = result;
+      const recHrName = inboxType === 'recruiter' && !isGenericOrgName ? hrName : '';
+      addDiscoveredRecipient(cleanCand, recHrName, inboxType, result.deliverabilityScore, result.reason);
+
+      if (!discoveredEmail) {
+        discoveredEmail = cleanCand;
+        source = `${sourceName} [Verified ${result.deliverabilityScore}%]`;
+        verificationInfo = result;
+      }
       return true;
     }
-    console.log(`[Email Rejected] Candidate ${candidate} failed deliverability check (Status: ${result.status}, Score: ${result.deliverabilityScore}%, Reason: ${result.reason})`);
+    console.log(`[Email Rejected] Candidate ${cleanCand} failed deliverability check (Status: ${result.status}, Score: ${result.deliverabilityScore}%, Reason: ${result.reason})`);
     return false;
   }
 
@@ -1067,31 +1107,33 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
 
   // Tier 4: Company Recruitment Inboxes (Standard corporate talent & recruitment inboxes)
   const isInvalidDomain = /\b(sourcingstrategist|technicalrecruiter|juniordeveloper|softwaredeveloper|softwareengineer|talentacquisition|directrecruiter|recruiteragency)\b/i.test(cleanDomain || '');
-  if (!discoveredEmail && domainMx.valid && cleanDomain && !isInvalidDomain) {
+  if (domainMx.valid && cleanDomain && !isInvalidDomain) {
     const candidateInboxes = [
-      `careers@${cleanDomain}`,
-      `jobs@${cleanDomain}`,
-      `talent@${cleanDomain}`,
-      `recruitment@${cleanDomain}`,
-      `hr@${cleanDomain}`
+      { email: `careers@${cleanDomain}`, type: 'careers' },
+      { email: `hr@${cleanDomain}`, type: 'hr' },
+      { email: `talent@${cleanDomain}`, type: 'talent' },
+      { email: `recruitment@${cleanDomain}`, type: 'recruitment' },
+      { email: `jobs@${cleanDomain}`, type: 'jobs' }
     ];
-    for (const candidate of candidateInboxes) {
-      if (await testCandidate(candidate, 'Tier 4 (Company Careers Inbox)', false, false)) {
-        break;
-      }
+    for (const item of candidateInboxes) {
+      await testCandidate(item.email, `Tier 4 (${item.type})`, false, false, item.type);
     }
   }
 
-  // Dynamic Learning: If an email is verified and accepted, learn it
-  if (discoveredEmail) {
-    await learnFromVerifiedEmail(company, cleanDomain, discoveredEmail, hrName);
-    console.log(`[Email Discovery] ${company} (${cleanDomain}) -> ${discoveredEmail} (${source})`);
+  // Dynamic Learning: If emails are verified and accepted, learn primary
+  if (allDiscoveredRecipients.length > 0 || discoveredEmail) {
+    const primary = discoveredEmail || allDiscoveredRecipients[0]?.email;
+    if (primary) {
+      await learnFromVerifiedEmail(company, cleanDomain, primary, hrName);
+    }
+    console.log(`[Email Discovery] ${company} (${cleanDomain}) -> Found ${allDiscoveredRecipients.length} mailboxes: ${allDiscoveredRecipients.map(r => r.email).join(', ')}`);
     return { 
-      email: discoveredEmail, 
-      source, 
-      deliverabilityScore: verificationInfo?.deliverabilityScore || 85,
+      email: primary, 
+      allRecipients: allDiscoveredRecipients,
+      source: source || `Discovered ${allDiscoveredRecipients.length} company inboxes`, 
+      deliverabilityScore: verificationInfo?.deliverabilityScore || allDiscoveredRecipients[0]?.deliverabilityScore || 65,
       deliverabilityStatus: verificationInfo?.status || 'deliverable',
-      deliverabilityReason: verificationInfo?.reason || 'Verified deliverable mailbox',
+      deliverabilityReason: verificationInfo?.reason || `Verified ${allDiscoveredRecipients.length} company inboxes`,
       verification: verificationInfo 
     };
   }
@@ -1099,6 +1141,7 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
   console.log(`[Email Discovery] ${company} (${cleanDomain}) -> NONE (Zero deliverable inboxes confirmed. Blocked guessing to prevent bounce)`);
   return { 
     email: null, 
+    allRecipients: [],
     source: 'No deliverable mailbox discovered', 
     deliverabilityScore: 0,
     deliverabilityStatus: 'undeliverable',
@@ -1471,6 +1514,61 @@ function buildPlainTextSignature(profile, trackClick = (url) => url) {
   return `Best Regards,\n${nameLine}${phone}${linksLine}`.trim();
 }
 
+/**
+ * Tailors an email draft with minor, personalized phrasing variations for a specific company recipient.
+ * Ensures individualized, high-deliverability outreach when contacting multiple company mailboxes.
+ */
+function tailorDraftForRecipient(baseDraft, recipient, company, role) {
+  if (!baseDraft) return '';
+  let draft = baseDraft.trim();
+  const recEmail = (recipient?.email || (typeof recipient === 'string' ? recipient : '')).toLowerCase().trim();
+  const hrName = recipient?.hrName || null;
+  const type = recipient?.type || (recEmail.startsWith('hr@') ? 'hr' : recEmail.startsWith('talent@') ? 'talent' : recEmail.startsWith('recruitment@') ? 'recruitment' : recEmail.startsWith('careers@') ? 'careers' : recEmail.startsWith('jobs@') ? 'jobs' : 'general');
+  const comp = company && !['unknown company', 'unknown'].includes(company.toLowerCase()) ? company.trim() : 'the team';
+
+  // Deterministic personalized greeting per AGENTS.md Rule 4
+  let tailoredGreeting = `Hi ${comp} Team,`;
+  if (hrName) {
+    const firstName = hrName.trim().split(' ')[0];
+    tailoredGreeting = `Hi ${firstName},`;
+  } else if (type === 'hr') {
+    tailoredGreeting = `Hi HR Team at ${comp},`;
+  } else if (type === 'talent') {
+    tailoredGreeting = `Hi Talent Acquisition Team at ${comp},`;
+  } else if (type === 'recruitment' || type === 'jobs') {
+    tailoredGreeting = `Hi Recruiting Team at ${comp},`;
+  } else if (type === 'careers') {
+    tailoredGreeting = `Hi ${comp} Careers Team,`;
+  }
+
+  // Replace existing opening greeting line with the tailored greeting
+  if (/^(?:Hi|Hello|Dear)\s+[^,\n]+,/i.test(draft)) {
+    draft = draft.replace(/^(?:Hi|Hello|Dear)\s+[^,\n]+,/i, tailoredGreeting);
+  } else {
+    draft = `${tailoredGreeting}\n\n${draft}`;
+  }
+
+  // Minor personalized framing variation so each email is distinct and authentic
+  if (type === 'hr' && !draft.includes('Human Resources')) {
+    draft = draft.replace(
+      /(I(?:'ve| have) been actively (?:building|developing|working))/i,
+      'I wanted to reach out to your HR team directly as I$1'
+    );
+  } else if (type === 'talent' && !draft.includes('Talent Acquisition')) {
+    draft = draft.replace(
+      /(I(?:'ve| have) been actively (?:building|developing|working))/i,
+      'I am reaching out to your Talent Acquisition team as I$1'
+    );
+  } else if (type === 'careers' && !draft.includes('careers team')) {
+    draft = draft.replace(
+      /(I(?:'ve| have) been actively (?:building|developing|working))/i,
+      'I wanted to reach out to the careers team regarding the open role as I$1'
+    );
+  }
+
+  return draft.trim();
+}
+
 module.exports = {
   sendEmailViaAPI,
   checkGmailForReply,
@@ -1480,6 +1578,7 @@ module.exports = {
   getInboxReplies,
   discoverEmailForJob,
   resolveCompanyDomain,
+  isJobBoardOrAtsDomain,
   verifyEmail,
   checkMxRecords,
   validateEmailSyntax,
@@ -1490,7 +1589,8 @@ module.exports = {
   getEffectivePortfolio,
   buildSignatureLinks,
   buildPlainTextSignature,
-  extractPortfolioUrl
+  extractPortfolioUrl,
+  tailorDraftForRecipient
 };
 
 
