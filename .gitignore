@@ -11,3 +11,4 @@ AGENTS.md
 dist-extension/
 .agent/
 .skills.json
+applications_bundle/
