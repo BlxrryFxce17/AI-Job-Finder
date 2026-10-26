@@ -1234,11 +1234,22 @@ router.post('/draft-email', async (req, res) => {
   * Resilient Production Architectures (CI/CD, REST APIs, database persistence, asynchronous workflows)`;
     }
 
-    const isHrNetworking = /recruiter|talent|hr|human resources|sourcing|acquisition|headhunter/i.test(targetRole) || targetCompany === 'Direct Recruiter / Agency';
-    const targetRecipient = isHrNetworking ? targetRole : `the engineering team at ${targetCompany}`;
-    const emailIntent = isHrNetworking 
-      ? `a direct, high-impact networking cold email to ${targetRecipient} at ${targetCompany} to inquire about open engineering roles`
-      : `a direct, high-impact cold email to ${targetRecipient} for the "${targetRole}" opening`;
+    const isHrTarget = Boolean(
+      req.body.isHr ||
+      hrName ||
+      recipientType === 'hr' ||
+      recipientType === 'talent' ||
+      recipientType === 'recruitment' ||
+      /recruiter|talent|hr|human resources|sourcing|acquisition|headhunter/i.test(targetRole || '') ||
+      /^(hr|talent|recruitment|recruiting|careers|jobs|people|sourcing)@/i.test((recipientEmail || '').toLowerCase().trim()) ||
+      targetCompany === 'Direct Recruiter / Agency'
+    );
+    const isGenericRole = !targetRole || /recruiter|talent|hr|human resources|sourcing|acquisition|headhunter/i.test(targetRole);
+    const effectiveRole = isGenericRole ? 'fresh software engineering openings' : targetRole;
+    const targetRecipient = hrName ? hrName : (isHrTarget ? `the HR & Talent Acquisition team at ${targetCompany}` : `the engineering team at ${targetCompany}`);
+    const emailIntent = isHrTarget 
+      ? `a direct, high-impact cold inquiry to ${targetRecipient} at ${targetCompany} inquiring about fresh software engineering openings, junior/entry-level developer opportunities, or potential internal referrals based on ${candidateName}'s technical background and verified projects`
+      : `a direct, high-impact cold email to ${targetRecipient} for the "${effectiveRole}" opening`;
 
     const prompt = `You are a talented software engineer named ${candidateName} writing ${emailIntent}.
 Discipline Focus: ${personaEmphasis}
@@ -1253,26 +1264,28 @@ ${outreachProjectsList}
 
 GUIDELINES FOR A REAL, COMPELLING HUMAN EMAIL (ZERO AI SLOP):
 1. SOUND LIKE A SHARP, EAGER DEVELOPER:
-   - Talk directly to the technical team with genuine energy and clarity.
+   - Talk directly to the team with genuine energy, technical competence, and clarity.
    - NO stiff robotic phrases ("I am writing to express my interest", "which aligns well with the layers you are likely using", "my passion for your innovative company", "I am a perfect fit").
 2. CONCISE & PUNCHY (80 to 120 words total):
-   - Paragraph 1 (The Hook): Say you noticed the ${targetRole} role at ${targetCompany} and wanted to reach out directly. State the 2-3 core technologies or tools you actively build with that directly tackle what this role demands.
+${isHrTarget ? `   - Paragraph 1 (The Hook): State that you are reaching out to the Talent Acquisition team to explore fresh software engineering openings (or the ${effectiveRole} role) at ${targetCompany}, or to explore potential internal referrals for their engineering teams. Mention the 2-3 core technologies you actively build with.
    - Paragraph 2 (The Proof): Highlight a specific, tangible project or architecture you built (referencing your projects above). Explain in clear, technical terms what problem you solved (e.g. automated deployment pipelines, asynchronous data scraping, robust DB persistence, or reactive UI state).
-   - Paragraph 3 (The Low-Friction Call-to-Action): "I've attached my resume and would welcome a quick 10-minute chat if my background looks like a match for what you're building."
+   - Paragraph 3 (The Low-Friction Referral Ask): "I've attached my resume. If your team has active or upcoming fresh openings matching this background, or if you could kindly refer me or point me to the hiring manager, I'd welcome a brief conversation."` : `   - Paragraph 1 (The Hook): Say you noticed the ${effectiveRole} role at ${targetCompany} and wanted to reach out directly. State the 2-3 core technologies or tools you actively build with that directly tackle what this role demands.
+   - Paragraph 2 (The Proof): Highlight a specific, tangible project or architecture you built (referencing your projects above). Explain in clear, technical terms what problem you solved (e.g. automated deployment pipelines, asynchronous data scraping, robust DB persistence, or reactive UI state).
+   - Paragraph 3 (The Low-Friction Call-to-Action): "I've attached my resume and would welcome a quick 10-minute chat if my background looks like a match for what you're building."`}
 3. STRICTLY NO BULLET POINTS: Write in 2-3 clean, readable paragraphs.
 4. SIGN-OFF BLOCK:
 ${signOffBlock}
 
 Output format:
-SUBJECT: ${isHrNetworking ? `Connecting: Engineering Opportunities at ${targetCompany}` : `Application for ${targetRole} - ${candidateName}`}
+SUBJECT: ${isHrTarget ? `Exploring Openings: ${effectiveRole} / Referral - ${candidateName}` : `Application for ${effectiveRole} - ${candidateName}`}
 BODY:
-Hi ${targetCompany} Team,
+${hrName ? `Hi ${hrName.split(' ')[0]},` : (isHrTarget ? `Hi ${targetCompany} Recruiting Team,` : `Hi ${targetCompany} Team,`)}
 
 [Email body here]
 
 ${signOffBlock}`;
 
-    let subject = isHrNetworking ? `Connecting: Engineering Opportunities at ${targetCompany}` : `Application for ${targetRole} - ${candidateName}`;
+    let subject = isHrTarget ? `Exploring Openings: ${effectiveRole} / Referral - ${candidateName}` : `Application for ${effectiveRole} - ${candidateName}`;
     let body = '';
 
     try {
@@ -1294,10 +1307,13 @@ ${signOffBlock}`;
       const s1 = profile.skills?.[0] || 'TypeScript';
       const s2 = profile.skills?.[1] || 'Node.js';
       const s3 = profile.skills?.[2] || 'React';
-      const hookText = isHrNetworking 
-        ? `I wanted to reach out to see if you are recruiting for any engineering roles.`
+      const hookText = isHrTarget 
+        ? `I wanted to reach out to your Talent Acquisition team directly to inquire about fresh software engineering openings or referrals at ${targetCompany}.`
         : `I saw the opening for the ${targetRole} position and wanted to reach out directly.`;
-      body = `Hi ${targetCompany} Team,\n\n${hookText} I've been actively developing full-stack web applications using ${s1}, ${s2}, and ${s3}, with a focus on building clean REST APIs and responsive user interfaces.\n\nRecently, I built and deployed full-stack projects handling real-time state, backend database persistence, and robust error handling. I'd love to bring this hands-on engineering mindset to ${targetCompany}.\n\nI've attached my resume and would love to chat if my background sounds like a fit for your team.\n\n${signOffBlock}`;
+      const askText = isHrTarget
+        ? `I've attached my resume. If your team has active or upcoming fresh openings matching this background, or if you could kindly refer me or point me to the hiring manager, I'd welcome a brief conversation.`
+        : `I've attached my resume and would love to chat if my background sounds like a fit for your team.`;
+      body = `${hrName ? `Hi ${hrName.split(' ')[0]},` : (isHrTarget ? `Hi ${targetCompany} Recruiting Team,` : `Hi ${targetCompany} Team,`)}\n\n${hookText} I've been actively developing full-stack web applications using ${s1}, ${s2}, and ${s3}, with a focus on building clean REST APIs and responsive user interfaces.\n\nRecently, I built and deployed full-stack projects handling real-time state, backend database persistence, and robust error handling. I'd love to bring this hands-on engineering mindset to ${targetCompany}.\n\n${askText}\n\n${signOffBlock}`;
     }
 
     res.json({

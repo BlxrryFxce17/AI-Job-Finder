@@ -1518,13 +1518,14 @@ function buildPlainTextSignature(profile, trackClick = (url) => url) {
  * Tailors an email draft with minor, personalized phrasing variations for a specific company recipient.
  * Ensures individualized, high-deliverability outreach when contacting multiple company mailboxes.
  */
-function tailorDraftForRecipient(baseDraft, recipient, company, role) {
+function tailorDraftForRecipient(baseDraft, recipient, company, role, profile = {}) {
   if (!baseDraft) return '';
   let draft = baseDraft.trim();
   const recEmail = (recipient?.email || (typeof recipient === 'string' ? recipient : '')).toLowerCase().trim();
   const hrName = recipient?.hrName || null;
   const type = recipient?.type || (recEmail.startsWith('hr@') ? 'hr' : recEmail.startsWith('talent@') ? 'talent' : recEmail.startsWith('recruitment@') ? 'recruitment' : recEmail.startsWith('careers@') ? 'careers' : recEmail.startsWith('jobs@') ? 'jobs' : 'general');
   const comp = company && !['unknown company', 'unknown'].includes(company.toLowerCase()) ? company.trim() : 'the team';
+  const targetRole = role && !/recruiter|talent|hr|human resources|sourcing|acquisition|headhunter/i.test(role) ? role : 'software engineering';
 
   // Deterministic personalized greeting per AGENTS.md Rule 4
   let tailoredGreeting = `Hi ${comp} Team,`;
@@ -1548,17 +1549,30 @@ function tailorDraftForRecipient(baseDraft, recipient, company, role) {
     draft = `${tailoredGreeting}\n\n${draft}`;
   }
 
-  // Minor personalized framing variation so each email is distinct and authentic
-  if (type === 'hr' && !draft.includes('Human Resources')) {
-    draft = draft.replace(
-      /(I(?:'ve| have) been actively (?:building|developing|working))/i,
-      'I wanted to reach out to your HR team directly as I$1'
-    );
-  } else if (type === 'talent' && !draft.includes('Talent Acquisition')) {
-    draft = draft.replace(
-      /(I(?:'ve| have) been actively (?:building|developing|working))/i,
-      'I am reaching out to your Talent Acquisition team as I$1'
-    );
+  // Personalized framing for HR/recruiter outreach: focus on fresh openings and referrals based on profile
+  const isHrRecipient = hrName || type === 'hr' || type === 'talent' || type === 'recruitment';
+  if (isHrRecipient) {
+    const teamLabel = hrName ? 'you' : (type === 'talent' ? 'your Talent Acquisition team' : 'your HR team');
+
+    if (/I saw you're hiring for (?:a |the )?|I saw the opening for (?:a |the )?|I saw your job posting for (?:a |the )?/i.test(draft)) {
+      draft = draft.replace(
+        /(?:I saw you're hiring for (?:a |the )?|I saw the opening for (?:a |the )?|I saw your job posting for (?:a |the )?)([^.,\n]+?)(?: and wanted to reach out directly| and wanted to reach out|, and wanted to reach out)/i,
+        `I wanted to reach out to ${teamLabel} directly to inquire about fresh software engineering openings (or the $1 role), or to explore potential internal referrals for your engineering teams`
+      );
+    } else if (!draft.toLowerCase().includes('fresh openings') && !draft.toLowerCase().includes('referral')) {
+      draft = draft.replace(
+        /(I(?:'ve| have) been actively (?:building|developing|working))/i,
+        `I wanted to reach out to ${teamLabel} regarding fresh engineering openings or referrals as I$1`
+      );
+    }
+
+    // Adapt closing to politely ask for a referral or pointer to hiring team
+    if (!draft.toLowerCase().includes('refer me') && !draft.toLowerCase().includes('referral') && /would love to chat if my background looks like a fit/i.test(draft)) {
+      draft = draft.replace(
+        /would love to chat if my background looks like a fit for what you're building/i,
+        "if your team has active or upcoming fresh openings, or if you could kindly refer me or point me to the hiring manager, I'd welcome a brief conversation"
+      );
+    }
   } else if (type === 'careers' && !draft.includes('careers team')) {
     draft = draft.replace(
       /(I(?:'ve| have) been actively (?:building|developing|working))/i,

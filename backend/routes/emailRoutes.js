@@ -312,29 +312,44 @@ function resolveCleanCompany(rawCompany, jdText) {
 }
 
 router.post('/generate-email', requireAuth, async (req, res) => {
-  const { company, role, type, jd, hrName } = req.body;
+  const { company, role, type, jd, hrName, recipientEmail, recipientType, isHr } = req.body;
 
   try {
     const profile = await getProfile(req.user.id);
     const tone = profile.tone || 'Professional';
     const skillsText = profile.skills && profile.skills.length > 0 ? `Core Skills: ${profile.skills.join(', ')}` : '';
     const achText = profile.achievements && profile.achievements.length > 0 ? `Key Achievements:\n- ${profile.achievements.join('\n- ')}` : '';
+    const eduText = profile.education && profile.education.length > 0 ? `Education: ${profile.education.map(e => `${e.degree || ''} (${e.institution || e.college || ''}, ${e.year || ''})`).join('; ')}` : '';
 
     const gitInsightText = buildGitInsightText(profile, jd, role, company);
 
     const cleanCompany = resolveCleanCompany(company, jd);
     const targetCompany = cleanCompany || 'the team';
-    
-    const isHrNetworking = /recruiter|talent|hr|human resources|sourcing|acquisition|headhunter/i.test(role) || cleanCompany === 'Direct Recruiter / Agency';
-    const targetRecipient = hrName ? hrName : `the engineering team at ${targetCompany}`;
-    const targetRole = isHrNetworking ? 'engineering opportunities' : (role || 'the open role');
-    const emailIntent = isHrNetworking
-      ? `a direct, natural networking cold email to ${targetRecipient} at ${targetCompany} to inquire about open ${targetRole}`
+    const recEmailStr = (recipientEmail || '').toLowerCase().trim();
+
+    const isHrTarget = Boolean(
+      isHr ||
+      hrName ||
+      recipientType === 'hr' ||
+      recipientType === 'talent' ||
+      recipientType === 'recruitment' ||
+      /recruiter|talent|hr|human resources|sourcing|acquisition|headhunter/i.test(role || '') ||
+      /recruiter|talent|hr|human resources|sourcing|acquisition|headhunter/i.test(type || '') ||
+      /^(hr|talent|recruitment|recruiting|careers|jobs|people|sourcing)@/i.test(recEmailStr) ||
+      cleanCompany === 'Direct Recruiter / Agency'
+    );
+
+    const targetRecipient = hrName ? hrName : (isHrTarget ? `the HR & Talent Acquisition team at ${targetCompany}` : `the engineering team at ${targetCompany}`);
+    const isGenericRole = !role || /recruiter|talent|hr|human resources|sourcing|acquisition|headhunter/i.test(role);
+    const targetRole = isGenericRole ? 'fresh software engineering openings' : role;
+
+    const emailIntent = isHrTarget
+      ? `a direct, authentic cold inquiry to ${targetRecipient} at ${targetCompany} inquiring about fresh software engineering openings, junior/entry-level developer opportunities, or potential internal referrals based on ${profile.name}'s technical background and verified projects`
       : `a direct, natural cold email to ${targetRecipient} for the "${targetRole}" position`;
 
     const prompt = `You are a talented software engineer named "${profile.name}" writing ${emailIntent}.
 Context: ${type}
-Tone: Confident, authentic, conversational software engineer talking directly to another technical lead. (ZERO corporate sycophancy, zero generic cover-letter filler, NO robotic AI slop).
+Tone: Confident, authentic, conversational software engineer talking directly to a talent partner or engineering leader. (ZERO corporate sycophancy, zero generic cover-letter filler, NO robotic AI slop).
 Here is the official Job Description:
 """
 ${jd || 'Not provided'}
@@ -345,6 +360,7 @@ ${profile.resumeText || 'No resume available'}
 """
 ${skillsText}
 ${achText}
+${eduText}
 ${profile.portfolio ? `Candidate Portfolio / Website: ${profile.portfolio}` : ''}
 ${profile.github ? `Candidate GitHub: ${profile.github}` : ''}
 ${profile.linkedin ? `Candidate LinkedIn: ${profile.linkedin}` : ''}
@@ -353,15 +369,18 @@ ${gitInsightText}
 CRITICAL RULES FOR WRITING A REAL, AUTHENTIC HUMAN COLD EMAIL:
 1. VARY YOUR TEMPLATES & OPENING HOOK (ZERO FLATTERY, DIRECT RELEVANCE):
    - ALWAYS vary the structure of your email. Do NOT use a static format with swapped-out keywords. Write highly personalized, distinct messages tailored specifically for this Job Description.
-   - NEVER open with empty corporate praise like "Your mission to simplify ecosystems...", "I was excited to see...", or "I am writing to express interest in...". Tech leads delete these instantly.
-   - Start immediately with a natural 1-2 sentence hook. State the open role and directly reference 1-2 core technologies or challenges from the Job Description.
+   - NEVER open with empty corporate praise like "Your mission to simplify ecosystems...", "I was excited to see...", or "I am writing to express interest in...". Recruiters and tech leads delete these instantly.
+${isHrTarget ? `   - FOR HR & RECRUITER OUTREACH (FRESH OPENINGS OR REFERRALS):
+     * Position this email as reaching out directly to the HR / Talent Acquisition team to explore fresh software engineering openings, junior/entry-level developer roles (or the ${targetRole} opening), or to politely ask for an internal referral / pointer to the engineering hiring team based on ${profile.name}'s profile.
+     * Start immediately with a natural 1-2 sentence hook. State that you're reaching out to explore fresh openings or referrals for software engineering teams building with their stack.
+     * Example opening: "Hi ${hrName ? hrName.split(' ')[0] : `${targetCompany} Recruiting Team`}, I wanted to reach out to your Talent Acquisition team directly to inquire about fresh software engineering openings at ${targetCompany} (or the ${targetRole} role), or to explore potential internal referrals for your engineering teams. I've been actively building full-stack web applications with [relevant tech from profile], focusing on [specific mechanism]."` : `   - Start immediately with a natural 1-2 sentence hook. State the open role and directly reference 1-2 core technologies or challenges from the Job Description.
    - Avoid aggressive syntax, excessive hyperlinks, or repeating generic catchphrases. Keep it professional and distinct.
-   - Example opening: "Hi ${targetCompany} Team, ${isHrNetworking ? `I wanted to reach out to see if you are recruiting for any ${targetRole}.` : `I saw you're hiring for a ${targetRole} and wanted to reach out directly.`} I've been actively building full-stack web applications with [relevant tech], focusing on [specific mechanism]."
+   - Example opening: "Hi ${targetCompany} Team, I saw you're hiring for a ${targetRole} and wanted to reach out directly. I've been actively building full-stack web applications with [relevant tech], focusing on [specific mechanism]."`}
 
-2. AUTHENTIC HUMAN VOICE & STRICTLY ZERO BULLET POINTS:
+2. AUTHENTIC HUMAN VOICE & GROUNDED IN CANDIDATE'S PROFILE:
    - ABSOLUTELY NO BULLET POINTS (no "*", no "•", no numbered lists). Bullet points in cold outreach scream "AI-generated template". Write in 2-3 short, clean, flowing paragraphs (strictly 90 to 140 words total).
-   - Talk like a normal, competent software engineer. Plainly describe a real project or architectural decision from your experience (e.g. state management, schema validation, REST APIs, defensive error handling).
-   - ABSOLUTE BAN ON FAKE METRICS & AI CLICHÉS: NEVER fabricate generic percentages like "reduced latency by ~20%", "improved throughput by 15%". Ground technical claims in REAL engineering mechanisms.
+   - Talk like a normal, competent software engineer. Plainly describe a real project or architectural decision from your experience (e.g. state management, schema validation, REST APIs, defensive error handling, data scraping).
+   - GROUND TECHNICAL CLAIMS IN CANDIDATE'S ACTUAL PROFILE: Highlight the candidate's core stack and projects from their profile. ABSOLUTE BAN ON FAKE METRICS & AI CLICHÉS: NEVER fabricate generic percentages like "reduced latency by ~20%", "improved throughput by 15%". Ground technical claims in REAL engineering mechanisms.
 
 3. CLEAN REPO CITATIONS (IF APPLICABLE):
    - When referencing a project from the candidate's verified GitHub, cite it cleanly as a markdown link: [ProjectName](repo_url).
@@ -369,8 +388,9 @@ CRITICAL RULES FOR WRITING A REAL, AUTHENTIC HUMAN COLD EMAIL:
    - Seamlessly embed it: e.g. "Recently, I built [ProjectName](repo_url), a full-stack platform where I handled..."
 
 4. CRISP LENGTH & CLOSING:
-   - End with a low-friction wrap-up: "I've attached my CV for technical context and would love to chat if my background looks like a fit for what you're building."
-   - Followed naturally by: "You can view my CV here."
+${isHrTarget ? `   - End with a low-friction referral / fresh opening inquiry: "I've attached my CV for technical context. If your team has active or upcoming fresh openings matching this background, or if you could kindly refer me or point me to the hiring manager, I'd welcome a brief conversation."
+   - Followed naturally by: "You can view my CV here."` : `   - End with a low-friction wrap-up: "I've attached my CV for technical context and would love to chat if my background looks like a fit for what you're building."
+   - Followed naturally by: "You can view my CV here."`}
 
 5. STRICTLY ZERO SIGN-OFF OR CLOSING VALEDICTION:
    - DO NOT include any sign-off whatsoever (NO "Best regards", "Sincerely", "Warm regards", "Cheers", "Thanks", "Respectfully", and DO NOT include your name or "[Your Name]" at the end). The backend dispatch system autonomously appends the candidate's verified signature block and portfolio links. End immediately on the last sentence of your email body.
@@ -381,9 +401,9 @@ CRITICAL RULES FOR WRITING A REAL, AUTHENTIC HUMAN COLD EMAIL:
 7. OUTPUT FORMAT:
 COMPANY: [Extracted Company Name or "${targetCompany}"]
 ROLE: [Extracted Job Title or "${targetRole}"]
-SUBJECT: [Exact subject requested in JD if any, or default "${hrName ? `Connecting: ${targetRole} at ${targetCompany}` : `Application for ${targetRole} - ${profile.name}`}"]
+SUBJECT: [Exact subject requested in JD if any, or default "${isHrTarget ? (hrName ? `Connecting: Fresh Engineering Openings / Referral at ${targetCompany} - ${profile.name}` : `Exploring Openings: ${targetRole} / Referral - ${profile.name}`) : (hrName ? `Connecting: ${targetRole} at ${targetCompany}` : `Application for ${targetRole} - ${profile.name}`)}"]
 BODY:
-${hrName ? `Hi ${hrName.split(' ')[0]},` : (targetCompany && !['unknown company', 'unknown'].includes(targetCompany.toLowerCase()) ? `Hi ${targetCompany} Team,` : 'Hi there,')}
+${hrName ? `Hi ${hrName.split(' ')[0]},` : (isHrTarget ? `Hi ${targetCompany} Recruiting Team,` : (targetCompany && !['unknown company', 'unknown'].includes(targetCompany.toLowerCase()) ? `Hi ${targetCompany} Team,` : 'Hi there,'))}
 
 [Start of email body without any conversational filler or markdown blocks]`;
 
@@ -559,7 +579,7 @@ router.post('/send-email', requireAuth, async (req, res) => {
 });
 
 router.post('/single-draft', requireAuth, async (req, res) => {
-  const { company, role, jd, recipientEmail, hrName } = req.body;
+  const { company, role, jd, recipientEmail, hrName, recipientType, isHr } = req.body;
 
   try {
     const profile = await getProfile(req.user.id, true);
@@ -568,22 +588,36 @@ router.post('/single-draft', requireAuth, async (req, res) => {
     const tone = profile.tone || 'Professional';
     const skillsText = profile.skills && profile.skills.length > 0 ? `Core Skills: ${profile.skills.join(', ')}` : '';
     const achText = profile.achievements && profile.achievements.length > 0 ? `Key Achievements:\n- ${profile.achievements.join('\n- ')}` : '';
+    const eduText = profile.education && profile.education.length > 0 ? `Education: ${profile.education.map(e => `${e.degree || ''} (${e.institution || e.college || ''}, ${e.year || ''})`).join('; ')}` : '';
 
     const gitInsightText = buildGitInsightText(profile, jd, role, company);
 
     const cleanCompany = resolveCleanCompany(company, jd);
     const targetCompany = cleanCompany || 'the team';
+    const recEmailStr = (recipientEmail || '').toLowerCase().trim();
 
-    const isHrNetworking = /recruiter|talent|hr|human resources|sourcing|acquisition|headhunter/i.test(role) || cleanCompany === 'Direct Recruiter / Agency';
-    const targetRecipient = hrName ? hrName : `the technical hiring team at ${targetCompany}`;
-    const targetRole = isHrNetworking ? 'engineering opportunities' : (role || 'the open role');
-    const emailIntent = isHrNetworking
-      ? `a direct, natural networking cold email to ${targetRecipient} at ${targetCompany} to inquire about open ${targetRole}`
+    const isHrTarget = Boolean(
+      isHr ||
+      hrName ||
+      recipientType === 'hr' ||
+      recipientType === 'talent' ||
+      recipientType === 'recruitment' ||
+      /recruiter|talent|hr|human resources|sourcing|acquisition|headhunter/i.test(role || '') ||
+      /^(hr|talent|recruitment|recruiting|careers|jobs|people|sourcing)@/i.test(recEmailStr) ||
+      cleanCompany === 'Direct Recruiter / Agency'
+    );
+
+    const targetRecipient = hrName ? hrName : (isHrTarget ? `the HR & Talent Acquisition team at ${targetCompany}` : `the technical hiring team at ${targetCompany}`);
+    const isGenericRole = !role || /recruiter|talent|hr|human resources|sourcing|acquisition|headhunter/i.test(role);
+    const targetRole = isGenericRole ? 'fresh software engineering openings' : role;
+
+    const emailIntent = isHrTarget
+      ? `a direct, authentic cold inquiry to ${targetRecipient} at ${targetCompany} inquiring about fresh software engineering openings, junior/entry-level developer opportunities, or potential internal referrals based on ${profile.name}'s technical background and verified projects`
       : `a direct, natural cold email to ${targetRecipient} for the "${targetRole}" position`;
 
     const prompt = `You are a talented software engineer named "${profile.name}" writing ${emailIntent}. 
 Context: Cold Outreach / Networking
-Tone: Confident, authentic, conversational software engineer talking directly to another technical lead. (ZERO corporate sycophancy, zero generic cover-letter filler, NO robotic AI slop).
+Tone: Confident, authentic, conversational software engineer talking directly to a talent partner or technical lead. (ZERO corporate sycophancy, zero generic cover-letter filler, NO robotic AI slop).
 Here is the official Job Description:
 """
 ${jd}
@@ -594,20 +628,24 @@ ${profile.resumeText || 'No resume available'}
 """
 ${skillsText}
 ${achText}
+${eduText}
 ${gitInsightText}
 
 CRITICAL RULES FOR WRITING A REAL, AUTHENTIC HUMAN COLD EMAIL:
 1. VARY YOUR TEMPLATES & OPENING HOOK (ZERO FLATTERY, DIRECT RELEVANCE):
    - ALWAYS vary the structure of your email. Do NOT use a static format with swapped-out keywords. Write highly personalized, distinct messages tailored specifically for this Job Description.
    - NEVER open with empty corporate praise like "Your mission to simplify ecosystems...", "I was excited to see...", or "I am writing to express interest in...". Tech leads delete these instantly.
-   - Start immediately with a natural 1-2 sentence hook. State the open role and directly reference 1-2 core technologies or challenges from the Job Description.
+${isHrTarget ? `   - FOR HR & RECRUITER OUTREACH (FRESH OPENINGS OR REFERRALS):
+     * Position this email as reaching out directly to the HR / Talent Acquisition team to explore fresh software engineering openings, junior/entry-level developer roles (or the ${targetRole} opening), or to politely ask for an internal referral / pointer to the engineering hiring team based on ${profile.name}'s profile.
+     * Start immediately with a natural 1-2 sentence hook. State that you're reaching out to explore fresh openings or referrals for software engineering teams building with their stack.
+     * Example opening: "Hi ${hrName ? hrName.split(' ')[0] : `${targetCompany} Recruiting Team`}, I wanted to reach out to your Talent Acquisition team directly to inquire about fresh software engineering openings at ${targetCompany} (or the ${targetRole} role), or to explore potential internal referrals for your engineering teams. I've been actively building full-stack web applications with [relevant tech from profile], focusing on [specific mechanism]."` : `   - Start immediately with a natural 1-2 sentence hook. State the open role and directly reference 1-2 core technologies or challenges from the Job Description.
    - Avoid aggressive syntax, excessive hyperlinks, or repeating generic catchphrases. Keep it professional and distinct.
-   - Example opening: "Hi ${targetCompany} Team, ${isHrNetworking ? `I wanted to reach out to see if you are recruiting for any ${targetRole}.` : `I saw you're hiring for a ${targetRole} and wanted to reach out directly.`} I've been actively building full-stack web applications with [relevant tech], focusing on [specific mechanism]."
+   - Example opening: "Hi ${targetCompany} Team, I saw you're hiring for a ${targetRole} and wanted to reach out directly. I've been actively building full-stack web applications with [relevant tech], focusing on [specific mechanism]."`}
 
-2. AUTHENTIC HUMAN VOICE & STRICTLY ZERO BULLET POINTS:
+2. AUTHENTIC HUMAN VOICE & GROUNDED IN CANDIDATE'S PROFILE:
    - ABSOLUTELY NO BULLET POINTS (no "*", no "•", no numbered lists). Bullet points in cold outreach scream "AI-generated template". Write in 2-3 short, clean, flowing paragraphs (strictly 90 to 140 words total).
    - Talk like a normal, competent software engineer. Plainly describe a real project or architectural decision from your experience (e.g. state management, schema validation, REST APIs, defensive error handling).
-   - ABSOLUTE BAN ON FAKE METRICS & AI CLICHÉS: NEVER fabricate generic percentages like "reduced latency by ~20%", "improved throughput by 15%". Ground technical claims in REAL engineering mechanisms.
+   - GROUND TECHNICAL CLAIMS IN CANDIDATE'S ACTUAL PROFILE: Highlight the candidate's core stack and projects from their profile. ABSOLUTE BAN ON FAKE METRICS & AI CLICHÉS: NEVER fabricate generic percentages like "reduced latency by ~20%", "improved throughput by 15%". Ground technical claims in REAL engineering mechanisms.
 
 3. CLEAN REPO CITATIONS (IF APPLICABLE):
    - When referencing a project from the candidate's verified GitHub, cite it cleanly as a markdown link: [ProjectName](repo_url).
@@ -615,8 +653,9 @@ CRITICAL RULES FOR WRITING A REAL, AUTHENTIC HUMAN COLD EMAIL:
    - Seamlessly embed it: e.g. "Recently, I built [ProjectName](repo_url), a full-stack platform where I handled..."
 
 4. CRISP LENGTH & CLOSING:
-   - End with a low-friction wrap-up: "I've attached my CV for technical context and would love to chat if my background looks like a fit for what you're building."
-   - Followed naturally by: "You can view my CV here."
+${isHrTarget ? `   - End with a low-friction referral / fresh opening inquiry: "I've attached my CV for technical context. If your team has active or upcoming fresh openings matching this background, or if you could kindly refer me or point me to the hiring manager, I'd welcome a brief conversation."
+   - Followed naturally by: "You can view my CV here."` : `   - End with a low-friction wrap-up: "I've attached my CV for technical context and would love to chat if my background looks like a fit for what you're building."
+   - Followed naturally by: "You can view my CV here."`}
 
 5. STRICTLY ZERO SIGN-OFF OR CLOSING VALEDICTION:
    - DO NOT include any sign-off whatsoever (NO "Best regards", "Sincerely", "Warm regards", "Cheers", "Thanks", "Respectfully", and DO NOT include your name or "[Your Name]" at the end). The backend dispatch system autonomously appends the candidate's verified signature block and portfolio links. End immediately on the last sentence of your email body.
@@ -627,9 +666,9 @@ CRITICAL RULES FOR WRITING A REAL, AUTHENTIC HUMAN COLD EMAIL:
 7. OUTPUT FORMAT:
 COMPANY: [Extracted Company Name or "${targetCompany}"]
 ROLE: [Extracted Job Title or "${targetRole}"]
-SUBJECT: [Exact subject requested in JD if any, or default "${isHrNetworking ? `Connecting: Engineering Opportunities at ${targetCompany}` : (hrName ? `Connecting: ${targetRole} at ${targetCompany}` : `Application for ${targetRole} - ${profile.name}`)}"]
+SUBJECT: [Exact subject requested in JD if any, or default "${isHrTarget ? (hrName ? `Connecting: Fresh Engineering Openings / Referral at ${targetCompany} - ${profile.name}` : `Exploring Openings: ${targetRole} / Referral - ${profile.name}`) : (hrName ? `Connecting: ${targetRole} at ${targetCompany}` : `Application for ${targetRole} - ${profile.name}`)}"]
 BODY:
-${hrName ? `Hi ${hrName.split(' ')[0]},` : (targetCompany && !['unknown company', 'unknown'].includes(targetCompany.toLowerCase()) ? `Hi ${targetCompany} Team,` : 'Hi there,')}
+${hrName ? `Hi ${hrName.split(' ')[0]},` : (isHrTarget ? `Hi ${targetCompany} Recruiting Team,` : (targetCompany && !['unknown company', 'unknown'].includes(targetCompany.toLowerCase()) ? `Hi ${targetCompany} Team,` : 'Hi there,'))}
 
 [Start of email body without any conversational filler or markdown blocks]`;
 

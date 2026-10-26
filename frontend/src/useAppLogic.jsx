@@ -463,9 +463,18 @@ export function useAppLogic() {
         
         if (discoveredEmail) {
           setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Generating tailored pitch citing verified GitHub projects...`] }));
+          const currentRecipient = targetRecipients[0];
           const genRes = await apiFetch(`${API_BASE}/api/generate-email`, {
              method: 'POST', headers: { 'Content-Type': 'application/json' },
-             body: JSON.stringify({ company: job.company, role: job.role, jd: job.jd, emailType: 'Cold Outreach / Networking', hrName: currentHrName })
+             body: JSON.stringify({ 
+               company: job.company, 
+               role: job.role, 
+               jd: job.jd, 
+               emailType: 'Cold Outreach / Networking', 
+               hrName: currentHrName,
+               recipientEmail: discoveredEmail,
+               recipientType: currentRecipient?.type || (discoveredEmail?.startsWith('hr@') ? 'hr' : discoveredEmail?.startsWith('talent@') ? 'talent' : discoveredEmail?.startsWith('recruitment@') ? 'recruitment' : undefined)
+             })
           });
           const genData = await genRes.json();
           
