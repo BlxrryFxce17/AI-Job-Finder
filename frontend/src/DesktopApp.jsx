@@ -517,6 +517,7 @@ export default function DesktopApp(props) {
   const [copyingNoteId, setCopyingNoteId] = React.useState(null);
   const [discoveringHrId, setDiscoveringHrId] = React.useState(null);
   const [copiedEmailJobId, setCopiedEmailJobId] = React.useState(null);
+  const [expandedRecipients, setExpandedRecipients] = React.useState({});
   const [editingEmailId, setEditingEmailId] = React.useState(null);
   const [connectedJobIds, setConnectedJobIds] = React.useState([]);
 
@@ -767,6 +768,7 @@ export default function DesktopApp(props) {
       if (data && data.email) {
         const updatePayload = {
           emailRecipient: data.email,
+          allRecipients: (data.allRecipients && data.allRecipients.length > 0) ? data.allRecipients : (job.allRecipients || []),
           deliverabilityScore: data.deliverabilityScore || 85,
           deliverabilityStatus: data.deliverabilityStatus || 'deliverable',
           deliverabilityReason: data.deliverabilityReason || 'Verified deliverable mailbox'
@@ -774,13 +776,14 @@ export default function DesktopApp(props) {
         if (data.hrName && !job.hrName) updatePayload.hrName = data.hrName;
         if (data.hrLinkedIn && !job.hrLinkedIn) updatePayload.hrLinkedIn = data.hrLinkedIn;
 
-        await props.apiFetch(`${API_BASE}/api/jobs/${job.id}`, {
+        const targetJobId = job.id || job._id;
+        await props.apiFetch(`${API_BASE}/api/jobs/${targetJobId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(updatePayload)
         }).catch(() => { });
 
-        setJobs(prev => prev.map(j => j.id === job.id ? {
+        setJobs(prev => prev.map(j => (j.id === targetJobId || (job._id && j._id === job._id)) ? {
           ...j,
           ...updatePayload
         } : j));
@@ -790,6 +793,7 @@ export default function DesktopApp(props) {
         const reason = data?.deliverabilityReason || 'No verified recipient mailbox found';
         const updatePayload = {
           emailRecipient: '',
+          allRecipients: [],
           deliverabilityScore: 0,
           deliverabilityStatus: 'undeliverable',
           deliverabilityReason: reason
@@ -797,13 +801,14 @@ export default function DesktopApp(props) {
         if (data?.hrName && !job.hrName) updatePayload.hrName = data.hrName;
         if (data?.hrLinkedIn && !job.hrLinkedIn) updatePayload.hrLinkedIn = data.hrLinkedIn;
 
-        await props.apiFetch(`${API_BASE}/api/jobs/${job.id}`, {
+        const targetJobId = job.id || job._id;
+        await props.apiFetch(`${API_BASE}/api/jobs/${targetJobId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(updatePayload)
         }).catch(() => { });
 
-        setJobs(prev => prev.map(j => j.id === job.id ? {
+        setJobs(prev => prev.map(j => (j.id === targetJobId || (job._id && j._id === job._id)) ? {
           ...j,
           ...updatePayload
         } : j));
@@ -813,6 +818,27 @@ export default function DesktopApp(props) {
       notify('Email discovery scan failed', 'error');
     } finally {
       setDiscoveringHrId(null);
+    }
+  };
+
+  const handleSelectPrimaryRecipient = async (job, targetEmail) => {
+    const targetJobId = job.id || job._id;
+    if (!targetEmail || job.emailRecipient === targetEmail) return;
+    setJobs(prev => prev.map(j => {
+      if (j.id === targetJobId || (j._id && j._id === targetJobId)) {
+        return { ...j, emailRecipient: targetEmail };
+      }
+      return j;
+    }));
+    notify(`Selected ${targetEmail} as primary mailbox`, 'info');
+    try {
+      await props.apiFetch(`${API_BASE}/api/jobs/${targetJobId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emailRecipient: targetEmail })
+      });
+    } catch (err) {
+      console.warn('Failed to persist primary email selection:', err);
     }
   };
 
@@ -837,6 +863,7 @@ export default function DesktopApp(props) {
               return {
                 ...j,
                 emailRecipient: uj.emailRecipient,
+                allRecipients: (uj.allRecipients && uj.allRecipients.length > 0) ? uj.allRecipients : (j.allRecipients || []),
                 deliverabilityScore: uj.deliverabilityScore,
                 deliverabilityStatus: uj.deliverabilityStatus,
                 deliverabilityReason: uj.deliverabilityReason
@@ -4960,52 +4987,165 @@ export default function DesktopApp(props) {
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start', minWidth: 0, maxWidth: '100%' }}>
                                 {job.emailRecipient ? (
                                   <>
-                                    <div style={{
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: '5px',
-                                      background: 'var(--surface-3)',
-                                      border: '1px solid var(--border)',
-                                      padding: '2px 6px',
-                                      borderRadius: '6px',
-                                      fontFamily: 'monospace',
-                                      fontSize: '11px',
-                                      color: 'var(--text-1)',
-                                      maxWidth: '100%',
-                                      minWidth: 0
-                                    }}>
-                                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={job.emailRecipient}>
-                                        {job.emailRecipient}
-                                      </span>
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          navigator.clipboard.writeText(job.emailRecipient);
-                                          setCopiedEmailJobId(job.id);
-                                          setTimeout(() => setCopiedEmailJobId(null), 2000);
-                                        }}
-                                        style={{
-                                          background: 'none',
-                                          border: 'none',
-                                          cursor: 'pointer',
-                                          padding: '0 2px',
-                                          color: copiedEmailJobId === job.id ? '#10b981' : 'var(--text-3)',
-                                          display: 'flex',
-                                          alignItems: 'center',
-                                          flexShrink: 0
-                                        }}
-                                        title="Copy Email Address"
-                                      >
-                                        {copiedEmailJobId === job.id ? (
-                                          <span style={{ fontSize: '10px', color: '#10b981', fontWeight: 600 }}>✓</span>
-                                        ) : (
-                                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                                          </svg>
-                                        )}
-                                      </button>
-                                    </div>
+                                    {(() => {
+                                      const map = new Map();
+                                      if (Array.isArray(job.allRecipients) && job.allRecipients.length > 0) {
+                                        job.allRecipients.forEach(r => {
+                                          const em = (typeof r === 'string' ? r : r?.email || '').trim();
+                                          if (em && !map.has(em.toLowerCase())) {
+                                            map.set(em.toLowerCase(), {
+                                              email: em,
+                                              hrName: typeof r === 'object' ? (r.hrName || '') : '',
+                                              type: typeof r === 'object' ? (r.type || 'inbox') : 'inbox',
+                                              deliverabilityScore: typeof r === 'object' ? (r.deliverabilityScore || job.deliverabilityScore || 65) : (job.deliverabilityScore || 65),
+                                              status: typeof r === 'object' ? r.status : undefined,
+                                              isPrimary: em.toLowerCase() === (job.emailRecipient || '').toLowerCase()
+                                            });
+                                          }
+                                        });
+                                      }
+                                      if (job.emailRecipient && job.emailRecipient.trim()) {
+                                        const primary = job.emailRecipient.trim();
+                                        if (!map.has(primary.toLowerCase())) {
+                                          const primaryItem = {
+                                            email: primary,
+                                            hrName: job.hrName || '',
+                                            type: 'primary',
+                                            deliverabilityScore: job.deliverabilityScore || 65,
+                                            status: undefined,
+                                            isPrimary: true
+                                          };
+                                          map.set(primary.toLowerCase(), primaryItem);
+                                        } else {
+                                          map.get(primary.toLowerCase()).isPrimary = true;
+                                        }
+                                      }
+                                      const recipientsList = Array.from(map.values());
+                                      const targetJobId = job.id || job._id;
+                                      const isExpanded = !!expandedRecipients[targetJobId];
+                                      const maxInitial = 3;
+                                      const displayList = (recipientsList.length <= maxInitial || isExpanded)
+                                        ? recipientsList
+                                        : recipientsList.slice(0, maxInitial);
+
+                                      return (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', alignItems: 'flex-start', maxWidth: '100%', minWidth: 0 }}>
+                                          {displayList.map(rec => {
+                                            const copyKey = `${targetJobId}-${rec.email}`;
+                                            const isCopied = copiedEmailJobId === copyKey;
+                                            return (
+                                              <div
+                                                key={rec.email}
+                                                onClick={(e) => {
+                                                  if (!rec.isPrimary) {
+                                                    e.stopPropagation();
+                                                    handleSelectPrimaryRecipient(job, rec.email);
+                                                  }
+                                                }}
+                                                style={{
+                                                  display: 'inline-flex',
+                                                  alignItems: 'center',
+                                                  gap: '5px',
+                                                  background: rec.isPrimary ? 'var(--surface-3)' : 'rgba(255, 255, 255, 0.02)',
+                                                  border: rec.isPrimary ? '1px solid rgba(56, 189, 248, 0.45)' : '1px solid var(--border)',
+                                                  padding: '2px 6px',
+                                                  borderRadius: '6px',
+                                                  fontFamily: 'monospace',
+                                                  fontSize: '11px',
+                                                  color: rec.isPrimary ? 'var(--text-1)' : 'var(--text-2)',
+                                                  maxWidth: '100%',
+                                                  minWidth: 0,
+                                                  cursor: rec.isPrimary ? 'default' : 'pointer',
+                                                  transition: 'all 0.15s ease',
+                                                  boxShadow: rec.isPrimary ? '0 0 0 1px rgba(56, 189, 248, 0.12)' : 'none'
+                                                }}
+                                                title={rec.isPrimary ? `Active primary mailbox: ${rec.email}` : `Click to select ${rec.email} as active mailbox`}
+                                              >
+                                                {rec.type && rec.type !== 'inbox' && (
+                                                  <span style={{
+                                                    fontSize: '9px',
+                                                    textTransform: 'uppercase',
+                                                    fontWeight: 700,
+                                                    padding: '0 3px',
+                                                    borderRadius: '3px',
+                                                    background: rec.type === 'careers' ? 'rgba(56, 189, 248, 0.18)' : rec.type === 'hr' ? 'rgba(168, 85, 247, 0.18)' : rec.type === 'talent' ? 'rgba(16, 185, 129, 0.18)' : 'rgba(245, 158, 11, 0.18)',
+                                                    color: rec.type === 'careers' ? '#38bdf8' : rec.type === 'hr' ? '#c084fc' : rec.type === 'talent' ? '#34d399' : '#fbbf24',
+                                                    letterSpacing: '0.3px',
+                                                    lineHeight: '13px'
+                                                  }}>
+                                                    {rec.type}
+                                                  </span>
+                                                )}
+
+                                                {rec.hrName && (
+                                                  <span style={{ fontSize: '9px', color: 'var(--text-3)', fontWeight: 600 }}>
+                                                    👤 {rec.hrName.split(' ')[0]}
+                                                  </span>
+                                                )}
+
+                                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={rec.email}>
+                                                  {rec.email}
+                                                </span>
+
+                                                <button
+                                                  type="button"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    navigator.clipboard.writeText(rec.email);
+                                                    setCopiedEmailJobId(copyKey);
+                                                    setTimeout(() => setCopiedEmailJobId(null), 2000);
+                                                  }}
+                                                  style={{
+                                                    background: 'none',
+                                                    border: 'none',
+                                                    cursor: 'pointer',
+                                                    padding: '0 2px',
+                                                    color: isCopied ? '#10b981' : 'var(--text-3)',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    flexShrink: 0
+                                                  }}
+                                                  title={`Copy ${rec.email}`}
+                                                >
+                                                  {isCopied ? (
+                                                    <span style={{ fontSize: '10px', color: '#10b981', fontWeight: 600 }}>✓</span>
+                                                  ) : (
+                                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                                    </svg>
+                                                  )}
+                                                </button>
+                                              </div>
+                                            );
+                                          })}
+
+                                          {recipientsList.length > maxInitial && (
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setExpandedRecipients(prev => ({ ...prev, [targetJobId]: !prev[targetJobId] }));
+                                              }}
+                                              style={{
+                                                background: 'transparent',
+                                                border: 'none',
+                                                padding: '0 2px',
+                                                fontSize: '10px',
+                                                fontWeight: 600,
+                                                color: '#38bdf8',
+                                                cursor: 'pointer',
+                                                display: 'inline-flex',
+                                                alignItems: 'center',
+                                                gap: '2px'
+                                              }}
+                                            >
+                                              {isExpanded ? '▴ Show less' : `▾ +${recipientsList.length - maxInitial} more emails`}
+                                            </button>
+                                          )}
+                                        </div>
+                                      );
+                                    })()}
 
                                     {/* Deliverability Badge */}
                                     {(() => {
@@ -5070,20 +5210,19 @@ export default function DesktopApp(props) {
                                     })()}
                                     {job.allRecipients && job.allRecipients.length > 1 && (
                                       <span style={{
-                                        display: "inline-flex",
-                                        alignItems: "center",
-                                        gap: "3px",
-                                        fontSize: "10px",
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '3px',
+                                        fontSize: '10px',
                                         fontWeight: 600,
-                                        padding: "1px 5px",
-                                        borderRadius: "10px",
-                                        background: "rgba(56, 189, 248, 0.12)",
-                                        color: "#38bdf8",
-                                        border: "1px solid rgba(56, 189, 248, 0.3)",
-                                        whiteSpace: "nowrap",
-                                        cursor: "pointer"
-                                      }} title={`All discovered mailboxes to reach:\n${job.allRecipients.map(r => `• ${r.email}${r.hrName ? ` (${r.hrName})` : ""}`).join("\n")}`}>
-                                        ⚡ +{job.allRecipients.length - 1} more
+                                        padding: '1px 5px',
+                                        borderRadius: '10px',
+                                        background: 'rgba(56, 189, 248, 0.12)',
+                                        color: '#38bdf8',
+                                        border: '1px solid rgba(56, 189, 248, 0.3)',
+                                        whiteSpace: 'nowrap'
+                                      }} title={`${job.allRecipients.length} verified inboxes discovered for this company`}>
+                                        ⚡ {job.allRecipients.length} inboxes
                                       </span>
                                     )}
                                   </>

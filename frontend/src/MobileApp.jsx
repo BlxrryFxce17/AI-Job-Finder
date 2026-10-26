@@ -711,6 +711,7 @@ export default function MobileApp(props) {
               return {
                 ...j,
                 emailRecipient: uj.emailRecipient,
+                allRecipients: (uj.allRecipients && uj.allRecipients.length > 0) ? uj.allRecipients : (j.allRecipients || []),
                 deliverabilityScore: uj.deliverabilityScore,
                 deliverabilityStatus: uj.deliverabilityStatus,
                 deliverabilityReason: uj.deliverabilityReason

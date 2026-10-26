@@ -221,6 +221,8 @@ router.post('/check-all-emails', requireAuth, async (req, res) => {
       }
       queryFilter.$or = [
         { emailRecipient: { $in: ['', null] } },
+        { allRecipients: { $exists: false } },
+        { allRecipients: { $size: 0 } },
         { deliverabilityScore: { $lt: 60 } },
         { deliverabilityStatus: { $in: ['undeliverable', 'unverified', 'unknown'] } }
       ];
@@ -357,6 +359,9 @@ router.put('/:id', requireAuth, async (req, res) => {
     if (req.body.deliverabilityScore !== undefined) job.deliverabilityScore = req.body.deliverabilityScore;
     if (req.body.deliverabilityStatus !== undefined) job.deliverabilityStatus = req.body.deliverabilityStatus;
     if (req.body.deliverabilityReason !== undefined) job.deliverabilityReason = req.body.deliverabilityReason;
+    if (req.body.allRecipients !== undefined && Array.isArray(req.body.allRecipients)) {
+      job.allRecipients = req.body.allRecipients;
+    }
 
     await job.save();
     res.json(job);
