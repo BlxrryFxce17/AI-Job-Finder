@@ -1142,7 +1142,7 @@ function isBackendPortalName(name) {
 router.post('/draft-email', async (req, res) => {
   try {
     const { company, role, jobTitle, jobDescription, recipientEmail, persona } = req.body;
-    const effectiveRole = role || jobTitle || 'Software Engineer';
+    const initialRole = role || jobTitle || 'Software Engineer';
     let userId = null;
     let profile = null;
 
@@ -1201,7 +1201,7 @@ router.post('/draft-email', async (req, res) => {
       }
     }
 
-    const targetRole = effectiveRole.trim();
+    const targetRole = initialRole.trim();
     const candidateName = profile.name || 'Candidate';
     const signOffBlock = buildExtensionSignOff(profile, candidateName);
 
