@@ -3,6 +3,9 @@ import { useAppLogic } from './useAppLogic.jsx';
 import DesktopApp from './DesktopApp';
 import MobileApp from './MobileApp';
 import Login from './Login';
+import LandingPage from './LandingPage';
+import PrivacyPolicy from './PrivacyPolicy';
+import TermsOfService from './TermsOfService';
 import TutorialModal from './TutorialModal';
 import './index.css';
 
@@ -144,10 +147,27 @@ export default function App() {
 
   const logic = useAppLogic();
 
+  const pathname = window.location.pathname.toLowerCase();
+  if (pathname === '/privacy' || pathname === '/privacy/') {
+    return (
+      <ErrorBoundary>
+        <PrivacyPolicy />
+      </ErrorBoundary>
+    );
+  }
+
+  if (pathname === '/terms' || pathname === '/terms/') {
+    return (
+      <ErrorBoundary>
+        <TermsOfService />
+      </ErrorBoundary>
+    );
+  }
+
   if (!logic.token) {
     return (
       <ErrorBoundary>
-        <Login />
+        <LandingPage />
       </ErrorBoundary>
     );
   }
