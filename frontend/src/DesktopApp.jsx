@@ -4338,24 +4338,32 @@ export default function DesktopApp(props) {
                   )}
                 </div>
 
-                {/* 3. Linked Google Account */}
+                {/* 3. Linked Google Account & Outbound Dispatch */}
                 <div style={{
                   background: 'rgba(15, 23, 42, 0.65)',
                   border: '1px solid var(--border)',
                   borderRadius: '14px',
-                  padding: '20px'
+                  padding: '20px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '14px'
                 }}>
-                  <h2 style={{ fontSize: '16px', fontWeight: 700, marginBottom: '12px', color: 'var(--text-1)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span>🔗</span> Sending Account (Google OAuth)
-                  </h2>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h2 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: 'var(--text-1)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>✉️</span> Outbound Email Dispatch
+                    </h2>
+                    {profile.emailUser && (
+                      <button onClick={logout} type="button" className="btn btn-ghost" style={{ fontSize: '11px', padding: '3px 8px' }}>Logout</button>
+                    )}
+                  </div>
+
                   <div>
                     {profile.emailUser ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                        <div style={{ background: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, border: '1px solid rgba(34, 197, 94, 0.3)' }}>
-                          ✓ Connected
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <div style={{ background: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 600, border: '1px solid rgba(34, 197, 94, 0.3)' }}>
+                          ✓ Connected Account
                         </div>
                         <span style={{ color: 'var(--text-1)', fontWeight: '500', fontSize: '13px' }}>{profile.emailUser}</span>
-                        <button onClick={logout} type="button" className="btn btn-ghost" style={{ marginLeft: 'auto', fontSize: '12px', padding: '4px 10px' }}>Logout</button>
                       </div>
                     ) : (
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
@@ -4363,6 +4371,62 @@ export default function DesktopApp(props) {
                         <a href={`${API_BASE}/api/auth/google`} className="btn btn-primary" style={{ textDecoration: 'none', fontSize: '12px', padding: '6px 14px' }}>Connect Google</a>
                       </div>
                     )}
+                  </div>
+
+                  {/* Gmail App Password (Optional Direct Dispatch) */}
+                  <div style={{
+                    background: 'rgba(255, 255, 255, 0.02)',
+                    border: '1px solid var(--border)',
+                    borderRadius: '8px',
+                    padding: '12px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '10px'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-1)' }}>
+                        Direct Personal Gmail Dispatch (Optional)
+                      </span>
+                      {profile.hasGmailAppPassword ? (
+                        <span style={{ fontSize: '10px', color: '#10b981', background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '2px 6px', borderRadius: '10px', fontWeight: 600 }}>
+                          🟢 Direct SMTP Active
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: '10px', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.12)', border: '1px solid rgba(56, 189, 248, 0.3)', padding: '2px 6px', borderRadius: '10px', fontWeight: 600 }}>
+                          ⚡ Platform Relay Active
+                        </span>
+                      )}
+                    </div>
+
+                    <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-3)', lineHeight: '1.4' }}>
+                      {profile.hasGmailAppPassword
+                        ? 'Applications will send directly from your personal Gmail address via authenticated IPv4 SMTP.'
+                        : 'No password required! Applications are delivered via our verified platform relay with your email as Reply-To. To send directly from your personal @gmail address, enter a 16-character Google App Password below.'}
+                    </p>
+
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <input
+                        type="password"
+                        className="form-input"
+                        style={{ flex: 1, fontSize: '12px', padding: '6px 10px', fontFamily: 'monospace' }}
+                        value={profile.gmailAppPassword !== undefined ? profile.gmailAppPassword : ''}
+                        onChange={e => setProfile({ ...profile, gmailAppPassword: e.target.value })}
+                        placeholder={profile.hasGmailAppPassword ? '•••• •••• •••• •••• (Saved)' : 'Enter 16-character App Password'}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={handleProfileSave}
+                        disabled={savingProfile}
+                        style={{ fontSize: '11px', padding: '6px 12px', whiteSpace: 'nowrap' }}
+                      >
+                        {savingProfile ? 'Saving...' : 'Save Password'}
+                      </button>
+                    </div>
+
+                    <div style={{ fontSize: '10px', color: 'var(--text-3)' }}>
+                      💡 Generate at <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer" style={{ color: '#38bdf8', textDecoration: 'underline' }}>Google Account → App Passwords</a> (requires 2-Step Verification).
+                    </div>
                   </div>
                 </div>
 

@@ -1,5 +1,10 @@
 require('dotenv').config();
 const dns = require('dns');
+if (dns.setDefaultResultOrder) {
+  try {
+    dns.setDefaultResultOrder('ipv4first');
+  } catch (e) { }
+}
 // Set reliable public DNS servers to prevent SRV lookup failures (ESERVFAIL) on local network resolvers
 try {
   dns.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4', '1.0.0.1']);

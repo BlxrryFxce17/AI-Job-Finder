@@ -2,6 +2,12 @@ const { google } = require('googleapis');
 const MailComposer = require('nodemailer/lib/mail-composer');
 const nodemailer = require('nodemailer');
 const axios = require('axios');
+const dns = require('dns');
+if (dns.setDefaultResultOrder) {
+  try {
+    dns.setDefaultResultOrder('ipv4first');
+  } catch (e) { }
+}
 const { verifyEmail, checkMxRecords, validateEmailSyntax, verifyWithHunter, isGenericEmail, isNonRecipientEmail, isRecruitingEmail } = require('./verifier');
 const { 
   getLearnedMemory, 
@@ -294,25 +300,50 @@ async function sendEmailViaAPI(user, mailOptions, sendOptions = {}) {
     }
   }
 
+  /**
+   * Helper: Dispatches email via Gmail SMTP with strict IPv4 enforcement (family: 4).
+   * This completely avoids ENETUNREACH 2607:f8b0:400e:... errors on networks without outbound IPv6 routing.
+   * Seamlessly tries Port 465 (SSL) first, and falls back to Port 587 (STARTTLS) if port 465 fails.
+   */
+  async function sendViaGmailSmtp(credentials, mailOpts) {
+    const cleanPass = (credentials.pass || '').replace(/\s+/g, '');
+    try {
+      const transporter465 = nodemailer.createTransport({
+        host: 'smtp.gmail.com',
+        port: 465,
+        secure: true,
+        family: 4, // Strict IPv4: prevents IPv6 ENETUNREACH
+        auth: { user: credentials.user, pass: cleanPass },
+        connectionTimeout: 10000,
+        greetingTimeout: 10000,
+        socketTimeout: 15000
+      });
+      return await transporter465.sendMail(mailOpts);
+    } catch (err465) {
+      console.warn(`⚠️ [SMTP SSL Port 465] Dispatch failed (${err465.message}). Retrying on Port 587 (STARTTLS)...`);
+      const transporter587 = nodemailer.createTransport({
+        host: 'smtp.gmail.com',
+        port: 587,
+        secure: false,
+        family: 4, // Strict IPv4: prevents IPv6 ENETUNREACH
+        auth: { user: credentials.user, pass: cleanPass },
+        connectionTimeout: 10000,
+        greetingTimeout: 10000,
+        socketTimeout: 15000
+      });
+      return await transporter587.sendMail(mailOpts);
+    }
+  }
+
   // Multi-Tenant Dispatch Protocol:
   // 1. If user provided their own Gmail App Password, send directly from their personal inbox
   if (user.gmailAppPassword) {
-    const cleanPass = user.gmailAppPassword.replace(/\s+/g, '');
-    const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: { user: user.email, pass: cleanPass }
-    });
-    return await transporter.sendMail(mailOptions);
+    return await sendViaGmailSmtp({ user: user.email, pass: user.gmailAppPassword }, mailOptions);
   }
 
   // 2. If user is the primary admin/configured user, send with system EMAIL_PASS
   if (process.env.EMAIL_USER && user.email && user.email.toLowerCase() === process.env.EMAIL_USER.toLowerCase() && process.env.EMAIL_PASS) {
-    const cleanPass = process.env.EMAIL_PASS.replace(/\s+/g, '');
-    const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: { user: user.email, pass: cleanPass }
-    });
-    return await transporter.sendMail(mailOptions);
+    return await sendViaGmailSmtp({ user: user.email, pass: process.env.EMAIL_PASS }, mailOptions);
   }
 
   // 3. Fallback for new users: Send via verified platform sender with candidate display name & Reply-To
@@ -325,11 +356,7 @@ async function sendEmailViaAPI(user, mailOptions, sendOptions = {}) {
       from: `"${user.name || 'Candidate'} via AI Job Finder" <${platformUser}>`,
       replyTo: user.email || platformUser
     };
-    const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: { user: platformUser, pass: platformPass }
-    });
-    return await transporter.sendMail(systemMailOptions);
+    return await sendViaGmailSmtp({ user: platformUser, pass: platformPass }, systemMailOptions);
   }
 
   throw new Error('Email dispatch failed: No valid Gmail API token, user App Password, or platform sender credentials configured.');
