@@ -92,6 +92,89 @@ app.get('/api/ping', (req, res) => {
   res.status(200).send('pong');
 });
 
+// Google OAuth Verification Mandatory Compliance Pages: Privacy Policy & Terms of Service
+const renderPolicyPage = (title, contentHtml) => `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${title} - AI Job Finder</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #1f2937; max-width: 800px; margin: 40px auto; padding: 0 20px; background-color: #f9fafb; }
+    .card { background: #ffffff; border-radius: 12px; padding: 36px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); }
+    h1 { color: #111827; font-size: 28px; margin-bottom: 8px; }
+    h2 { color: #1f2937; font-size: 20px; margin-top: 24px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; }
+    p, li { font-size: 15px; color: #4b5563; }
+    .disclosure { background: #eff6ff; border-left: 4px solid #3b82f6; padding: 16px; margin: 20px 0; border-radius: 4px; font-weight: 500; }
+    a { color: #2563eb; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    ${contentHtml}
+  </div>
+</body>
+</html>
+`;
+
+app.get(['/privacy', '/api/privacy'], (req, res) => {
+  const content = `
+    <h1>Privacy Policy</h1>
+    <p><em>Last updated: October 2026</em></p>
+    <p>AI Job Finder ("we", "our", or "us") values your privacy. This policy describes how we handle and protect your personal information when you use our job application and email automation services.</p>
+    
+    <h2>1. Information We Collect</h2>
+    <ul>
+      <li><strong>Account Details:</strong> Your name and email address provided during authentication.</li>
+      <li><strong>Candidate Profile:</strong> Your resume, contact details, portfolio links, and technical skill summaries that you voluntarily upload to tailor your applications.</li>
+      <li><strong>Google Account Data:</strong> When you connect your Google Account via OAuth, we access your email address and request permissions strictly to send job applications and monitor replies from hiring teams.</li>
+    </ul>
+
+    <h2>2. How We Use Your Data</h2>
+    <p>We use your information exclusively to:</p>
+    <ul>
+      <li>Draft personalized, role-specific job application emails.</li>
+      <li>Send outreach emails to verified hiring managers and HR teams directly from your email account upon your approval.</li>
+      <li>Detect responses from recruiters to keep your application pipeline updated.</li>
+    </ul>
+
+    <div class="disclosure">
+      <strong>Google API Limited Use Disclosure:</strong><br/>
+      AI Job Finder's use and transfer to any other app of information received from Google APIs will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy#additional_requirements_for_specific_api_scopes" target="_blank" rel="noopener">Google API Services User Data Policy</a>, including the Limited Use requirements.
+    </div>
+
+    <h2>3. Data Protection & Security</h2>
+    <p>Your OAuth refresh tokens and profile data are stored securely with enterprise-grade encryption. We do not sell, rent, or share your personal data or email contents with any third-party advertisers or data brokers.</p>
+
+    <h2>4. Data Deletion & Revocation</h2>
+    <p>You can revoke access to your Google Account at any time through your <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Google Security Settings</a>. You may also request deletion of your account and profile data by contacting us.</p>
+  `;
+  res.send(renderPolicyPage('Privacy Policy', content));
+});
+
+app.get(['/terms', '/api/terms'], (req, res) => {
+  const content = `
+    <h1>Terms of Service</h1>
+    <p><em>Last updated: October 2026</em></p>
+    <p>By accessing or using AI Job Finder, you agree to comply with and be bound by these Terms of Service.</p>
+    
+    <h2>1. Permitted Use</h2>
+    <p>AI Job Finder is provided to assist individuals with job search automation, personalized email drafting, and tracking legitimate job outreach. You agree not to use the service for unsolicited spam, bulk scraping, harassment, or any activity that violates Google's Acceptable Use Policy.</p>
+
+    <h2>2. User Responsibility</h2>
+    <p>You maintain full control and responsibility over all outreach sent through your connected email account. It is your responsibility to review application drafts and ensure their accuracy before dispatching.</p>
+
+    <h2>3. Disclaimer of Warranties</h2>
+    <p>The platform is provided on an "as is" and "as available" basis without warranties of any kind. We do not guarantee interview offers or employment outcomes.</p>
+
+    <h2>4. Changes to Terms</h2>
+    <p>We reserve the right to modify these terms at any time. Continued use of the platform constitutes acceptance of updated terms.</p>
+  `;
+  res.send(renderPolicyPage('Terms of Service', content));
+});
+
 // Follow-Up Cron Job: Runs daily at 11:00 AM IST
 cron.schedule('0 11 * * *', async () => {
   console.log('[Cron] Starting daily follow-up check...');
