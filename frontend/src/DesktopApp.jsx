@@ -5005,226 +5005,264 @@ export default function DesktopApp(props) {
                                         });
                                       }
                                       if (job.emailRecipient && job.emailRecipient.trim()) {
-                                        const primary = job.emailRecipient.trim();
-                                        if (!map.has(primary.toLowerCase())) {
+                                        const primaryEmail = job.emailRecipient.trim();
+                                        if (!map.has(primaryEmail.toLowerCase())) {
                                           const primaryItem = {
-                                            email: primary,
+                                            email: primaryEmail,
                                             hrName: job.hrName || '',
-                                            type: 'primary',
+                                            type: 'careers',
                                             deliverabilityScore: job.deliverabilityScore || 65,
                                             status: undefined,
                                             isPrimary: true
                                           };
-                                          map.set(primary.toLowerCase(), primaryItem);
+                                          map.set(primaryEmail.toLowerCase(), primaryItem);
                                         } else {
-                                          map.get(primary.toLowerCase()).isPrimary = true;
+                                          map.get(primaryEmail.toLowerCase()).isPrimary = true;
                                         }
                                       }
                                       const recipientsList = Array.from(map.values());
+                                      const primary = recipientsList.find(r => r.isPrimary) || recipientsList[0];
+                                      const alternates = recipientsList.filter(r => r.email.toLowerCase() !== (primary?.email || '').toLowerCase());
                                       const targetJobId = job.id || job._id;
                                       const isExpanded = !!expandedRecipients[targetJobId];
-                                      const maxInitial = 3;
-                                      const displayList = (recipientsList.length <= maxInitial || isExpanded)
-                                        ? recipientsList
-                                        : recipientsList.slice(0, maxInitial);
+                                      const copyKey = `${targetJobId}-${primary?.email}`;
+                                      const isCopied = copiedEmailJobId === copyKey;
+
+                                      const status = job.deliverabilityStatus || ((primary?.deliverabilityScore || job.deliverabilityScore || 65) >= 60 ? 'deliverable' : 'unverified');
+                                      const score = primary?.deliverabilityScore || job.deliverabilityScore || (status === 'deliverable' ? 85 : 0);
 
                                       return (
                                         <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', alignItems: 'flex-start', maxWidth: '100%', minWidth: 0 }}>
-                                          {displayList.map(rec => {
-                                            const copyKey = `${targetJobId}-${rec.email}`;
-                                            const isCopied = copiedEmailJobId === copyKey;
-                                            return (
-                                              <div
-                                                key={rec.email}
-                                                onClick={(e) => {
-                                                  if (!rec.isPrimary) {
-                                                    e.stopPropagation();
-                                                    handleSelectPrimaryRecipient(job, rec.email);
-                                                  }
-                                                }}
-                                                style={{
-                                                  display: 'inline-flex',
-                                                  alignItems: 'center',
-                                                  gap: '5px',
-                                                  background: rec.isPrimary ? 'var(--surface-3)' : 'rgba(255, 255, 255, 0.02)',
-                                                  border: rec.isPrimary ? '1px solid rgba(56, 189, 248, 0.45)' : '1px solid var(--border)',
-                                                  padding: '2px 6px',
-                                                  borderRadius: '6px',
-                                                  fontFamily: 'monospace',
-                                                  fontSize: '11px',
-                                                  color: rec.isPrimary ? 'var(--text-1)' : 'var(--text-2)',
-                                                  maxWidth: '100%',
-                                                  minWidth: 0,
-                                                  cursor: rec.isPrimary ? 'default' : 'pointer',
-                                                  transition: 'all 0.15s ease',
-                                                  boxShadow: rec.isPrimary ? '0 0 0 1px rgba(56, 189, 248, 0.12)' : 'none'
-                                                }}
-                                                title={rec.isPrimary ? `Active primary mailbox: ${rec.email}` : `Click to select ${rec.email} as active mailbox`}
-                                              >
-                                                {rec.type && rec.type !== 'inbox' && (
-                                                  <span style={{
-                                                    fontSize: '9px',
-                                                    textTransform: 'uppercase',
-                                                    fontWeight: 700,
-                                                    padding: '0 3px',
-                                                    borderRadius: '3px',
-                                                    background: rec.type === 'careers' ? 'rgba(56, 189, 248, 0.18)' : rec.type === 'hr' ? 'rgba(168, 85, 247, 0.18)' : rec.type === 'talent' ? 'rgba(16, 185, 129, 0.18)' : 'rgba(245, 158, 11, 0.18)',
-                                                    color: rec.type === 'careers' ? '#38bdf8' : rec.type === 'hr' ? '#c084fc' : rec.type === 'talent' ? '#34d399' : '#fbbf24',
-                                                    letterSpacing: '0.3px',
-                                                    lineHeight: '13px'
-                                                  }}>
-                                                    {rec.type}
-                                                  </span>
-                                                )}
+                                          {/* Line 1: Primary Recipient with Inline Deliverability */}
+                                          <div
+                                            style={{
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              gap: '5px',
+                                              background: 'rgba(56, 189, 248, 0.05)',
+                                              border: '1px solid rgba(56, 189, 248, 0.35)',
+                                              padding: '2px 7px',
+                                              borderRadius: '6px',
+                                              fontFamily: 'monospace',
+                                              fontSize: '11px',
+                                              color: 'var(--text-1)',
+                                              maxWidth: '100%',
+                                              minWidth: 0,
+                                              boxShadow: '0 1px 3px rgba(0, 0, 0, 0.2)'
+                                            }}
+                                            title={`Active mailbox: ${primary?.email}`}
+                                          >
+                                            {primary?.type && primary.type !== 'inbox' && (
+                                              <span style={{
+                                                fontSize: '9px',
+                                                textTransform: 'uppercase',
+                                                fontWeight: 700,
+                                                padding: '0 4px',
+                                                borderRadius: '3px',
+                                                background: primary.type === 'careers' ? 'rgba(56, 189, 248, 0.2)' : primary.type === 'hr' ? 'rgba(168, 85, 247, 0.2)' : primary.type === 'talent' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)',
+                                                color: primary.type === 'careers' ? '#38bdf8' : primary.type === 'hr' ? '#c084fc' : primary.type === 'talent' ? '#34d399' : '#fbbf24',
+                                                letterSpacing: '0.3px',
+                                                lineHeight: '14px'
+                                              }}>
+                                                {primary.type}
+                                              </span>
+                                            )}
 
-                                                {rec.hrName && (
-                                                  <span style={{ fontSize: '9px', color: 'var(--text-3)', fontWeight: 600 }}>
-                                                    👤 {rec.hrName.split(' ')[0]}
-                                                  </span>
-                                                )}
+                                            {primary?.hrName && (
+                                              <span style={{ fontSize: '10px', color: 'var(--text-3)', fontWeight: 600 }}>
+                                                👤 {primary.hrName.split(' ')[0]}
+                                              </span>
+                                            )}
 
-                                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={rec.email}>
-                                                  {rec.email}
-                                                </span>
+                                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 500 }} title={primary?.email}>
+                                              {primary?.email}
+                                            </span>
 
-                                                <button
-                                                  type="button"
-                                                  onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    navigator.clipboard.writeText(rec.email);
-                                                    setCopiedEmailJobId(copyKey);
-                                                    setTimeout(() => setCopiedEmailJobId(null), 2000);
-                                                  }}
-                                                  style={{
-                                                    background: 'none',
-                                                    border: 'none',
-                                                    cursor: 'pointer',
-                                                    padding: '0 2px',
-                                                    color: isCopied ? '#10b981' : 'var(--text-3)',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    flexShrink: 0
-                                                  }}
-                                                  title={`Copy ${rec.email}`}
-                                                >
-                                                  {isCopied ? (
-                                                    <span style={{ fontSize: '10px', color: '#10b981', fontWeight: 600 }}>✓</span>
-                                                  ) : (
-                                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                                                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                                                    </svg>
-                                                  )}
-                                                </button>
-                                              </div>
-                                            );
-                                          })}
-
-                                          {recipientsList.length > maxInitial && (
                                             <button
                                               type="button"
                                               onClick={(e) => {
                                                 e.stopPropagation();
-                                                setExpandedRecipients(prev => ({ ...prev, [targetJobId]: !prev[targetJobId] }));
+                                                navigator.clipboard.writeText(primary?.email || '');
+                                                setCopiedEmailJobId(copyKey);
+                                                setTimeout(() => setCopiedEmailJobId(null), 2000);
                                               }}
                                               style={{
-                                                background: 'transparent',
+                                                background: 'none',
                                                 border: 'none',
-                                                padding: '0 2px',
-                                                fontSize: '10px',
-                                                fontWeight: 600,
-                                                color: '#38bdf8',
                                                 cursor: 'pointer',
-                                                display: 'inline-flex',
+                                                padding: '0 2px',
+                                                color: isCopied ? '#10b981' : 'var(--text-3)',
+                                                display: 'flex',
                                                 alignItems: 'center',
-                                                gap: '2px'
+                                                flexShrink: 0
                                               }}
+                                              title={`Copy ${primary?.email}`}
                                             >
-                                              {isExpanded ? '▴ Show less' : `▾ +${recipientsList.length - maxInitial} more emails`}
+                                              {isCopied ? (
+                                                <span style={{ fontSize: '10px', color: '#10b981', fontWeight: 700 }}>✓</span>
+                                              ) : (
+                                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                                </svg>
+                                              )}
                                             </button>
+
+                                            {/* Integrated Deliverability Pill */}
+                                            <span style={{
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              gap: '2px',
+                                              fontSize: '9px',
+                                              fontWeight: 700,
+                                              padding: '1px 5px',
+                                              borderRadius: '8px',
+                                              background: status === 'deliverable' ? 'rgba(16, 185, 129, 0.15)' : status === 'risky' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                                              color: status === 'deliverable' ? '#10b981' : status === 'risky' ? '#f59e0b' : '#ef4444',
+                                              border: status === 'deliverable' ? '1px solid rgba(16, 185, 129, 0.3)' : status === 'risky' ? '1px solid rgba(245, 158, 11, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
+                                              whiteSpace: 'nowrap',
+                                              lineHeight: '12px'
+                                            }} title={job.deliverabilityReason || (status === 'deliverable' ? 'Verified deliverable mailbox' : 'Risky mailbox')}>
+                                              {status === 'deliverable' ? `🟢 ${score}%` : status === 'risky' ? `🟡 ${score}%` : '🔴'}
+                                            </span>
+                                          </div>
+
+                                          {/* Line 2: Alternate Inboxes Pill & Drawer (only when multiple mailboxes exist) */}
+                                          {alternates.length > 0 && (
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', width: '100%' }}>
+                                              <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  setExpandedRecipients(prev => ({ ...prev, [targetJobId]: !prev[targetJobId] }));
+                                                }}
+                                                style={{
+                                                  background: isExpanded ? 'rgba(56, 189, 248, 0.12)' : 'rgba(255, 255, 255, 0.03)',
+                                                  border: '1px solid ' + (isExpanded ? 'rgba(56, 189, 248, 0.4)' : 'var(--border)'),
+                                                  padding: '1px 6px',
+                                                  borderRadius: '10px',
+                                                  fontSize: '10px',
+                                                  fontWeight: 600,
+                                                  color: isExpanded ? '#38bdf8' : 'var(--text-3)',
+                                                  cursor: 'pointer',
+                                                  display: 'inline-flex',
+                                                  alignItems: 'center',
+                                                  gap: '4px',
+                                                  transition: 'all 0.15s ease',
+                                                  width: 'fit-content'
+                                                }}
+                                                title="Click to view and switch between alternate detected inboxes"
+                                              >
+                                                <span>⚡ {recipientsList.length} inboxes</span>
+                                                <span style={{ color: '#38bdf8' }}>
+                                                  {isExpanded ? '▴ collapse' : `▾ +${alternates.length} alternate${alternates.length > 1 ? 's' : ''}`}
+                                                </span>
+                                              </button>
+
+                                              {isExpanded && (
+                                                <div style={{
+                                                  display: 'flex',
+                                                  flexDirection: 'column',
+                                                  gap: '3px',
+                                                  padding: '4px 6px',
+                                                  background: 'rgba(0, 0, 0, 0.3)',
+                                                  borderRadius: '6px',
+                                                  border: '1px solid var(--border)',
+                                                  maxWidth: '100%',
+                                                  marginTop: '2px'
+                                                }}>
+                                                  <div style={{ fontSize: '9px', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.4px', fontWeight: 600, marginBottom: '2px' }}>
+                                                    Click to select active mailbox:
+                                                  </div>
+                                                  {alternates.map(alt => {
+                                                    const altCopyKey = `${targetJobId}-${alt.email}`;
+                                                    const isAltCopied = copiedEmailJobId === altCopyKey;
+                                                    return (
+                                                      <div
+                                                        key={alt.email}
+                                                        onClick={(e) => {
+                                                          e.stopPropagation();
+                                                          handleSelectPrimaryRecipient(job, alt.email);
+                                                        }}
+                                                        style={{
+                                                          display: 'inline-flex',
+                                                          alignItems: 'center',
+                                                          gap: '6px',
+                                                          background: 'rgba(255, 255, 255, 0.03)',
+                                                          border: '1px solid var(--border)',
+                                                          padding: '2px 6px',
+                                                          borderRadius: '4px',
+                                                          fontFamily: 'monospace',
+                                                          fontSize: '10px',
+                                                          color: 'var(--text-2)',
+                                                          cursor: 'pointer',
+                                                          transition: 'all 0.15s ease',
+                                                          maxWidth: '100%'
+                                                        }}
+                                                        onMouseEnter={(e) => {
+                                                          e.currentTarget.style.borderColor = 'rgba(56, 189, 248, 0.5)';
+                                                          e.currentTarget.style.background = 'rgba(56, 189, 248, 0.08)';
+                                                        }}
+                                                        onMouseLeave={(e) => {
+                                                          e.currentTarget.style.borderColor = 'var(--border)';
+                                                          e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
+                                                        }}
+                                                        title={`Click to set ${alt.email} as active mailbox`}
+                                                      >
+                                                        {alt.type && alt.type !== 'inbox' && (
+                                                          <span style={{
+                                                            fontSize: '8px',
+                                                            textTransform: 'uppercase',
+                                                            fontWeight: 700,
+                                                            padding: '0 3px',
+                                                            borderRadius: '3px',
+                                                            background: alt.type === 'careers' ? 'rgba(56, 189, 248, 0.18)' : alt.type === 'hr' ? 'rgba(168, 85, 247, 0.18)' : alt.type === 'talent' ? 'rgba(16, 185, 129, 0.18)' : 'rgba(245, 158, 11, 0.18)',
+                                                            color: alt.type === 'careers' ? '#38bdf8' : alt.type === 'hr' ? '#c084fc' : alt.type === 'talent' ? '#34d399' : '#fbbf24',
+                                                            lineHeight: '12px'
+                                                          }}>
+                                                            {alt.type}
+                                                          </span>
+                                                        )}
+                                                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                          {alt.email}
+                                                        </span>
+                                                        <button
+                                                          type="button"
+                                                          onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            navigator.clipboard.writeText(alt.email);
+                                                            setCopiedEmailJobId(altCopyKey);
+                                                            setTimeout(() => setCopiedEmailJobId(null), 2000);
+                                                          }}
+                                                          style={{
+                                                            background: 'none',
+                                                            border: 'none',
+                                                            cursor: 'pointer',
+                                                            padding: '0 2px',
+                                                            color: isAltCopied ? '#10b981' : 'var(--text-3)',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            marginLeft: 'auto'
+                                                          }}
+                                                          title={`Copy ${alt.email}`}
+                                                        >
+                                                          {isAltCopied ? '✓' : (
+                                                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                                              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                                            </svg>
+                                                          )}
+                                                        </button>
+                                                      </div>
+                                                    );
+                                                  })}
+                                                </div>
+                                              )}
+                                            </div>
                                           )}
                                         </div>
                                       );
                                     })()}
-
-                                    {/* Deliverability Badge */}
-                                    {(() => {
-                                      const status = job.deliverabilityStatus || (job.deliverabilityScore >= 60 ? 'deliverable' : 'unverified');
-                                      const score = job.deliverabilityScore || (status === 'deliverable' ? 85 : 0);
-
-                                      if (status === 'deliverable') {
-                                        return (
-                                          <span style={{
-                                            display: 'inline-flex',
-                                            alignItems: 'center',
-                                            gap: '3px',
-                                            fontSize: '10px',
-                                            fontWeight: 600,
-                                            padding: '1px 5px',
-                                            borderRadius: '10px',
-                                            background: 'rgba(16, 185, 129, 0.12)',
-                                            color: '#10b981',
-                                            border: '1px solid rgba(16, 185, 129, 0.3)',
-                                            whiteSpace: 'nowrap'
-                                          }} title={job.deliverabilityReason || 'Verified deliverable inbox'}>
-                                            🟢 {score}% Verified
-                                          </span>
-                                        );
-                                      }
-                                      if (status === 'risky') {
-                                        return (
-                                          <span style={{
-                                            display: 'inline-flex',
-                                            alignItems: 'center',
-                                            gap: '3px',
-                                            fontSize: '10px',
-                                            fontWeight: 600,
-                                            padding: '1px 5px',
-                                            borderRadius: '10px',
-                                            background: 'rgba(245, 158, 11, 0.12)',
-                                            color: '#f59e0b',
-                                            border: '1px solid rgba(245, 158, 11, 0.3)',
-                                            whiteSpace: 'nowrap'
-                                          }} title={job.deliverabilityReason || 'Catch-all or risky mailbox'}>
-                                            🟡 {score}% Risky
-                                          </span>
-                                        );
-                                      }
-                                      return (
-                                        <span style={{
-                                          display: 'inline-flex',
-                                          alignItems: 'center',
-                                          gap: '3px',
-                                          fontSize: '10px',
-                                          fontWeight: 600,
-                                          padding: '1px 5px',
-                                          borderRadius: '10px',
-                                          background: 'rgba(239, 68, 68, 0.12)',
-                                          color: '#ef4444',
-                                          border: '1px solid rgba(239, 68, 68, 0.3)',
-                                          whiteSpace: 'nowrap'
-                                        }} title={job.deliverabilityReason || 'Address failed verification'}>
-                                          🔴 Protected
-                                        </span>
-                                      );
-                                    })()}
-                                    {job.allRecipients && job.allRecipients.length > 1 && (
-                                      <span style={{
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: '3px',
-                                        fontSize: '10px',
-                                        fontWeight: 600,
-                                        padding: '1px 5px',
-                                        borderRadius: '10px',
-                                        background: 'rgba(56, 189, 248, 0.12)',
-                                        color: '#38bdf8',
-                                        border: '1px solid rgba(56, 189, 248, 0.3)',
-                                        whiteSpace: 'nowrap'
-                                      }} title={`${job.allRecipients.length} verified inboxes discovered for this company`}>
-                                        ⚡ {job.allRecipients.length} inboxes
-                                      </span>
-                                    )}
                                   </>
                                 ) : (
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'nowrap', maxWidth: '100%' }}>
