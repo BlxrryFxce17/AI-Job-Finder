@@ -36,11 +36,9 @@ router.get('/google', (req, res) => {
     scope: [
       'openid',
       'https://www.googleapis.com/auth/userinfo.email',
-      'https://www.googleapis.com/auth/userinfo.profile',
-      'https://www.googleapis.com/auth/gmail.send',
-      'https://www.googleapis.com/auth/gmail.readonly'
+      'https://www.googleapis.com/auth/userinfo.profile'
     ],
-    prompt: 'consent'
+    prompt: 'select_account'
   });
   res.redirect(url);
 });
@@ -53,20 +51,27 @@ router.get('/google/callback', async (req, res) => {
     const { tokens } = await oauth2Client.getToken(code);
 
     oauth2Client.setCredentials(tokens);
-    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-    const profileRes = await gmail.users.getProfile({ userId: 'me' });
-    const email = profileRes.data.emailAddress;
+    const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
+    const userInfoRes = await oauth2.userinfo.get();
+    const email = userInfoRes.data.email;
+    const name = userInfoRes.data.name;
 
     let user = await User.findOne({ email });
     if (!user) {
-      user = new User({ email });
+      user = new User({ email, name: name || '' });
+    } else if (name && !user.name) {
+      user.name = name;
     }
     user.googleRefreshToken = tokens.refresh_token || user.googleRefreshToken;
     user.googleAccessToken = tokens.access_token;
     user.googleTokenExpiry = tokens.expiry_date;
     await user.save();
 
-    await getProfile(user._id);
+    const profile = await getProfile(user._id);
+    if (name && !profile.name) {
+      profile.name = name;
+      await profile.save();
+    }
 
     const token = jwt.sign({ id: user._id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
 
