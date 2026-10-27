@@ -5,7 +5,8 @@ const userSchema = new mongoose.Schema({
   name: { type: String },
   googleRefreshToken: { type: String, default: '' },
   googleAccessToken: { type: String, default: '' },
-  googleTokenExpiry: { type: Number, default: 0 }
+  googleTokenExpiry: { type: Number, default: 0 },
+  gmailAppPassword: { type: String, default: '' }
 }, { timestamps: true });
 
 module.exports = mongoose.model('User', userSchema);

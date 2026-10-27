@@ -65,7 +65,8 @@ router.get('/', requireAuth, async (req, res) => {
 
     const responseData = {
       ...profileObj,
-      emailUser: user ? user.email : ''
+      emailUser: user ? user.email : '',
+      hasGmailAppPassword: Boolean(user && user.gmailAppPassword)
     };
     res.json(responseData || {});
   } catch (err) {
@@ -97,9 +98,15 @@ const updateProfileHandler = async (req, res) => {
 
     await profile.save();
     const user = await User.findById(req.user.id);
+
+    if (req.body.gmailAppPassword !== undefined && user) {
+      user.gmailAppPassword = req.body.gmailAppPassword.trim();
+      await user.save();
+    }
+
     const profileObj = profile.toObject();
     delete profileObj.resumePdf;
-    res.json({ ...profileObj, emailUser: user.email });
+    res.json({ ...profileObj, emailUser: user.email, hasGmailAppPassword: Boolean(user.gmailAppPassword) });
   } catch (err) {
     console.error('Profile Update Error:', err);
     res.status(500).json({ error: 'Failed to update profile' });

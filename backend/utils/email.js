@@ -264,38 +264,75 @@ async function sendEmailViaAPI(user, mailOptions, sendOptions = {}) {
   const userEmail = user.email || process.env.EMAIL_USER;
 
   if (user.googleRefreshToken) {
-    const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET
-    );
-    oauth2Client.setCredentials({ refresh_token: user.googleRefreshToken });
-    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+    try {
+      const oauth2Client = new google.auth.OAuth2(
+        process.env.GOOGLE_CLIENT_ID,
+        process.env.GOOGLE_CLIENT_SECRET
+      );
+      oauth2Client.setCredentials({ refresh_token: user.googleRefreshToken });
+      const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
-    const mail = new MailComposer(mailOptions);
-    const messageBuffer = await mail.compile().build();
+      const mail = new MailComposer(mailOptions);
+      const messageBuffer = await mail.compile().build();
 
-    const encodedMessage = messageBuffer
-      .toString('base64')
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=+$/, '');
+      const encodedMessage = messageBuffer
+        .toString('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
 
-    const res = await gmail.users.messages.send({
-      userId: 'me',
-      requestBody: {
-        raw: encodedMessage,
-        threadId: mailOptions.threadId || undefined
-      },
-    });
-    return { messageId: res.data.id, threadId: res.data.threadId };
-  } else {
-    console.warn('[Warning] No Google Refresh Token found. Falling back to SMTP which may be blocked on Render Free Tier.');
+      const res = await gmail.users.messages.send({
+        userId: 'me',
+        requestBody: {
+          raw: encodedMessage,
+          threadId: mailOptions.threadId || undefined
+        },
+      });
+      return { messageId: res.data.id, threadId: res.data.threadId };
+    } catch (apiErr) {
+      console.warn(`[Gmail API Fallback] API send failed for ${userEmail} (${apiErr.message}). Attempting SMTP dispatch.`);
+    }
+  }
+
+  // Multi-Tenant Dispatch Protocol:
+  // 1. If user provided their own Gmail App Password, send directly from their personal inbox
+  if (user.gmailAppPassword) {
+    const cleanPass = user.gmailAppPassword.replace(/\s+/g, '');
     const transporter = nodemailer.createTransport({
       service: 'gmail',
-      auth: { user: userEmail, pass: process.env.EMAIL_PASS }
+      auth: { user: user.email, pass: cleanPass }
     });
     return await transporter.sendMail(mailOptions);
   }
+
+  // 2. If user is the primary admin/configured user, send with system EMAIL_PASS
+  if (process.env.EMAIL_USER && user.email && user.email.toLowerCase() === process.env.EMAIL_USER.toLowerCase() && process.env.EMAIL_PASS) {
+    const cleanPass = process.env.EMAIL_PASS.replace(/\s+/g, '');
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: { user: user.email, pass: cleanPass }
+    });
+    return await transporter.sendMail(mailOptions);
+  }
+
+  // 3. Fallback for new users: Send via verified platform sender with candidate display name & Reply-To
+  const platformUser = process.env.EMAIL_USER;
+  const platformPass = (process.env.EMAIL_PASS || '').replace(/\s+/g, '');
+  if (platformUser && platformPass) {
+    console.log(`📨 [Email Dispatch] Delivering via verified platform relay for ${userEmail} (Reply-To: ${userEmail})`);
+    const systemMailOptions = {
+      ...mailOptions,
+      from: `"${user.name || 'Candidate'} via AI Job Finder" <${platformUser}>`,
+      replyTo: user.email || platformUser
+    };
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: { user: platformUser, pass: platformPass }
+    });
+    return await transporter.sendMail(systemMailOptions);
+  }
+
+  throw new Error('Email dispatch failed: No valid Gmail API token, user App Password, or platform sender credentials configured.');
 }
 
 async function checkGmailForReply(user, recipientEmail) {
