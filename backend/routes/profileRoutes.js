@@ -26,7 +26,7 @@ async function getProfile(userId, includePdf = false) {
 router.get('/', requireAuth, async (req, res) => {
   try {
     const profile = await getProfile(req.user.id, true);
-    const user = await User.findById(req.user.id).select('email');
+    const user = await User.findById(req.user.id).select('email gmailAppPassword');
 
     // Auto-detect portfolio from existing resumePdf annotations or resumeText if not yet set
     if (!profile.portfolio) {
@@ -100,8 +100,14 @@ const updateProfileHandler = async (req, res) => {
     const user = await User.findById(req.user.id);
 
     if (req.body.gmailAppPassword !== undefined && user) {
-      user.gmailAppPassword = req.body.gmailAppPassword.trim();
-      await user.save();
+      const trimmedPass = req.body.gmailAppPassword.trim();
+      if (trimmedPass.length > 0) {
+        user.gmailAppPassword = trimmedPass;
+        await user.save();
+      } else if (req.body.clearGmailAppPassword) {
+        user.gmailAppPassword = '';
+        await user.save();
+      }
     }
 
     const profileObj = profile.toObject();
