@@ -44,6 +44,24 @@ const isJuniorQuery = (q = '') => {
   return /\b(jr\.?|junior|entry|entry[- ]level|fresher|freshers|intern|internship|associate|trainee|graduate)\b/i.test(q);
 };
 
+export const simplifySendError = (errorStr) => {
+  if (!errorStr) return 'High bounce risk detected';
+  const str = String(errorStr);
+  if (/ENETUNREACH|ETIMEDOUT|Connection timeout|timeout/i.test(str)) {
+    return 'Connection timeout: Email server could not be reached. Check network connection or retry.';
+  }
+  if (/535-5.7.8|Invalid login|Username and Password not accepted/i.test(str)) {
+    return 'Authentication failed: Google rejected the App Password. Check the 16-character Gmail App Password in your Profile.';
+  }
+  if (/Greeting timeout/i.test(str)) {
+    return 'Server timeout: Gmail did not respond in time.';
+  }
+  if (/No valid Gmail API token, user App Password/i.test(str)) {
+    return 'Missing credentials: Save your Gmail App Password in your Profile to send emails.';
+  }
+  return str;
+};
+
 export const extractPackage = (salaryStr = '', jd = '') => {
   if (salaryStr && salaryStr.trim()) return salaryStr.trim();
   if (!jd) return '';
@@ -480,7 +498,7 @@ export function useAppLogic() {
           
           if (genData.draft) {
             const recipientCount = targetRecipients.length > 1 ? targetRecipients.length : 1;
-            setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Pre-send deliverability check passed. Dispatching ${recipientCount > 1 ? `${recipientCount} individualized emails` : 'outreach'} via Gmail API...`] }));
+            setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Pre-send deliverability check passed. Dispatching ${recipientCount > 1 ? `${recipientCount} individualized emails` : 'tailored email'}...`] }));
             const sendRes = await apiFetch(`${API_BASE}/api/send-email`, {
                method: 'POST', headers: { 'Content-Type': 'application/json' },
                body: JSON.stringify({ 
@@ -499,7 +517,7 @@ export function useAppLogic() {
                  : `🚀 Successfully sent to ${discoveredEmail}! Delivery verified (Tracked: ${sendData.tracked ? 'Yes' : 'No'})`;
                setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] ${successMsg}`] }));
             } else {
-               setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] 🛑 Send blocked: ${sendData.error || 'High bounce risk detected'}`] }));
+               setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] 🛑 Send blocked: ${simplifySendError(sendData.error)}`] }));
             }
           } else {
             setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] ⚠️ Draft generation yielded empty output.`] }));
@@ -509,7 +527,7 @@ export function useAppLogic() {
         }
       } catch (err) {
         console.error(err);
-        setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] ❌ Error: ${err.message}`] }));
+        setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] ❌ Error: ${simplifySendError(err.message)}`] }));
       }
       // Calculate progress based on total originally queued + newly queued
       setBatchState(prev => {

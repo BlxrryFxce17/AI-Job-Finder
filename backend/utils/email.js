@@ -23,13 +23,14 @@ const domainResolutionCache = new Map(); // companyKey -> { timestamp, domain }
 let serperCreditsExhaustedUntil = 0;
 
 /**
- * Checks if a domain belongs to a job aggregator, job board, ATS platform, or social network.
+ * Checks if a domain belongs to a job aggregator, job board, ATS platform, corporate intelligence registry,
+ * financial filing directory, or social network.
  * These domains must NEVER be treated as the employer's official email domain.
  */
 function isJobBoardOrAtsDomain(host, company = '') {
   if (!host || typeof host !== 'string') return false;
   const clean = host.toLowerCase().trim().replace(/^www\./, '');
-  const jobBoardPattern = /\b(adzuna|indeed|naukri|linkedin|glassdoor|internshala|foundit|monster|shine|timesjobs|hirist|instahyre|cuvette|unstop|wellfound|angel\.co|ziprecruiter|simplyhired|careerbuilder|dice|apify|google|facebook|twitter|instagram|youtube|wikipedia|github|medium|zaubacorp|tofler|ambitionbox|zoominfo|greenhouse|lever|workday|myworkdayjobs|smartrecruiters|ashbyhq|breezy|recruitee|jobvite|bamboohr|workable|tracxn|leadiq|rocketreach|tradekey|textranch|firestormirc|nnedv|crunchbase|pitchbook|apollo|lusha|signalhire|contactout|clearbit|hunter|owler|dnb|kompass|indiamart|justdial|yellowpages|bloomberg|reuters|craft\.co|upwork|fiverr|freelancer)\b/i;
+  const jobBoardPattern = /\b(adzuna|indeed|naukri|linkedin|glassdoor|internshala|foundit|monster|shine|timesjobs|hirist|instahyre|cuvette|unstop|wellfound|angel\.co|ziprecruiter|simplyhired|careerbuilder|dice|apify|google|facebook|twitter|instagram|youtube|wikipedia|github|medium|zaubacorp|tofler|ambitionbox|zoominfo|greenhouse|lever|workday|myworkdayjobs|smartrecruiters|ashbyhq|breezy|recruitee|jobvite|bamboohr|workable|tracxn|leadiq|rocketreach|tradekey|textranch|firestormirc|nnedv|crunchbase|pitchbook|apollo|lusha|signalhire|contactout|clearbit|hunter|owler|dnb|kompass|indiamart|justdial|yellowpages|bloomberg|reuters|craft\.co|upwork|fiverr|freelancer|instafinancials|quickcompany|thecompanycheck|company360|connect2india|tradeindia|fundoodata|startupindia|kredx|ventureintelligence|screener|economictimes|moneycontrol|livemint|business-standard|f6s|builtin|topstartups|chicagomarathon|marathon|runsignup)\b/i;
   if (jobBoardPattern.test(clean)) return true;
 
   // Block .edu / .ac.in / .edu.in unless company is an academic institution
@@ -49,21 +50,82 @@ function isJobBoardOrAtsDomain(host, company = '') {
   return false;
 }
 
+/**
+ * Validates that a candidate domain actually belongs to the given employer.
+ * Prevents third-party registries or unrelated companies from being misidentified as the official domain.
+ */
+function isDomainLexicallyMatchingCompany(companyName, domain) {
+  if (!companyName || !domain) return false;
+  const rawComp = companyName.trim().toLowerCase();
+  const domainRoot = domain.toLowerCase().split('.')[0].replace(/[^a-z0-9]/g, '');
+
+  if (!domainRoot) return false;
+
+  // Known corporate aliases and brands
+  if (/bank of america/i.test(rawComp) && (domainRoot.includes('bankofamerica') || domainRoot.includes('bofa'))) return true;
+  if (/nippon data/i.test(rawComp) && domainRoot.includes('nippondata')) return true;
+  if (/orange business/i.test(rawComp) && (domainRoot.includes('orange') || domainRoot.includes('orange-business'))) return true;
+  if (/wolters kluwer/i.test(rawComp) && (domainRoot.includes('wolterskluwer') || domainRoot.includes('wk'))) return true;
+
+  const cleanComp = rawComp
+    .replace(/\b(pvt|ltd|limited|private|llc|inc|corp|corporation|technologies|technology|tech|solutions|services|consulting|consultancy|systems|group|holdings|enterprises|ventures|global|india|international|digital)\b/gi, '')
+    .replace(/[^a-z0-9]/g, ' ')
+    .trim();
+
+  const tokens = cleanComp.split(/\s+/).filter(t => t.length >= 3);
+
+  // Exact or near-exact match on company compact name
+  const origCompact = cleanComp.replace(/[^a-z0-9]/g, '');
+  if (origCompact && (domainRoot.includes(origCompact) || (origCompact.length >= 4 && origCompact.includes(domainRoot)))) {
+    return true;
+  }
+
+  // If no distinctive tokens remain, check raw company name
+  if (tokens.length === 0) {
+    const rawCompact = rawComp.replace(/[^a-z0-9]/g, '');
+    return domainRoot.includes(rawCompact) || (rawCompact.length >= 4 && rawCompact.includes(domainRoot));
+  }
+
+  // Token match (e.g. 'kdots' in 'kdotsdigital')
+  for (const token of tokens) {
+    if (token.length >= 4 && domainRoot.includes(token)) {
+      return true;
+    }
+    if (domainRoot.length >= 4 && token.includes(domainRoot)) {
+      return true;
+    }
+  }
+
+  // Acronym match (e.g. 'TSS Consultancy' -> 'tss')
+  const words = companyName.trim().split(/\s+/);
+  if (words.length >= 2) {
+    const acronym = words.map(w => w[0]).join('').toLowerCase();
+    if (acronym.length >= 3 && domainRoot.startsWith(acronym)) {
+      return true;
+    }
+    if (acronym.length >= 2 && (domainRoot === acronym || domainRoot === `${acronym}consultancy` || domainRoot === `${acronym}tech`)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 async function resolveCompanyDomain(company, applyLink = null) {
   if (!company || typeof company !== 'string') return null;
 
   const rawComp = company.trim();
   const lowerComp = rawComp.toLowerCase();
 
-  // Check cache first
+  // Check cache first (strictly verify cached domain still lexically matches)
   const cacheKey = `${lowerComp}|${applyLink || ''}`;
   const cached = domainResolutionCache.get(cacheKey);
-  if (cached && (Date.now() - cached.timestamp < 60 * 60 * 1000) && !isJobBoardOrAtsDomain(cached.domain)) {
+  if (cached && (Date.now() - cached.timestamp < 60 * 60 * 1000) && !isJobBoardOrAtsDomain(cached.domain) && isDomainLexicallyMatchingCompany(rawComp, cached.domain)) {
     return cached.domain;
   }
 
   const finalizeDomain = (dom) => {
-    if (dom && isJobBoardOrAtsDomain(dom)) dom = null;
+    if (dom && (isJobBoardOrAtsDomain(dom) || !isDomainLexicallyMatchingCompany(rawComp, dom))) dom = null;
     if (domainResolutionCache.size > 2000) domainResolutionCache.clear();
     domainResolutionCache.set(cacheKey, { timestamp: Date.now(), domain: dom });
     return dom;
@@ -83,7 +145,7 @@ async function resolveCompanyDomain(company, applyLink = null) {
   const urlMatch = rawComp.match(/(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+)/i);
   if (urlMatch) {
     const host = urlMatch[1].toLowerCase();
-    if (!isJobBoardOrAtsDomain(host)) {
+    if (!isJobBoardOrAtsDomain(host, rawComp) && isDomainLexicallyMatchingCompany(rawComp, host)) {
       const mx = await checkMxRecords(host);
       if (mx.valid) return finalizeDomain(host);
     }
@@ -94,7 +156,7 @@ async function resolveCompanyDomain(company, applyLink = null) {
     try {
       const parsed = new URL(applyLink);
       const host = parsed.hostname.replace(/^www\./, '').toLowerCase();
-      if (!isJobBoardOrAtsDomain(host)) {
+      if (!isJobBoardOrAtsDomain(host, rawComp) && isDomainLexicallyMatchingCompany(rawComp, host)) {
         const mx = await checkMxRecords(host);
         if (mx.valid) return finalizeDomain(host);
       }
@@ -113,14 +175,14 @@ async function resolveCompanyDomain(company, applyLink = null) {
     cleanName = rawComp.replace(/[^a-zA-Z0-9]/g, '');
   }
 
-  // 3. Clearbit Autocomplete (Free company domain lookup)
+  // 3. Clearbit Autocomplete (Free company domain lookup with strict lexical verification)
   try {
     const clearbitRes = await axios.get(`https://autocomplete.clearbit.com/v1/companies/suggest?query=${encodeURIComponent(cleanName || rawComp)}`, { timeout: 3500 });
     if (clearbitRes.data && clearbitRes.data.length > 0) {
       for (const entry of clearbitRes.data) {
         if (entry && entry.domain) {
           const cbDomain = entry.domain.toLowerCase().trim();
-          if (!isJobBoardOrAtsDomain(cbDomain)) {
+          if (!isJobBoardOrAtsDomain(cbDomain, cleanName) && isDomainLexicallyMatchingCompany(cleanName, cbDomain)) {
             const mx = await checkMxRecords(cbDomain);
             if (mx.valid) return finalizeDomain(cbDomain);
           }
@@ -129,20 +191,20 @@ async function resolveCompanyDomain(company, applyLink = null) {
     }
   } catch (err) { }
 
-  // 4. Tavily search for Company Official Website (High precision, reliable)
+  // 4. Tavily search for Company Official Website (High precision, strictly filtered)
   if (process.env.TAVILY_API_KEY) {
     try {
       const tavilyRes = await axios.post('https://api.tavily.com/search', {
         api_key: process.env.TAVILY_API_KEY,
         query: `"${cleanName}" official website`,
-        max_results: 4
+        max_results: 6
       }, { timeout: 3500 });
       const results = tavilyRes.data?.results || [];
       for (const o of results) {
         try {
           const u = new URL(o.url);
           const host = u.hostname.replace(/^www\./, '').toLowerCase();
-          if (!isJobBoardOrAtsDomain(host)) {
+          if (!isJobBoardOrAtsDomain(host, cleanName) && isDomainLexicallyMatchingCompany(cleanName, host)) {
             const mx = await checkMxRecords(host);
             if (mx.valid) return finalizeDomain(host);
           }
@@ -156,7 +218,7 @@ async function resolveCompanyDomain(company, applyLink = null) {
     try {
       const serperRes = await axios.post('https://google.serper.dev/search', {
         q: `"${cleanName}" official website`,
-        num: 4
+        num: 5
       }, {
         headers: { 'X-API-KEY': process.env.SERPER_API_KEY, 'Content-Type': 'application/json' },
         timeout: 3000
@@ -166,7 +228,7 @@ async function resolveCompanyDomain(company, applyLink = null) {
         try {
           const u = new URL(o.link);
           const host = u.hostname.replace(/^www\./, '').toLowerCase();
-          if (!isJobBoardOrAtsDomain(host)) {
+          if (!isJobBoardOrAtsDomain(host, cleanName) && isDomainLexicallyMatchingCompany(cleanName, host)) {
             const mx = await checkMxRecords(host);
             if (mx.valid) return finalizeDomain(host);
           }
@@ -179,7 +241,7 @@ async function resolveCompanyDomain(company, applyLink = null) {
     }
   }
 
-  // 5. Candidate domain generation with legal suffix stripping - strictly require MX validation
+  // 6. Candidate domain generation with legal suffix stripping - strictly require MX validation
   const compactName = cleanName.toLowerCase().replace(/[^a-z0-9]/g, '');
   const fullCompact = rawComp.toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -193,7 +255,7 @@ async function resolveCompanyDomain(company, applyLink = null) {
   ].filter(Boolean);
 
   for (const dom of candidates) {
-    if (!isJobBoardOrAtsDomain(dom)) {
+    if (!isJobBoardOrAtsDomain(dom, cleanName) && isDomainLexicallyMatchingCompany(cleanName, dom)) {
       const mx = await checkMxRecords(dom);
       if (mx.valid) return finalizeDomain(dom);
     }
@@ -301,19 +363,31 @@ async function sendEmailViaAPI(user, mailOptions, sendOptions = {}) {
   }
 
   /**
-   * Helper: Dispatches email via Gmail SMTP with strict IPv4 enforcement (family: 4).
-   * This completely avoids ENETUNREACH 2607:f8b0:400e:... errors on networks without outbound IPv6 routing.
+   * Helper: Dispatches email via Gmail SMTP with strict direct IPv4 resolution.
+   * This completely bypasses nodemailer's internal random IPv6 DNS selection which triggers ENETUNREACH / timeouts.
    * Seamlessly tries Port 465 (SSL) first, and falls back to Port 587 (STARTTLS) if port 465 fails.
    */
   async function sendViaGmailSmtp(credentials, mailOpts) {
     const cleanPass = (credentials.pass || '').replace(/\s+/g, '');
+
+    // Resolve Gmail SMTP server IPv4 directly to bypass nodemailer's internal random IPv6 selector
+    let smtpHost = 'smtp.gmail.com';
+    try {
+      const lookupRes = await dns.promises.lookup('smtp.gmail.com', { family: 4 });
+      if (lookupRes && lookupRes.address) {
+        smtpHost = lookupRes.address;
+      }
+    } catch (e) {
+      console.warn('DNS lookup for smtp.gmail.com IPv4 failed, using default hostname:', e.message);
+    }
+
     try {
       const transporter465 = nodemailer.createTransport({
-        host: 'smtp.gmail.com',
+        host: smtpHost,
         port: 465,
         secure: true,
-        family: 4, // Strict IPv4: prevents IPv6 ENETUNREACH
         auth: { user: credentials.user, pass: cleanPass },
+        tls: { servername: 'smtp.gmail.com' },
         connectionTimeout: 10000,
         greetingTimeout: 10000,
         socketTimeout: 15000
@@ -322,11 +396,11 @@ async function sendEmailViaAPI(user, mailOptions, sendOptions = {}) {
     } catch (err465) {
       console.warn(`⚠️ [SMTP SSL Port 465] Dispatch failed (${err465.message}). Retrying on Port 587 (STARTTLS)...`);
       const transporter587 = nodemailer.createTransport({
-        host: 'smtp.gmail.com',
+        host: smtpHost,
         port: 587,
         secure: false,
-        family: 4, // Strict IPv4: prevents IPv6 ENETUNREACH
         auth: { user: credentials.user, pass: cleanPass },
+        tls: { servername: 'smtp.gmail.com' },
         connectionTimeout: 10000,
         greetingTimeout: 10000,
         socketTimeout: 15000
@@ -918,7 +992,9 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
   const learnedMemory = await getLearnedMemory(company);
   if (learnedMemory) {
     if (learnedMemory.verifiedDomain && (!cleanDomain || cleanDomain.includes('unknown') || isJobBoardOrAtsDomain(cleanDomain))) {
-      cleanDomain = learnedMemory.verifiedDomain;
+      if (isDomainLexicallyMatchingCompany(company, learnedMemory.verifiedDomain) && !isJobBoardOrAtsDomain(learnedMemory.verifiedDomain, company)) {
+        cleanDomain = learnedMemory.verifiedDomain;
+      }
     }
     // If domain is already known dead, abort early
     if (learnedMemory.deadDomains && learnedMemory.deadDomains.includes(cleanDomain)) {
@@ -984,7 +1060,8 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
       const isDomainMatch = candidateDomain === cleanDomain ||
         candidateDomain.endsWith('.' + cleanDomain) ||
         cleanDomain.endsWith('.' + candidateDomain) ||
-        (cleanRoot.length >= 3 && candidateRoot.includes(cleanRoot));
+        (cleanRoot.length >= 4 && candidateRoot.includes(cleanRoot)) ||
+        isDomainLexicallyMatchingCompany(company, candidateDomain);
       
       const isPersonalMail = ['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com'].includes(candidateDomain);
       if (isPersonalMail) {
@@ -997,6 +1074,23 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
       } else if (!isDomainMatch) {
         console.log(`[Email Rejected] Domain mismatch for "${cleanCand}" (expected "${cleanDomain}", got "${candidateDomain}")`);
         return false;
+      }
+    }
+
+    // Strict Recruiter / Employee Name Match:
+    // When testing an individual recruiter mailbox (not department mailboxes like careers@, hr@, etc.),
+    // ensure the mailbox name contains tokens of the target recruiter.
+    const localPart = cleanCand.split('@')[0].replace(/[^a-z0-9]/g, '');
+    const isDeptInbox = /^(careers|hr|talent|recruitment|recruiting|jobs|people|sourcing|hiring|work|info|contact|office|admin|enquiry|support|team|developer|engineering)$/i.test(cleanCand.split('@')[0]);
+
+    if (!isDeptInbox && hrName && !isGenericOrgName && inboxType === 'recruiter') {
+      const nameTokens = hrName.toLowerCase().replace(/[^a-z0-9 ]/g, '').split(/\s+/).filter(t => t.length >= 3);
+      if (nameTokens.length > 0) {
+        const matchesRecruiter = nameTokens.some(tok => localPart.includes(tok));
+        if (!matchesRecruiter) {
+          console.log(`[Email Rejected] Candidate employee mailbox "${cleanCand}" does not match assigned recruiter "${hrName}"`);
+          return false;
+        }
       }
     }
 

@@ -574,7 +574,17 @@ router.post('/send-email', requireAuth, async (req, res) => {
     });
   } catch (error) {
     console.error('Error sending email:', error);
-    res.status(500).json({ error: error.message || 'Failed to send email. Check credentials.' });
+    let readableError = error.message || 'Failed to send email. Check credentials.';
+    if (/ENETUNREACH|ETIMEDOUT|Connection timeout|timeout/i.test(readableError)) {
+      readableError = 'Connection timeout: Email server could not be reached. Check network connection or retry.';
+    } else if (/535-5.7.8|Invalid login|Username and Password not accepted/i.test(readableError)) {
+      readableError = 'Authentication failed: Google rejected the App Password. Check the 16-character Gmail App Password in your Profile.';
+    } else if (/Greeting timeout/i.test(readableError)) {
+      readableError = 'Server timeout: Gmail did not respond in time. Please try again.';
+    } else if (/No valid Gmail API token, user App Password/i.test(readableError)) {
+      readableError = 'Missing credentials: Save your Gmail App Password in your Profile to send emails.';
+    }
+    res.status(500).json({ error: readableError });
   }
 });
 
