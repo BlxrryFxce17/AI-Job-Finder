@@ -440,7 +440,7 @@ ${hrName ? `Hi ${hrName.split(' ')[0]},` : (isHrTarget ? `Hi ${targetCompany} Re
     res.json({ draft: draftText, company: extractedCompany, role: extractedRole, subject: extractedSubject });
   } catch (error) {
     console.error('Error generating email:', error);
-    res.status(500).json({ error: 'Failed to generate email' });
+    res.status(500).json({ error: error.message || 'Failed to generate email' });
   }
 });
 

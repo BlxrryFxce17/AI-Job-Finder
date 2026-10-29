@@ -55,17 +55,12 @@ async function getBestGroqModel() {
     const list = await groq.models.list();
     const models = list.data.map(m => m.id);
     const preferences = [
-      'llama-3.3-70b-versatile',
-      'llama-3.1-70b-versatile',
       'qwen/qwen3.8-27b',
-      'qwen-2.5-32b-it',
       'openai/gpt-oss-120b',
       'openai/gpt-oss-20b',
-      'canopylabs/orpheus-v1-english',
-      'llama-3.2-90b-text-preview',
-      'mixtral-8x7b-32768',
+      'llama-3.3-70b-versatile',
       'llama-3.1-8b-instant',
-      'llama3-70b-8192'
+      'allam-2-7b'
     ];
     for (const pref of preferences) {
       if (models.includes(pref)) {
@@ -74,7 +69,7 @@ async function getBestGroqModel() {
         return pref;
       }
     }
-    const textModels = models.filter(m => !m.includes('whisper') && !m.includes('vision'));
+    const textModels = models.filter(m => !m.includes('whisper') && !m.includes('vision') && !m.includes('guard'));
     if (textModels.length > 0) {
       cachedGroqModel = textModels[0];
       lastGroqFetch = Date.now();
@@ -83,7 +78,7 @@ async function getBestGroqModel() {
   } catch (err) {
     console.warn("[Groq] Failed to fetch models list dynamically:", err.message);
   }
-  return 'llama-3.3-70b-versatile';
+  return 'qwen/qwen3.8-27b';
 }
 
 let cachedGeminiModel = null;
@@ -93,71 +88,71 @@ async function getBestGeminiModel() {
   if (cachedGeminiModel && Date.now() - lastGeminiFetch < 1000 * 60 * 60 * 24) {
     return cachedGeminiModel;
   }
-  // Google's core endpoints are very stable, flash is always reliable, but we can verify dynamically if needed.
-  // For now, we will stick to known reliable models that do not break easily to avoid overhead,
-  // but let's implement dynamic discovery for Gemini too.
-  try {
-    // Note: Gemini SDK for node might not expose a simple listModels without rest API, but we'll try a fallback check
-    // Actually, gemini-2.5-flash is stable and rolling.
-    cachedGeminiModel = 'gemini-2.5-flash';
-    lastGeminiFetch = Date.now();
-    return cachedGeminiModel;
-  } catch(e) {
-    return 'gemini-2.5-flash';
-  }
+  cachedGeminiModel = 'gemini-2.5-flash';
+  lastGeminiFetch = Date.now();
+  return cachedGeminiModel;
 }
 
-
-const callAIWithRetry = async (prompt, retries = 5, delayMs = 3000, options = {}) => {
+const callAIWithRetry = async (prompt, retries = 3, delayMs = 2000, options = {}) => {
   const action = options.action || 'Cold Email Generation';
   const userId = options.userId || null;
-  const GROQ_MODEL = process.env.GROQ_MODEL || await getBestGroqModel();
+  const bestGroq = await getBestGroqModel();
   const GEMINI_MODEL = process.env.GEMINI_MODEL || await getBestGeminiModel();
 
+  const groqModelsToTry = [...new Set([
+    process.env.GROQ_MODEL,
+    bestGroq,
+    'qwen/qwen3.8-27b',
+    'openai/gpt-oss-120b',
+    'openai/gpt-oss-20b'
+  ].filter(Boolean))];
+
   for (let i = 0; i < retries; i++) {
-    try {
-      console.log(`[AI] Attempt ${i + 1}/${retries}: Trying Groq (${GROQ_MODEL})...`);
-      const completion = await groq.chat.completions.create({
-        messages: [{ role: 'user', content: prompt }],
-        model: GROQ_MODEL,
-        max_tokens: 2000,
-        temperature: 0.7
-      });
+    // 1. Try available Groq models in sequence
+    let groqSuccess = null;
+    for (const modelId of groqModelsToTry) {
+      try {
+        console.log(`[AI] Attempt ${i + 1}/${retries}: Trying Groq (${modelId})...`);
+        const completion = await groq.chat.completions.create({
+          messages: [{ role: 'user', content: prompt }],
+          model: modelId,
+          max_tokens: 2000,
+          temperature: 0.7
+        });
 
-      const pTokens = completion.usage?.prompt_tokens || Math.round(prompt.length / 4);
-      const cTokens = completion.usage?.completion_tokens || Math.round((completion.choices[0]?.message?.content || '').length / 4);
-      const tTokens = completion.usage?.total_tokens || (pTokens + cTokens);
+        const pTokens = completion.usage?.prompt_tokens || Math.round(prompt.length / 4);
+        const cTokens = completion.usage?.completion_tokens || Math.round((completion.choices[0]?.message?.content || '').length / 4);
+        const tTokens = completion.usage?.total_tokens || (pTokens + cTokens);
 
-      recordApiUsage({
-        userId,
-        service: 'Groq',
-        action,
-        model: GROQ_MODEL,
-        promptTokens: pTokens,
-        completionTokens: cTokens,
-        totalTokens: tTokens,
-        creditsUsed: 1,
-        status: 'success'
-      });
+        recordApiUsage({
+          userId,
+          service: 'Groq',
+          action,
+          model: modelId,
+          promptTokens: pTokens,
+          completionTokens: cTokens,
+          totalTokens: tTokens,
+          creditsUsed: 1,
+          status: 'success'
+        });
 
-      const textOutput = completion.choices[0]?.message?.content || '';
-      if (textOutput.trim().startsWith('Error:')) {
-        throw new Error(textOutput.trim());
+        const textOutput = completion.choices[0]?.message?.content || '';
+        if (textOutput.trim().startsWith('Error:')) {
+          throw new Error(textOutput.trim());
+        }
+
+        groqSuccess = { text: textOutput };
+        break;
+      } catch (err) {
+        console.warn(`[Groq ${modelId}] Failed (${err.message}). Trying next...`);
       }
+    }
 
-      return { text: textOutput };
-    } catch (groqErr) {
-      console.warn(`[Groq API] Failed:`, groqErr.message || groqErr);
-      recordApiUsage({
-        userId,
-        service: 'Groq',
-        action,
-        model: GROQ_MODEL,
-        status: 'failed',
-        meta: { error: groqErr.message }
-      });
+    if (groqSuccess) {
+      return groqSuccess;
+    }
 
-      console.log(`[AI] Attempt ${i + 1}/${retries}: Falling back to Gemini...`);
+    console.log(`[AI] Attempt ${i + 1}/${retries}: All Groq models failed. Falling back to Gemini...`);
       try {
         const response = await gemini.models.generateContent({
           model: GEMINI_MODEL,
@@ -207,7 +202,6 @@ const callAIWithRetry = async (prompt, retries = 5, delayMs = 3000, options = {}
         } else {
           throw new Error(`All AI engines failed after ${retries} attempts.`);
         }
-      }
     }
   }
 };

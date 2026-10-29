@@ -528,7 +528,7 @@ export function useAppLogic() {
                setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] 🛑 Send blocked: ${simplifySendError(sendData.error)}`] }));
             }
           } else {
-            setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] ⚠️ Draft generation yielded empty output.`] }));
+            setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] ⚠️ Draft generation failed: ${genData?.error || 'Empty output from AI engine'}`] }));
           }
         } else {
           setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] ⏩ Skipped (No verified mailbox found. Apply via official link or LinkedIn to avoid bouncing)`] }));
