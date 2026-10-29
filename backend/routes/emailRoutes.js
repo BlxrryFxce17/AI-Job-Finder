@@ -471,8 +471,15 @@ router.post('/send-email', requireAuth, async (req, res) => {
       targetRecipients = [{ email: job.emailRecipient.trim(), hrName: job?.hrName || '' }];
     }
 
+    // Filter out blacklisted third-party registries or event domains that may have been previously cached
+    targetRecipients = targetRecipients.filter(rec => {
+      const email = (typeof rec === 'string' ? rec : rec.email || '').toLowerCase().trim();
+      const domain = email.split('@')[1] || '';
+      return !/^(instafinancials\.com|chicagomarathon\.com|nytimes\.com|rocketreach\.co)$/i.test(domain);
+    });
+
     if (targetRecipients.length === 0) {
-      return res.status(400).json({ error: 'No recipient email specified' });
+      return res.status(400).json({ error: 'No verified company mailbox found. Mismatched third-party domains were rejected.' });
     }
 
     const sentResults = [];
@@ -576,7 +583,7 @@ router.post('/send-email', requireAuth, async (req, res) => {
     console.error('Error sending email:', error);
     let readableError = error.message || 'Failed to send email. Check credentials.';
     if (/ENETUNREACH|ETIMEDOUT|Connection timeout|timeout/i.test(readableError)) {
-      readableError = 'Connection timeout: Email server could not be reached. Check network connection or retry.';
+      readableError = 'Connection timeout: Email server could not be reached. Cloud hosts (like Render Free tier) block outbound SMTP ports (465/587). Please connect your Gmail account via OAuth to send via Gmail API over HTTPS (Port 443), or run locally.';
     } else if (/535-5.7.8|Invalid login|Username and Password not accepted/i.test(readableError)) {
       readableError = 'Authentication failed: Google rejected the App Password. Check the 16-character Gmail App Password in your Profile.';
     } else if (/Greeting timeout/i.test(readableError)) {

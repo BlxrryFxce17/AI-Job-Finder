@@ -48,7 +48,7 @@ export const simplifySendError = (errorStr) => {
   if (!errorStr) return 'High bounce risk detected';
   const str = String(errorStr);
   if (/ENETUNREACH|ETIMEDOUT|Connection timeout|timeout/i.test(str)) {
-    return 'Connection timeout: Email server could not be reached. Check network connection or retry.';
+    return 'Connection timeout: Email server could not be reached. Cloud hosts (like Render Free Tier) block outbound SMTP ports (465/587). Please connect your Gmail account via OAuth to send via Gmail API over HTTPS (Port 443), or run locally.';
   }
   if (/535-5.7.8|Invalid login|Username and Password not accepted/i.test(str)) {
     return 'Authentication failed: Google rejected the App Password. Check the 16-character Gmail App Password in your Profile.';
@@ -398,6 +398,14 @@ export function useAppLogic() {
         let currentHrName = job.hrName || null;
 
         let targetRecipients = (job.allRecipients && job.allRecipients.length > 0) ? job.allRecipients : [];
+
+        // Invalidate mismatched or blacklisted registry domains previously cached in job state
+        const firstDomain = (targetRecipients[0]?.email || discoveredEmail || '').split('@')[1]?.toLowerCase() || '';
+        const isCorruptDomain = /^(instafinancials\.com|chicagomarathon\.com|nytimes\.com|rocketreach\.co)$/i.test(firstDomain);
+        if (isCorruptDomain) {
+          discoveredEmail = '';
+          targetRecipients = [];
+        }
 
         if (!discoveredEmail || targetRecipients.length === 0) {
           setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Running multi-layer email discovery & mailbox verification...`] }));

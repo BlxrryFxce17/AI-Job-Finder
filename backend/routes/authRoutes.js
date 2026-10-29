@@ -36,9 +36,11 @@ router.get('/google', (req, res) => {
     scope: [
       'openid',
       'https://www.googleapis.com/auth/userinfo.email',
-      'https://www.googleapis.com/auth/userinfo.profile'
+      'https://www.googleapis.com/auth/userinfo.profile',
+      'https://www.googleapis.com/auth/gmail.send',
+      'https://www.googleapis.com/auth/gmail.readonly'
     ],
-    prompt: 'select_account'
+    prompt: 'consent select_account'
   });
   res.redirect(url);
 });
