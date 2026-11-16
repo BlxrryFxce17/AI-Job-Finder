@@ -7,101 +7,13 @@ const Job = require('../models/Job');
 const User = require('../models/User');
 const { getBestGroqModel, getBestGeminiModel } = require('../utils/ai');
 
-// Auth middleware helper: permissive so telemetry always loads reliably
-const optionalAuth = (req, res, next) => {
-  const token = req.headers.authorization?.split(' ')[1];
-  if (token) {
-    try {
-      req.user = jwt.verify(token, process.env.JWT_SECRET || 'your_jwt_secret');
-    } catch (err) {
-      // Fallback to global telemetry
-    }
-  }
-  next();
-};
-
-// Seed historical baseline if empty so charts are immediately populated
-async function ensureHistoricalSeed(userId) {
-  try {
-    const count = await ApiUsage.countDocuments();
-    if (count > 0) return;
-
-    const jobs = await Job.find({ isDeleted: { $ne: true } }).lean();
-    if (!jobs || jobs.length === 0) return;
-
-    const seedEntries = [];
-    const now = Date.now();
-    const DAY_MS = 24 * 60 * 60 * 1000;
-
-    // Distribute seed across last 6 days
-    for (let i = 0; i < jobs.length; i++) {
-      const j = jobs[i];
-      const daysAgo = (i % 6);
-      const createdAt = new Date(now - daysAgo * DAY_MS - (i * 15 * 60 * 1000));
-
-      if (j.status === 'HR_Found') {
-        seedEntries.push({
-          userId: j.userId || userId,
-          service: 'Tavily',
-          action: 'HR Discovery',
-          creditsUsed: 1,
-          status: 'success',
-          createdAt
-        });
-        seedEntries.push({
-          userId: j.userId || userId,
-          service: 'Groq',
-          action: 'HR Discovery',
-          model: 'qwen/qwen3.8-27b',
-          promptTokens: 420,
-          completionTokens: 180,
-          totalTokens: 600,
-          creditsUsed: 1,
-          status: 'success',
-          createdAt
-        });
-      }
-
-      if (j.emailDraft) {
-        seedEntries.push({
-          userId: j.userId || userId,
-          service: 'Groq',
-          action: 'Cold Email Drafter',
-          model: 'qwen/qwen3.8-27b',
-          promptTokens: 550,
-          completionTokens: 260,
-          totalTokens: 810,
-          creditsUsed: 1,
-          status: 'success',
-          createdAt
-        });
-      }
-
-      if (j.status === 'Found') {
-        seedEntries.push({
-          userId: j.userId || userId,
-          service: 'Adzuna',
-          action: 'Job Search',
-          creditsUsed: 1,
-          status: 'success',
-          createdAt
-        });
-      }
-    }
-
-    if (seedEntries.length > 0) {
-      await ApiUsage.insertMany(seedEntries.slice(0, 300));
-      console.log(`[ApiUsage] Initialized ${Math.min(seedEntries.length, 300)} baseline usage records.`);
-    }
-  } catch (err) {
-    console.warn('[ApiUsage] Seed check failed:', err.message);
-  }
-}
+const requireAuth = require('../middleware/requireAuth');
+const mongoose = require('mongoose');
 
 // GET /api/ai/usage - Fetch live usage, provider limits, and 7-day chart series
-router.get('/usage', optionalAuth, async (req, res) => {
+router.get('/usage', requireAuth, async (req, res) => {
   try {
-    await ensureHistoricalSeed(req.user?.id || null);
+    const userId = new mongoose.Types.ObjectId(req.user.id);
 
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -143,7 +55,7 @@ router.get('/usage', optionalAuth, async (req, res) => {
 
     // 2. Aggregate Today and 30-Day Totals by Service
     const todayAgg = await ApiUsage.aggregate([
-      { $match: { createdAt: { $gte: startOfToday } } },
+      { $match: { userId, createdAt: { $gte: startOfToday } } },
       {
         $group: {
           _id: '$service',
@@ -155,7 +67,7 @@ router.get('/usage', optionalAuth, async (req, res) => {
     ]);
 
     const thirtyDayAgg = await ApiUsage.aggregate([
-      { $match: { createdAt: { $gte: thirtyDaysAgo } } },
+      { $match: { userId, createdAt: { $gte: thirtyDaysAgo } } },
       {
         $group: {
           _id: '$service',
@@ -244,7 +156,7 @@ router.get('/usage', optionalAuth, async (req, res) => {
 
     // 4. Last 7 Days Timeline Data for Smart Chart
     const dailyRaw = await ApiUsage.aggregate([
-      { $match: { createdAt: { $gte: sevenDaysAgo } } },
+      { $match: { userId, createdAt: { $gte: sevenDaysAgo } } },
       {
         $group: {
           _id: {
@@ -299,7 +211,7 @@ router.get('/usage', optionalAuth, async (req, res) => {
 
     // 5. Breakdown by Action Category
     const actionAgg = await ApiUsage.aggregate([
-      { $match: { createdAt: { $gte: thirtyDaysAgo } } },
+      { $match: { userId, createdAt: { $gte: thirtyDaysAgo } } },
       {
         $group: {
           _id: '$action',
@@ -315,7 +227,7 @@ router.get('/usage', optionalAuth, async (req, res) => {
       tokens: a.tokens
     })).sort((a, b) => b.count - a.count);
 
-    const recentLogs = await ApiUsage.find()
+    const recentLogs = await ApiUsage.find({ userId })
       .sort({ createdAt: -1 })
       .limit(8)
       .lean();

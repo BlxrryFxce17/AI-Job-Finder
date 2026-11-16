@@ -826,20 +826,11 @@ ${intentGuidance ? intentGuidance + '\n\n' : ''}CRITICAL RULES — READ CAREFULL
       // TIER 2 & 3: Fallback using user-configured or dynamically retrieved keys from storage
       let storageData = await new Promise(r => chrome.storage.local.get(['ai_copilot_api_keys', 'groq_api_key', 'gemini_api_key'], r));
       let apiKeys = storageData.ai_copilot_api_keys || {};
-      let groqKey = storageData.groq_api_key || apiKeys.groqKey || '';
-      let geminiKey = storageData.gemini_api_key || apiKeys.geminiKey || '';
+      let groqKey = storageData.groq_api_key || '';
+      let geminiKey = storageData.gemini_api_key || '';
 
-      // Auto-fetch keys dynamically from local backend if not yet in storage
-      if (!groqKey && !geminiKey) {
-        try {
-          const configRes = await apiFetch('/api/extension/ai-config', { method: 'GET' }, apiBase);
-          if (configRes?.success) {
-            groqKey = configRes.groqKey || '';
-            geminiKey = configRes.geminiKey || '';
-            await new Promise(r => chrome.storage.local.set({ ai_copilot_api_keys: { groqKey, geminiKey } }, r));
-          }
-        } catch (_) { }
-      }
+      // Server credentials are never downloaded or used by the extension.
+      await new Promise(resolve => chrome.storage.local.remove('ai_copilot_api_keys', resolve));
 
       // TIER 2: Direct Groq API (fast, free, high quality)
       if (groqKey) {

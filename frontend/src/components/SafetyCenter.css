@@ -1,0 +1,34 @@
+/* Give this long page a bounded scroll region inside both fixed-height app shells. */
+.safety-page-scroll { flex: 1 1 0%; min-height: 0; min-width: 0; width: 100%; overflow-y: auto; overflow-x: hidden; overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch; }
+.mobile-content-area.safety-content-area { display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding-bottom: calc(70px + env(safe-area-inset-bottom, 0px)); }
+.safety-page-scroll > .safety { min-height: min-content; }
+.safety { color: var(--text-1, #e5e7eb); font: inherit; max-width: 1100px; margin: 24px auto; padding: 24px; width: 100%; box-sizing: border-box; }
+.safety * { box-sizing: border-box; }
+.safety h2, .safety h3, .safety p { margin: 0 0 12px; }
+.safety h2 { font-size: 26px; letter-spacing: -.5px; }
+.safety p, .safety small { color: var(--text-2, #a5adbc); line-height: 1.6; }
+.safety-eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: 1.4px; }
+.safety-heading, .safety-actions { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.safety-actions { justify-content: flex-start; margin: 12px 0; }
+.safety-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 12px; margin: 20px 0; }
+.safety-card, .safety section { background: var(--surface-2, #141b29); border: 1px solid var(--border, #30394a); border-radius: 12px; padding: 18px; }
+.safety section { margin-bottom: 18px; }
+.safety-card strong { display: block; font-size: 30px; font-variant-numeric: tabular-nums; }
+.safety-card span { font-size: 12px; color: var(--text-2, #a5adbc); }
+.safety label { display: flex; flex-direction: column; gap: 7px; font-size: 13px; margin-bottom: 14px; }
+.safety input, .safety textarea, .safety select { background: var(--surface-1, #0c1220); color: inherit; border: 1px solid var(--border, #30394a); padding: 10px 12px; border-radius: 7px; font: inherit; width: 100%; }
+.safety textarea { resize: vertical; line-height: 1.6; }
+.safety button { background: var(--surface-2, #1e293b); color: inherit; border: 1px solid var(--border, #475569); border-radius: 7px; padding: 10px 14px; cursor: pointer; font: inherit; font-size: 13px; }
+.safety button:disabled { opacity: .5; cursor: not-allowed; }
+.safety button.safety-primary { background: #4f46e5; border-color: #6366f1; color: white; }
+.safety button.safety-danger { background: #991b1b; border-color: #dc2626; color: white; }
+.safety :focus-visible { outline: 2px solid #818cf8; outline-offset: 3px; }
+.safety .safety-check { flex-direction: row; align-items: center; line-height: 1.5; }
+.safety-check input { width: auto; }
+.safety-notice { background: var(--surface-2, #202438); border-left: 3px solid #eab308; padding: 12px 12px 12px 30px; line-height: 1.6; font-size: 13px; }
+.safety-error { color: #f87171 !important; }
+.safety-table { overflow-x: auto; }
+.safety table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
+.safety th, .safety td { padding: 12px 8px; border-bottom: 1px solid var(--border, #30394a); vertical-align: top; }
+.safety td small { display: block; max-width: 340px; overflow-wrap: anywhere; }
+@media (max-width: 600px) { .safety { padding: 14px; margin: 10px auto; } .safety h2 { font-size: 22px; } }

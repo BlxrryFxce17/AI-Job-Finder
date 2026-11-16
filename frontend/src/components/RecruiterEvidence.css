@@ -1,0 +1,11 @@
+.recruiter-email-row { min-width: 0; width: 100%; box-sizing: border-box; }
+.recruiter-email-row > span, .recruiter-email-row > div { min-width: 0; flex: 1; }
+.recruiter-email-row > button { flex-shrink: 0; white-space: nowrap; }
+.recruiter-email-row input { min-width: 0; }
+.recruiter-evidence { width: 100%; min-width: 0; box-sizing: border-box; border-top: 1px solid var(--border); padding-top: 8px; color: var(--text-2); font-size: 11px; line-height: 1.6; white-space: normal; overflow-wrap: anywhere; }
+.recruiter-evidence .hr-state-line { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-bottom: 5px; }
+.recruiter-evidence .hr-state { display: inline-block; padding: 2px 7px; border-radius: 4px; background: var(--surface-3); }
+.recruiter-evidence summary { cursor: pointer; }
+.recruiter-evidence form, .recruiter-evidence label { min-width: 0; }
+.recruiter-evidence label { display: grid; gap: 4px; }
+.recruiter-evidence .btn { max-width: 100%; white-space: normal; }

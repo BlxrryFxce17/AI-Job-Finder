@@ -1,6 +1,8 @@
+const { resumeLink, trackingLink } = require('../utils/signedLinks');
 const express = require('express');
 const router = express.Router();
 const Job = require('../models/Job');
+const mongoose = require('mongoose');
 const User = require('../models/User');
 const Profile = require('../models/Profile');
 const requireAuth = require('../middleware/requireAuth');
@@ -38,20 +40,28 @@ async function getProfile(userId) {
 router.post('/send-followup', requireAuth, async (req, res) => {
   const { jobId, day } = req.body;
   try {
-    const job = await Job.findOne({ userId: req.user.id, id: jobId });
+    const job = await Job.findOne({ userId: req.user.id, isDeleted: { $ne: true }, $or: [{ id: jobId }, ...(mongoose.isObjectIdOrHexString(jobId) ? [{ _id: jobId }] : [])] });
     if (!job) return res.status(404).json({ error: 'Job not found' });
 
     const followUp = job.followUps.find(f => f.day === day);
     if (!followUp) return res.status(404).json({ error: 'Follow up not found' });
 
+    if (followUp.sent) return res.status(409).json({ error: 'Follow-up already sent' });
+    if (!['Sent', 'Opened'].includes(job.status)) return res.status(409).json({ error: 'This application is no longer eligible for follow-ups' });
+
     const user = await User.findById(req.user.id);
     const profile = await getProfile(req.user.id);
 
+    if (user.googleRefreshToken && await checkGmailForReply(user, job.emailRecipient)) {
+      job.status = 'Replied'; await job.save();
+      return res.status(409).json({ error: 'The recruiter has replied. Follow-up stopped.' });
+    }
+    if (typeof req.body.draft === 'string' && req.body.draft.trim()) followUp.draft = req.body.draft.trim();
     const baseUrl = process.env.PUBLIC_URL;
-    const trackClick = (url) => (baseUrl && url) ? `${baseUrl}/api/track-click/${job.id}?url=${encodeURIComponent(url)}` : (url || '');
-    const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${job.id}" width="1" height="1" style="display:none;" />` : '';
+    const trackClick = (url) => trackingLink(baseUrl, req.user.id, job.id, url);
+    const trackingPixel = baseUrl ? `<img src="${trackingLink(baseUrl, req.user.id, job.id)}" width="1" height="1" style="display:none;" />` : '';
 
-    const resumeLinkUrl = baseUrl ? trackClick(`${baseUrl}/api/profile/resume-pdf?userId=${user._id}`) : null;
+    const resumeLinkUrl = resumeLink(baseUrl, req.user.id);
     const cleanBody = stripSignOff(cleanDraftEmailText(followUp.draft, profile, job.company, job.role), profile);
     const formattedDraft = formatEmailTextToHtml(cleanBody, resumeLinkUrl);
     const linksHtml = buildSignatureLinks(profile, trackClick);
@@ -73,20 +83,25 @@ router.post('/send-followup', requireAuth, async (req, res) => {
     const plainTextSignature = buildPlainTextSignature(profile);
     const fullPlainText = `${cleanBody}\n\n${plainTextSignature}`;
 
-    if ((!job.matchedThreadId || !job.rfcMessageId) && user.googleRefreshToken) {
+    if ((!job.matchedThreadId || !/^<[^<>\s]+@[^<>\s]+>$/.test(job.rfcMessageId || '')) && user.googleRefreshToken) {
       try {
         const threadInfo = await findThreadForRecipient(user, job.emailRecipient, { role: job.role, company: job.company });
         if (threadInfo) {
           if (!job.matchedThreadId && threadInfo.threadId) job.matchedThreadId = threadInfo.threadId;
-          if (!job.rfcMessageId && threadInfo.rfcMessageId) job.rfcMessageId = threadInfo.rfcMessageId;
+          if (threadInfo.rfcMessageId) job.rfcMessageId = threadInfo.rfcMessageId;
+                  if (threadInfo.subject) job.emailSubject = threadInfo.subject;
         }
       } catch (_) {}
+    }
+
+    if (!job.matchedThreadId || !/^<[^<>\s]+@[^<>\s]+>$/.test(job.rfcMessageId || '')) {
+      return res.status(409).json({ error: 'Original email thread could not be recovered. Follow-up was not sent.' });
     }
 
     const mailOptions = {
       from: `"${profile.name}" <${user.email || process.env.EMAIL_USER}>`,
       to: job.emailRecipient,
-      subject: `Re: Application for ${job.role} - ${profile.name}`,
+      subject: `Re: ${job.emailSubject || `Application for ${job.role} - ${profile.name}`}`,
       text: fullPlainText,
       html: htmlBody,
       attachments: [],
@@ -99,7 +114,7 @@ router.post('/send-followup', requireAuth, async (req, res) => {
       mailOptions.attachments.push({ filename: profile.resumeFilename || 'resume.pdf', content: profile.resumePdf });
     }
 
-    await sendEmailViaAPI(user, mailOptions);
+    await sendEmailViaAPI(user, mailOptions, { jobId: job.id, kind: 'followup', idempotencyKey: `followup:${job._id}:${day}` });
 
     followUp.sent = true;
     await job.save();
@@ -133,7 +148,7 @@ router.post('/check-followups', requireAuth, async (req, res) => {
       if (!job.emailRecipient) continue;
 
       const daysSinceSent = Math.floor((Date.now() - new Date(job.sentAt || job.createdAt).getTime()) / (1000 * 60 * 60 * 24));
-      const targetDay = daysSinceSent >= 6 ? 6 : daysSinceSent >= 3 ? 3 : 0;
+      const targetDay = require('../utils/safetyControls').controlsFor(user).followUpDays.filter(day => daysSinceSent >= day).at(-1) || 0;
 
       if (targetDay === 0) continue;
 

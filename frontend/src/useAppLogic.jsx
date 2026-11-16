@@ -9,11 +9,12 @@ export const NAV = [
   { id: 'applied', label: 'Applied Jobs', icon: <MailCheck size={20} /> },
   { id: 'followups', label: 'Follow Ups', icon: <RotateCw size={20} /> },
   { id: 'inbox', label: 'Smart Inbox', icon: <Inbox size={20} /> },
+  { id: 'safety', label: 'Safety & activity', icon: <BarChart3 size={20} /> },
   { id: 'resume', label: 'Profile Settings', icon: <User size={20} /> },
   { id: 'ai_settings', label: 'AI Settings', icon: <Settings size={20} /> },
 ];
 
-export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+export const API_BASE = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE || 'http://localhost:5000';
 
 // Senior role detection helpers
 export const isSeniorJob = (role = '', jd = '') => {
@@ -169,6 +170,8 @@ export function useAppLogic() {
 
   const [fetching, setFetching] = useState(false);
   const [fetchingHR, setFetchingHR] = useState(false);
+  const [hrSearchMode, setHrSearchMode] = useState('role');
+  const [hrSearchReport, setHrSearchReport] = useState(null);
   const fetchAbortRef = useRef(null);
   const hrAbortRef = useRef(null);
   const [useApify, setUseApify] = useState(false);
@@ -179,7 +182,7 @@ export function useAppLogic() {
   const [testingEmail, setTestingEmail] = useState(false);
   const [selectedMail, setSelectedMail] = useState(null);
   const [selectedJobDetails, setSelectedJobDetails] = useState(null);
-  
+
   // Profile State
   const [profile, setProfile] = useState({ name: 'Loading...', title: '', phone: '', linkedin: '', github: '', portfolio: '', resumeUrl: '', projectUrl: '', resumeFilename: '', emailUser: '' });
   const [originalProfile, setOriginalProfile] = useState(null);
@@ -200,7 +203,7 @@ export function useAppLogic() {
     const origInst = (originalProfile.aiInstructions || '').trim();
     return currFlex !== origFlex || currInst !== origInst;
   }, [profile, originalProfile]);
-  
+
   // Batch Selection
   const [selectedJobs, setSelectedJobs] = useState([]);
   const [batchProgress, setBatchProgress] = useState(null);
@@ -240,6 +243,7 @@ export function useAppLogic() {
     localStorage.removeItem('token');
     setToken(null);
     setJobs([]);
+    setHrSearchReport(null);
     setProfile({ name: 'Loading...', title: '', phone: '', linkedin: '', github: '', portfolio: '', resumeFilename: '', emailUser: '' });
     setOriginalProfile(null);
   };
@@ -291,6 +295,7 @@ export function useAppLogic() {
     try {
       const r = await apiFetch(`${API_BASE}/api/profile`);
       const p = await r.json();
+      if (!r.ok) throw new Error(p.error || 'Profile request failed');
       setProfile(p);
       setOriginalProfile(p);
       if (p.experienceLevel && isJuniorQuery(p.experienceLevel)) {
@@ -299,11 +304,11 @@ export function useAppLogic() {
     } catch (err) { }
   };
 
-  useEffect(() => { 
+  useEffect(() => {
     if (token) {
-      loadJobs(); 
+      loadJobs();
       loadProfile();
-      
+
       // Auto-refresh jobs every 5 seconds for real-time tracking updates
       const trackingInterval = setInterval(loadJobs, 5000);
       return () => clearInterval(trackingInterval);
@@ -350,8 +355,9 @@ export function useAppLogic() {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
+      if (!r.ok) throw new Error('Status update failed');
       const updatedJob = await r.json();
-      setJobs(p => p.map(j => j.id === id ? updatedJob : j));
+      setJobs(p => p.map(j => String(j.id) === String(id) || String(j._id) === String(id) ? updatedJob : j));
     } catch { notify('Failed to update status', 'error'); }
   };
 
@@ -361,39 +367,72 @@ export function useAppLogic() {
   const handleBatchSend = async (jobIds = null) => {
     const jobsToProcess = jobIds || selectedJobs;
     if (jobsToProcess.length === 0) return;
-    
-    batchQueueRef.current = [...batchQueueRef.current, ...jobsToProcess];
-    
+
+    batchQueueRef.current = [...new Set([...batchQueueRef.current, ...jobsToProcess])];
+
     if (isBatchingRef.current) {
-        setBatchState(prev => ({ 
-            ...prev, 
-            total: prev.currentIndex + batchQueueRef.current.length, 
-            logs: [...prev.logs, `Added ${jobsToProcess.length} job(s) to the queue...`] 
+        setBatchState(prev => ({
+            ...prev,
+            total: prev.currentIndex + batchQueueRef.current.length,
+            logs: [...prev.logs, `Added ${jobsToProcess.length} job(s) to the queue...`]
         }));
         return;
     }
-    
+
     isBatchingRef.current = true;
     setBatchProgress(0);
     setBatchState({ active: true, currentIndex: 0, total: batchQueueRef.current.length, currentJob: null, logs: [] });
-    
+
     let processed = 0;
-    
+
     while (batchQueueRef.current.length > 0 && isBatchingRef.current) {
       const jobId = batchQueueRef.current.shift();
       const job = jobs.find(j => j.id === jobId || (j._id && j._id.toString() === jobId.toString()));
       if (!job) continue;
 
       processed++;
-      setBatchState(prev => ({ 
-        ...prev, 
-        currentIndex: processed, 
-        currentJob: job, 
-        logs: [...prev.logs, `[${job.company}] Initializing outreach pipeline for "${job.role}"...`] 
+      setBatchState(prev => ({
+        ...prev,
+        currentIndex: processed,
+        currentJob: job,
+        logs: [...prev.logs, `[${job.company}] Initializing outreach pipeline for "${job.role}"...`]
       }));
 
+      const stage = async (pipelineStage, pipelineError = '') => {
+        setJobs(prev => prev.map(j => String(j.id) === String(job.id) || String(j._id) === String(job._id) ? { ...j, pipelineStage, pipelineError } : j));
+        const response = await apiFetch(`${API_BASE}/api/jobs/${job._id || job.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pipelineStage, pipelineError }) });
+        if (!response.ok) throw new Error('Could not save queue progress');
+      };
       try {
+        if (['Replied', 'Interview', 'Offer', 'Bounced'].includes(job.status) || ((job.sentAt || ['Sent', 'Opened'].includes(job.status)) && job.pipelineStage !== 'partial' && !job.sendSummary?.partial)) {
+          setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Already contacted; skipped.`] }));
+          continue;
+        }
+        const prepare = async (recipients) => {
+          const response = await apiFetch(`${API_BASE}/api/outreach/prepare`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobId: job._id || job.id, ...(recipients ? { recipients } : {}) }) });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || 'Recipient preparation failed');
+          return result;
+        };
+        const initialPlan = await prepare();
+        if (!job.emailRecipient && ['queued', 'running'].includes(initialPlan.emailLookupState)) {
+          setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Recruiter email lookup is ${initialPlan.emailLookupState}. Skipped until the profile finishes updating.`] }));
+          continue;
+        }
+        if (initialPlan.relevance.excluded) {
+          await stage('filtered', initialPlan.relevance.reason);
+          setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Profile match ${initialPlan.relevance.score}%: ${initialPlan.relevance.reason} Skipped before drafting.`] }));
+          continue;
+        }
+        if (!initialPlan.allowed.length && (initialPlan.blocked.length || initialPlan.completed.length)) {
+          const reason = initialPlan.blocked.map(r => `${r.email}: ${r.reason} (${r.source})`).join('; ') || 'All recipients are already sent or awaiting delivery reconciliation';
+          await stage('failed', reason);
+          setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] No eligible recipients: ${reason}. No AI request used.`] }));
+          continue;
+        }
+        await stage('verifying');
         let discoveredEmail = job.emailRecipient;
+        let discoveryReason = job.deliverabilityReason || '';
         let deliverabilityScore = job.deliverabilityScore || 0;
         let currentHrName = job.hrName || null;
 
@@ -412,6 +451,7 @@ export function useAppLogic() {
           const discRes = await apiFetch(`${API_BASE}/api/discover-email`, {
              method: 'POST', headers: { 'Content-Type': 'application/json' },
              body: JSON.stringify({
+               jobId: job._id || job.id,
                company: job.company,
                jd: job.jd,
                hrName: job.hrName || null,
@@ -421,6 +461,7 @@ export function useAppLogic() {
              })
           });
           const discData = await discRes.json();
+          discoveryReason = discData.deliverabilityReason || discData.error || discData.source || 'No company mailbox could be confirmed';
           discoveredEmail = discData.email || '';
           deliverabilityScore = discData.deliverabilityScore || 0;
           if (discData.allRecipients && discData.allRecipients.length > 0) {
@@ -438,7 +479,7 @@ export function useAppLogic() {
             apiFetch(`${API_BASE}/api/jobs/${job.id}`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ 
+              body: JSON.stringify({
                 emailRecipient: discoveredEmail,
                 allRecipients: targetRecipients,
                 deliverabilityScore,
@@ -447,22 +488,29 @@ export function useAppLogic() {
               })
             }).catch(() => {});
 
-            setJobs(prev => prev.map(j => j.id === job.id ? { 
-              ...j, 
+            setJobs(prev => prev.map(j => (String(j.id) === String(job.id) || String(j._id) === String(job._id)) ? {
+              ...j,
               emailRecipient: discoveredEmail,
               allRecipients: targetRecipients,
               deliverabilityScore,
               deliverabilityStatus: 'deliverable'
             } : j));
           } else {
-            const reason = discData?.deliverabilityReason || 'No verified recipient mailbox found';
-            setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] 🛡️ Deliverability Guard: Zero verified inboxes. Unverified guessing blocked to protect sender reputation.`] }));
-            
+            const reason = discData?.deliverabilityReason || discData?.error || discData?.source || 'No verified recipient mailbox found';
+            setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Discovery stopped: ${reason}`] }));
+            if (discData.excluded) {
+              const ids = new Set([job.id, job._id].filter(Boolean).map(String));
+              setJobs(prev => prev.filter(item => ![item.id, item._id].some(id => id && ids.has(String(id)))));
+              setSelectedJobs(prev => prev.filter(id => !ids.has(String(id))));
+              setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Removed from HR results; future searches will skip this profile.`] }));
+              continue;
+            }
+
             // Update job list immediately in DB and UI
             apiFetch(`${API_BASE}/api/jobs/${job.id}`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ 
+              body: JSON.stringify({
                 emailRecipient: '',
                 allRecipients: [],
                 deliverabilityScore: 0,
@@ -471,8 +519,8 @@ export function useAppLogic() {
               })
             }).catch(() => {});
 
-            setJobs(prev => prev.map(j => j.id === job.id ? { 
-              ...j, 
+            setJobs(prev => prev.map(j => (String(j.id) === String(job.id) || String(j._id) === String(job._id)) ? {
+              ...j,
               emailRecipient: '',
               allRecipients: [],
               deliverabilityScore: 0,
@@ -481,59 +529,75 @@ export function useAppLogic() {
             } : j));
           }
         } else {
-          const recInfo = targetRecipients.length > 1 
+          const recInfo = targetRecipients.length > 1
             ? `${targetRecipients.length} company mailboxes (${targetRecipients.map(r => r.email).join(', ')})`
             : `${discoveredEmail} (Score: ${deliverabilityScore > 0 ? deliverabilityScore + '%' : 'MX-checked'})`;
           setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Target recipients: ${recInfo}`] }));
         }
-        
+
         if (discoveredEmail) {
+          const plan = await prepare(targetRecipients.length ? targetRecipients : [{ email: discoveredEmail }]);
+          for (const blocked of plan.blocked) setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Skipped ${blocked.email}: ${blocked.reason} (${blocked.source}, ${blocked.blockedAt ? new Date(blocked.blockedAt).toLocaleDateString() : 'date unknown'}).`] }));
+          targetRecipients = plan.allowed;
+          const dispatchRecipients = [...plan.allowed, ...plan.blocked.map(r => ({ email: r.email }))];
+          if (!targetRecipients.length) {
+            await stage('failed', 'No eligible recipients after blocklist and previous-send checks');
+            setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] No eligible recipients. No AI request used.`] }));
+            continue;
+          }
+          discoveredEmail = targetRecipients[0].email;
+          await stage('drafting');
           setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Generating tailored pitch citing verified GitHub projects...`] }));
           const currentRecipient = targetRecipients[0];
           const genRes = await apiFetch(`${API_BASE}/api/generate-email`, {
              method: 'POST', headers: { 'Content-Type': 'application/json' },
-             body: JSON.stringify({ 
-               company: job.company, 
-               role: job.role, 
-               jd: job.jd, 
-               emailType: 'Cold Outreach / Networking', 
+             body: JSON.stringify({
+               company: job.company,
+               role: job.role,
+               jd: job.jd,
+               emailType: 'Cold Outreach / Networking',
                hrName: currentHrName,
                recipientEmail: discoveredEmail,
                recipientType: currentRecipient?.type || (discoveredEmail?.startsWith('hr@') ? 'hr' : discoveredEmail?.startsWith('talent@') ? 'talent' : discoveredEmail?.startsWith('recruitment@') ? 'recruitment' : undefined)
              })
           });
           const genData = await genRes.json();
-          
+
           if (genData.draft) {
+            await apiFetch(`${API_BASE}/api/jobs/${job._id || job.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ emailDraft: genData.draft }) });
+            await stage('drafted');
+            if (!isBatchingRef.current) break;
             const recipientCount = targetRecipients.length > 1 ? targetRecipients.length : 1;
-            setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Pre-send deliverability check passed. Dispatching ${recipientCount > 1 ? `${recipientCount} individualized emails` : 'tailored email'}...`] }));
+            setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] Draft ready. Requesting server checks and dispatch for ${recipientCount > 1 ? `${recipientCount} individualized emails` : 'tailored email'}...`] }));
             const sendRes = await apiFetch(`${API_BASE}/api/send-email`, {
                method: 'POST', headers: { 'Content-Type': 'application/json' },
-               body: JSON.stringify({ 
-                 jobId: job.id, 
-                 body: genData.draft, 
+               body: JSON.stringify({
+                 jobId: job._id || job.id,
+                 body: genData.draft,
                  to: discoveredEmail,
-                 recipients: targetRecipients.length > 0 ? targetRecipients : undefined,
-                 sendToAll: true 
+                 recipients: dispatchRecipients,
+                 sendToAll: true
                })
             });
             const sendData = await sendRes.json();
             if (sendData.success) {
-               updateStatus(job.id, 'Sent', discoveredEmail, sendData.emailDraft || genData.draft, sendData.tracked);
-               const successMsg = sendData.sentCount && sendData.sentCount > 1
-                 ? `🚀 Successfully sent ${sendData.sentCount} tailored emails to: ${sendData.sentRecipients?.map(r => r.email).join(', ')}!`
-                 : `🚀 Successfully sent to ${discoveredEmail}! Delivery verified (Tracked: ${sendData.tracked ? 'Yes' : 'No'})`;
-               setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] ${successMsg}`] }));
+               await stage(sendData.partial ? 'partial' : 'sent', sendData.partial ? sendData.message : '');
+               await loadJobs();
+               setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] ${sendData.message}`, ...(sendData.results || []).map(result => `[${job.company}] ${result.email}: ${result.status}${result.reason ? ' — ' + result.reason : ''}`)] }));
             } else {
-               setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] 🛑 Send blocked: ${simplifySendError(sendData.error)}`] }));
+               await stage(sendData.cancelled ? 'drafted' : 'failed', sendData.error);
+               setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] ${simplifySendError(sendData.error)}`, ...(sendData.results || []).map(result => `[${job.company}] ${result.email}: ${result.status}${result.reason ? ' — ' + result.reason : ''}`)] }));
             }
           } else {
+            await stage('failed', genData?.error || 'Draft generation failed');
             setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] ⚠️ Draft generation failed: ${genData?.error || 'Empty output from AI engine'}`] }));
           }
         } else {
-          setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] ⏩ Skipped (No verified mailbox found. Apply via official link or LinkedIn to avoid bouncing)`] }));
+          await stage('failed', discoveryReason || 'No verified mailbox found');
+          setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] ⏩ Skipped: ${discoveryReason || 'No confirmed recipient. Use the official application link.'}`] }));
         }
       } catch (err) {
+        await stage('failed', err.message).catch(() => {});
         console.error(err);
         setBatchState(prev => ({ ...prev, logs: [...prev.logs, `[${job.company}] ❌ Error: ${simplifySendError(err.message)}`] }));
       }
@@ -573,6 +637,7 @@ export function useAppLogic() {
         body: JSON.stringify(profile)
       });
       const p = await r.json();
+      if (!r.ok) throw new Error(p.error || 'Profile request failed');
       setProfile(p);
       setOriginalProfile(p);
       notify('Profile saved successfully');
@@ -643,7 +708,7 @@ export function useAppLogic() {
   const handleDelete = async (id) => {
     if (!id) return;
     const targetIdStr = String(id);
-    
+
     // Track both id and _id in deletedJobIdsRef so polling never revives it
     const targetJob = jobs.find(j => String(j.id) === targetIdStr || String(j._id) === targetIdStr);
     if (targetJob) {
@@ -658,8 +723,8 @@ export function useAppLogic() {
     setSelectedJobs(prev => prev.filter(jId => String(jId) !== targetIdStr));
 
     try {
-      const res = await apiFetch(`${API_BASE}/api/jobs/${encodeURIComponent(targetIdStr)}`, { 
-        method: 'DELETE' 
+      const res = await apiFetch(`${API_BASE}/api/jobs/${encodeURIComponent(targetIdStr)}`, {
+        method: 'DELETE'
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -856,18 +921,21 @@ export function useAppLogic() {
     setFetching(false);
   };
 
-  const handleScrapeHR = async ({ query, locations, experience }) => {
+  const handleScrapeHR = async ({ query, locations, experience, mode = hrSearchMode }) => {
+    if (mode === 'company' && !query?.trim()) { notify('Enter the company name to search', 'error'); return; }
+    setHrSearchReport(null);
     const effectiveQuery = (query || 'technical recruiter').trim();
     const effectiveLocations = (locations && locations.length > 0) ? locations : ['All India'];
     const controller = new AbortController();
     hrAbortRef.current = controller;
     setFetchingHR(true);
     try {
-      const r = await apiFetch(`${API_BASE}/api/jobs/scrape-hr`, {
+      const r = await apiFetch(`${API_BASE}/api/hr/search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
         body: JSON.stringify({
+          mode,
           query: effectiveQuery,
           experience: experience !== 'All' ? experience : '',
           locations: effectiveLocations,
@@ -875,6 +943,7 @@ export function useAppLogic() {
         })
       });
       const result = await r.json();
+      setHrSearchReport({ ...result, query: effectiveQuery, mode });
       if (result.success) {
         if (result.jobs && Array.isArray(result.jobs) && result.jobs.length > 0) {
           setJobs(prev => {
@@ -885,7 +954,7 @@ export function useAppLogic() {
         }
         const nonAll = effectiveLocations.filter(l => !['all', 'all india'].includes(l.toLowerCase()));
         const locText = nonAll.length > 0 ? ` in ${nonAll.join(', ')}` : '';
-        notify(`Discovered ${result.count} new HR leads for "${effectiveQuery}"${locText}!`);
+        notify(result.message || `Discovered ${result.count} new HR leads for "${effectiveQuery}"${locText}!`, result.count ? 'success' : 'info');
         await loadJobs();
       } else {
         notify(result.error || 'Failed to find HRs', 'error');
@@ -955,7 +1024,7 @@ export function useAppLogic() {
   const activeJobs = React.useMemo(() => {
     return (jobs || []).filter(j => {
       if (!j) return false;
-      if (tab === 'applications') return j.status === 'Found' || j.status === 'Drafting';
+      if (tab === 'applications') return !j.relevance?.excluded && (j.status === 'Found' || j.status === 'Drafting');
       if (tab === 'applied') {
         const isAppliedStatus = ['Sent', 'Opened', 'Bounced', 'Replied', 'LinkedIn_Sent', 'LinkedIn_Connected', 'LinkedIn_Replied'].includes(j.status);
         if (!isAppliedStatus) return false;
@@ -1050,7 +1119,7 @@ export function useAppLogic() {
   };
 
   return {
-    token, logout, apiFetch, // Exposed new auth-related properties
+    token, logout,
     tab, setTab,
     sidebarOpen, setSidebarOpen,
     jobs, setJobs,
@@ -1087,7 +1156,7 @@ export function useAppLogic() {
     totalPages,
     itemsPerPage, setItemsPerPage,
     theme, setTheme,
-    
+
     notify,
     apiFetch,
     hasProfileInfoChanges,
@@ -1116,6 +1185,7 @@ export function useAppLogic() {
     setFetchingHR,
     handleScrapeHR,
     handleStopFetchHR,
+    hrSearchMode, setHrSearchMode, hrSearchReport,
     addFetchQuery,
     removeFetchQuery,
     toggleFetchQuery,

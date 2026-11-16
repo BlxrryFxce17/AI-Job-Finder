@@ -1,3 +1,5 @@
+import RecruiterEvidence from './components/RecruiterEvidence';
+import SafetyCenter from './components/SafetyCenter';
 import React from 'react';
 import { NAV, API_BASE } from './useAppLogic.jsx';
 import GitHubPortfolioCard from './GitHubPortfolioCard';
@@ -113,7 +115,7 @@ function MobileEmailMessageBody({ text, quotedText }) {
   );
 }
 
-function FollowUpRow({ job, f, API_BASE, token, setJobs, jobs, notify, profile }) {
+function FollowUpRow({ job, f, API_BASE, token, setJobs, jobs, notify, profile, apiFetch }) {
   const [expanded, setExpanded] = React.useState(false);
   const [sending, setSending] = React.useState(false);
 
@@ -188,13 +190,13 @@ function FollowUpRow({ job, f, API_BASE, token, setJobs, jobs, notify, profile }
                   Sent to: <strong style={{ color: 'var(--text-2)' }}>{job.emailRecipient || job.recruiterEmail || 'Recruiter'}</strong>
                 </span>
                 <button
-                  className="btn btn-secondary"
+                  className="btn btn-secondary" disabled title="This follow-up has already been sent"
                   style={{ padding: '6px 12px', fontSize: '12px' }}
                   onClick={async (e) => {
                     e.stopPropagation();
                     if (!window.confirm(`Resend Day ${f.day} follow-up?`)) return;
                     try {
-                      const res = await fetch(`${API_BASE}/api/send-followup`, {
+                      const res = await apiFetch(`${API_BASE}/api/send-followup`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                         body: JSON.stringify({ jobId: job.id, day: f.day })
@@ -209,7 +211,7 @@ function FollowUpRow({ job, f, API_BASE, token, setJobs, jobs, notify, profile }
                     }
                   }}
                 >
-                  Resend ✈️
+                  Already sent
                 </button>
               </>
             ) : (
@@ -221,7 +223,7 @@ function FollowUpRow({ job, f, API_BASE, token, setJobs, jobs, notify, profile }
                   e.stopPropagation();
                   setSending(true);
                   try {
-                    const res = await fetch(`${API_BASE}/api/send-followup`, {
+                    const res = await apiFetch(`${API_BASE}/api/send-followup`, {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                       body: JSON.stringify({ jobId: job.id, day: f.day })
@@ -253,6 +255,15 @@ function FollowUpRow({ job, f, API_BASE, token, setJobs, jobs, notify, profile }
 }
 
 export default function MobileApp(props) {
+  const headerRef = React.useRef(null);
+  const [headerHeight, setHeaderHeight] = React.useState(160);
+  React.useEffect(() => {
+    const header = headerRef.current;
+    if (!header) return;
+    const observer = new ResizeObserver(() => setHeaderHeight(header.getBoundingClientRect().height));
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, []);
   const {
     tab, setTab,
     jobs, setJobs,
@@ -454,7 +465,7 @@ export default function MobileApp(props) {
           createNew,
           company,
           role,
-          messageId: currentReply.messageId,
+          messageId: currentReply.rfcMessageId || currentReply.messageId,
           threadId: currentReply.threadId,
           fromEmail: currentReply.from
         })
@@ -608,6 +619,12 @@ export default function MobileApp(props) {
   const handleDeepDiscoverHrEmail = async (job) => {
     setDiscoveringHrId(job.id);
     try {
+      if (job.hrLinkedIn) {
+        const response = await props.apiFetch(`${API_BASE}/api/hr/email-lookup`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobId: job._id || job.id }) });
+        const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Could not queue lookup');
+        notify(result.message); await loadJobs(); return;
+      }
+
       const targetLabel = job.hrName ? `${job.hrName} at ${job.company}` : (job.company || 'company');
       notify(`🔍 Scanning web & pattern databases for ${targetLabel}...`, 'info');
       const effectiveLoc = job.location || (locationFilter === 'Custom' ? customLocation : locationFilter) || 'India';
@@ -703,6 +720,7 @@ export default function MobileApp(props) {
       });
       const data = await res.json();
       if (data && data.success) {
+        if (data.queued) { notify(data.message, 'info'); await loadJobs(); return; }
         if (data.updatedJobs && data.updatedJobs.length > 0) {
           const updateMap = new Map(data.updatedJobs.map(uj => [uj.id, uj]));
           setJobs(prev => prev.map(j => {
@@ -787,10 +805,10 @@ export default function MobileApp(props) {
       {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
 
       {/* Main Content Area (Scrollable) */}
-      <div className="mobile-content-area" onScroll={(e) => setIsScrolled(e.target.scrollTop > 20)}>
+      <div style={{ '--mobile-header-height': `${headerHeight}px` }} className={`mobile-content-area${tab === 'safety' ? ' safety-content-area' : ''}`} onScroll={(e) => setIsScrolled(e.target.scrollTop > 20)}>
 
         {/* Top Header */}
-        <div className={`mobile-header ${isScrolled ? 'scrolled-up' : ''}`}>
+        <div ref={headerRef} className={`mobile-header ${isScrolled ? 'scrolled-up' : ''}`}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
             <div className="mobile-brand">
               <span className="brand-icon">⚡</span>
@@ -836,10 +854,16 @@ export default function MobileApp(props) {
             </div>
           )}
 
-          {tab !== 'resume' && tab !== 'single_drafter' && tab !== 'inbox' && (
+          {tab !== 'resume' && tab !== 'single_drafter' && tab !== 'inbox' && tab !== 'safety' && tab !== 'hr_dashboard' && (
             <p className="mobile-subtitle">{activeJobs.length} results found</p>
           )}
         </div>
+
+        {tab === 'safety' && (
+          <div className="safety-page-scroll" tabIndex={0} aria-label="Safety and activity settings">
+            <SafetyCenter {...props} />
+          </div>
+        )}
 
         {tab === 'inbox' && (() => {
           const categoryCounts = {
@@ -1333,14 +1357,14 @@ export default function MobileApp(props) {
                                     onClick={async () => {
                                       setSendingReply(true);
                                       try {
-                                        const res = await fetch(`${API_BASE}/api/inbox/send-reply`, {
+                                        const res = await props.apiFetch(`${API_BASE}/api/inbox/send-reply`, {
                                           method: 'POST',
                                           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` },
                                           body: JSON.stringify({
                                             to: currentReply.fromFull || currentReply.from,
                                             subject: currentReply.subject,
                                             body: selectedDraft,
-                                            messageId: currentReply.messageId,
+                                            messageId: currentReply.rfcMessageId || currentReply.messageId,
                                             threadId: currentReply.threadId
                                           })
                                         });
@@ -1817,7 +1841,7 @@ export default function MobileApp(props) {
                     </span>
                   </div>
                   <span style={{ fontSize: '10px', color: 'var(--text-3)', paddingLeft: '12px' }}>
-                    {profile?.enableAutoFollowUp !== false ? 'Autonomously dispatches Day 3 & 6' : 'Drafts saved in memory • manual send'}
+                    {profile?.enableAutoFollowUp !== false ? 'Uses your schedule in Safety & activity' : 'Drafts saved in memory • manual send'}
                   </span>
                 </div>
 
@@ -1961,6 +1985,7 @@ export default function MobileApp(props) {
               <div style={{ display: 'flex', flexDirection: 'column' }}>
                 {filteredFollowUps.slice(0, followUpLimit).map(({ job, f }) => (
                   <FollowUpRow
+                    apiFetch={props.apiFetch}
                     key={`${job.id}-${f.day}`}
                     job={job}
                     f={f}
@@ -2281,7 +2306,7 @@ export default function MobileApp(props) {
                           )}
                         </h3>
                         <p style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                          <span>{parseRoleDisplay ? parseRoleDisplay(job.role).title : job.role}</span>
+                          <span>{parseRoleDisplay ? parseRoleDisplay(job.role).title : job.role}</span>{job.relevance && <span title={job.relevance.reason} style={{ fontSize: '11px', color: 'var(--text-2)' }}>Match: {job.relevance.score}%</span>}
                           {tab === 'applications' && (() => {
                             const lvl = getJobLevel(job);
                             const lvlClass = lvl === 'Senior' ? 'level-senior' : lvl === 'Junior' ? 'level-junior' : 'level-mid';
@@ -2571,7 +2596,7 @@ export default function MobileApp(props) {
 
         {tab === 'single_drafter' && (
           <div className="mobile-form-section">
-            <p style={{ color: 'var(--text-2)', fontSize: '13px', marginBottom: '20px' }}>Paste a JD, and the AI will draft and send a highly personalized cold email instantly.</p>
+            <p style={{ color: 'var(--text-2)', fontSize: '13px', marginBottom: '20px' }}>Paste a JD, and the AI will draft and send your email directly to the recipient.</p>
             <form onSubmit={async (e) => {
               e.preventDefault();
               setFetching(true);
@@ -2580,7 +2605,7 @@ export default function MobileApp(props) {
                 const data = Object.fromEntries(formData);
                 const res = await fetch(`${API_BASE}/api/single-draft`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` }, body: JSON.stringify(data) });
                 const result = await res.json();
-                if (result.success) { notify('Email Sent! 🚀'); e.target.reset(); loadJobs(); } else { notify(result.error || 'Failed to send', 'error'); }
+                if (result.success) { await loadJobs(); if (result.to) { const sent = await props.apiFetch(`${API_BASE}/api/send-email`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobId: result.jobId, to: result.to, subject: result.subject, body: result.draft }) }); const outcome = await sent.json(); notify(outcome.success ? 'Email sent' : outcome.error, outcome.success ? 'success' : 'info'); } else notify('Draft saved. Add a recipient in your applications to send it.'); loadJobs(); } else { notify(result.error || 'Failed to send', 'error'); }
               } catch (err) { notify('Error', 'error'); }
               setFetching(false);
             }} className="mobile-form">
@@ -2600,7 +2625,7 @@ export default function MobileApp(props) {
               <textarea name="jd" required className="form-input" style={{ minHeight: '200px' }} placeholder="Paste JD here..."></textarea>
 
               <button type="submit" className="btn btn-primary" style={{ padding: '14px' }} disabled={fetching}>
-                {fetching ? <span className="spinner"></span> : 'Draft & Send 🚀'}
+                {fetching ? <span className="spinner"></span> : 'Draft & send'}
               </button>
             </form>
           </div>
@@ -2635,152 +2660,16 @@ export default function MobileApp(props) {
           </div>
         )}
 
-        {(tab === 'applications' || tab === 'applied') && (
-          <div className="mobile-job-list">
-            {loading ? (
-              <div className="empty-state"><span className="loading-spinner"></span><h3>Loading...</h3></div>
-            ) : activeJobs.length === 0 ? (
-              <div className="empty-state"><div className="empty-icon">📭</div><h3>No jobs found</h3></div>
-            ) : (
-              paginatedJobs.map(job => (
-                <div className={`mobile-job-card ${selectedJobs.includes(job.id) ? 'selected' : ''}`} key={job.id} onClick={() => { if (tab === 'applications') toggleSelectJob(job.id); }}>
-                  {tab === 'applications' && (
-                    <div className="mobile-card-checkbox">
-                      <input type="checkbox" checked={selectedJobs.includes(job.id)} onChange={() => { }} />
-                    </div>
-                  )}
-                  <div className="mobile-card-content">
-                    <div className="mobile-card-header">
-                      <div className="company-avatar" style={{ width: '32px', height: '32px', fontSize: '12px' }}>{(job.company || 'XX').substring(0, 2).toUpperCase()}</div>
-                      <div className="mobile-card-title">
-                        <h3 style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
-                          {job.company || 'Unknown Company'}
-                          {job.source && job.source !== 'Manual' && (
-                            <span className={`source-pill source-${(job.source || '').toLowerCase()}`}>
-                              <img src={`https://www.google.com/s2/favicons?domain=${job.source.toLowerCase()}.com&sz=16`} alt={job.source} style={{ width: 10, height: 10, borderRadius: '2px' }} />
-                              {job.source}
-                            </span>
-                          )}
-                        </h3>
-                        <p style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                          <span>{parseRoleDisplay ? parseRoleDisplay(job.role).title : job.role}</span>
-                          {tab === 'applications' && (() => {
-                            const lvl = getJobLevel(job);
-                            const lvlClass = lvl === 'Senior' ? 'level-senior' : lvl === 'Junior' ? 'level-junior' : 'level-mid';
-                            return (
-                              <span className={`level-pill ${lvlClass}`} style={{ fontSize: '9px', padding: '1px 5px' }}>
-                                {lvl === 'Junior' ? '🟢 Jr' : lvl === 'Senior' ? '🟣 Sr' : '🟡 Mid'}
-                              </span>
-                            );
-                          })()}
-                        </p>
-                      </div>
-                    </div>
-                    {tab === 'applications' && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', padding: '0 12px 6px 12px' }}>
-                        <span style={{ fontSize: '11px', color: 'var(--text-2)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                          📍 {job.location || 'India'}
-                        </span>
-                        {(() => {
-                          const wm = extractWorkMode(job.location, job.jd);
-                          return wm ? (
-                            <span style={{ fontSize: '10px', color: 'var(--text-3)', fontWeight: 500 }}>
-                              {wm === 'Remote' ? '🏠 Remote' : wm === 'Hybrid' ? '🏢 Hybrid' : '🏢 On-site'}
-                            </span>
-                          ) : null;
-                        })()}
-                        {(() => {
-                          const pkg = extractPackage(job.salary, job.jd);
-                          return pkg ? (
-                            <span style={{
-                              fontSize: '10px',
-                              fontWeight: 600,
-                              color: '#10b981',
-                              background: 'rgba(16, 185, 129, 0.12)',
-                              border: '1px solid rgba(16, 185, 129, 0.25)',
-                              padding: '1px 6px',
-                              borderRadius: '10px'
-                            }}>
-                              💰 {pkg}
-                            </span>
-                          ) : null;
-                        })()}
-                      </div>
-                    )}
-                    <div className="mobile-card-footer">
-                      <span className="mobile-card-date">
-                        {tab === 'applied'
-                          ? `Sent: ${new Date(job.sentAt || job.updatedAt || job.createdAt || Date.now()).toLocaleString([], { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
-                          : `Found: ${new Date(job.createdAt || Date.now()).toLocaleString([], { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
-                        }
-                      </span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        {tab === 'applied' && (
-                          (job.status || '').startsWith('LinkedIn') ? (
-                            <select
-                              value={job.status}
-                              onClick={e => e.stopPropagation()}
-                              onChange={(e) => updateStatus(job.id, e.target.value)}
-                              style={{
-                                fontSize: '11px',
-                                fontWeight: 600,
-                                padding: '2px 6px',
-                                borderRadius: '6px',
-                                background: 'rgba(10, 102, 194, 0.15)',
-                                color: '#38bdf8',
-                                border: '1px solid rgba(10, 102, 194, 0.4)',
-                                cursor: 'pointer'
-                              }}
-                            >
-                              <option value="LinkedIn_Sent" style={{ background: 'var(--surface-2)', color: 'var(--text-1)' }}>💼 Invite Sent</option>
-                              <option value="LinkedIn_Connected" style={{ background: 'var(--surface-2)', color: 'var(--text-1)' }}>🤝 Connected</option>
-                              <option value="LinkedIn_Replied" style={{ background: 'var(--surface-2)', color: 'var(--text-1)' }}>💬 Replied</option>
-                            </select>
-                          ) : (
-                            <span className={`badge ${job.status.toLowerCase()}`}>
-                              {job.status}
-                            </span>
-                          )
-                        )}
-                        {job.tracked && <span style={{ fontSize: '12px' }}>🎯</span>}
-                      </div>
-                    </div>
-                    <div className="mobile-card-actions">
-                      <button className="icon-btn" onClick={(e) => { e.stopPropagation(); job.applyLink ? window.open(job.applyLink, '_blank') : alert('No link'); }}>
-                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                      </button>
-                      {job.hrLinkedIn && (
-                        <button className="icon-btn text-accent" onClick={(e) => { e.stopPropagation(); window.open(job.hrLinkedIn, '_blank'); }}>
-                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"></path><rect x="2" y="9" width="4" height="12"></rect><circle cx="4" cy="4" r="2"></circle></svg>
-                        </button>
-                      )}
-                      <button className="icon-btn text-danger" onClick={async (e) => {
-                        e.stopPropagation();
-                        try {
-                          await fetch(`${API_BASE}/api/jobs/${job.id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` } });
-                          setJobs(p => p.filter(j => j.id !== job.id));
-                          notify('Job deleted');
-                        } catch (e) { notify('Delete failed', 'error'); }
-                      }}>
-                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        )}
-
         {tab === 'hr_dashboard' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <form
+            <select className="form-input" aria-label="Recruiter search mode" value={props.hrSearchMode} onChange={e => props.setHrSearchMode(e.target.value)} style={{ width: 'auto' }}><option value="role">Recruiting specialty</option><option value="company">Company</option></select>
+                <form
               onSubmit={(e) => {
                 e.preventDefault();
                 handleScrapeHR({
                   query: hrQuery.trim() || fetchQuery.trim() || fetchQueries[0] || 'software engineer',
                   locations: hrLocations,
-                  experience: experienceFilter
+                  mode: props.hrSearchMode, experience: experienceFilter
                 });
               }}
               className="mobile-actions-panel"
@@ -2995,7 +2884,7 @@ export default function MobileApp(props) {
                       </div>
 
                       {/* Email Box / Inline Editor on Mobile */}
-                      <div style={{
+                      <div className="recruiter-email-row" style={{
                         fontSize: '11px',
                         background: 'var(--surface-1)',
                         padding: '6px 10px',
@@ -3040,7 +2929,8 @@ export default function MobileApp(props) {
                         ) : (
                           <>
                             <span style={{ color: hasEmail ? 'var(--text-1)' : 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                              ✉️ {hasEmail ? (
+                              ✉️
+                        {hasEmail ? (
                                 <>
                                   <span>{job.emailRecipient}</span>
                                   {job.status === 'Bounced' || job.deliverabilityStatus === 'bounced' ? (
@@ -3072,6 +2962,8 @@ export default function MobileApp(props) {
                           </>
                         )}
                       </div>
+
+                    <RecruiterEvidence job={job} apiFetch={props.apiFetch} notify={notify} loadJobs={loadJobs} />
 
                       {/* Action buttons on Mobile */}
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%' }} onClick={e => e.stopPropagation()}>
@@ -3144,6 +3036,7 @@ export default function MobileApp(props) {
             </div>
           </div>
         )}
+
       </div>
 
       {/* Bottom Navigation */}

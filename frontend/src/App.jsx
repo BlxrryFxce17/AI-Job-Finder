@@ -1,8 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { useAppLogic } from './useAppLogic.jsx';
-import DesktopApp from './DesktopApp';
-import MobileApp from './MobileApp';
-import Login from './Login';
+const DesktopApp = lazy(() => import('./DesktopApp'));
+const MobileApp = lazy(() => import('./MobileApp'));
 import LandingPage from './LandingPage';
 import PrivacyPolicy from './PrivacyPolicy';
 import TermsOfService from './TermsOfService';
@@ -175,7 +174,7 @@ export default function App() {
   return (
     <ErrorBoundary>
       {logic.showTutorial && <TutorialModal onComplete={logic.completeTutorial} />}
-      {isMobile ? <MobileApp {...logic} /> : <DesktopApp {...logic} />}
+      <Suspense fallback={<div role="status" style={{ padding: 32 }}>Loading your workspace…</div>}>{isMobile ? <MobileApp {...logic} /> : <DesktopApp {...logic} />}</Suspense>
     </ErrorBoundary>
   );
 }

@@ -61,7 +61,7 @@ export default function GitHubPortfolioCard({ profile, setProfile, apiFetch, not
         setSelectedReposForLinks(profile.selectedRepoNames);
       }
     }
-  }, [profile?.githubRepoLinkCount, profile?.selectedRepoNames]);
+  }, [profile]);
 
   const savedCount = typeof profile?.githubRepoLinkCount === 'number' ? profile.githubRepoLinkCount : 2;
   const savedSelected = Array.isArray(profile?.selectedRepoNames) ? profile.selectedRepoNames : [];

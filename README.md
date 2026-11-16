@@ -128,3 +128,18 @@
   <br />
   <p><i>Built for the modern job seeker.</i></p>
 </div>
+
+
+## Safety and activity
+
+Open **Safety & activity** after signing in to review sends, pause outreach, configure daily limits and quiet hours, choose follow-up days, export your data, or review duplicates with undo. Automatic follow-ups are opt-in. Emails send directly when you start a send action; there is no pre-send review modal.
+
+Email attempts default to 25 per day and AI requests to 50 per day, counted independently for each user in their selected timezone. These are request limits, not an exact provider spending budget. Resume links expire after seven days; tracking links expire after 90 days. Unknown delivery outcomes remain blocked until reconciled with Gmail.
+
+Run backend regression tests with `npm test --prefix backend`. Run frontend checks with `npm run build --prefix frontend` and `npm run lint --prefix frontend`. See [AUDIT.md](AUDIT.md) for implementation details, behavior changes, and verification limits.
+
+
+Company-domain corrections and aliases, blocklist source/reason/date, profile relevance filtering and per-recipient partial-send results are available in **Safety & activity**. Multiple company inboxes still receive individual sequential messages. Blocked, already-sent and uncertain recipients are filtered before drafting; one failed recipient does not erase other send outcomes. Relevance filtering can be disabled in the confirmed profile details section.
+
+
+In **HR Discovery**, choose **Specific company** or **Recruiting specialty**. Results show source evidence and relevance; profiles save before their email lookup completes. The contact-history filter retains prior outreach status. Email lookup distinguishes published/provider-supported personal contacts, inferred patterns and department-only inboxes, and resumes queued work after a server restart. Search requires a configured Tavily or Serper provider; provider errors are displayed instead of filling results from a static directory.

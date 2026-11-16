@@ -1,77 +1,31 @@
 const express = require('express');
 const router = express.Router();
 const Job = require('../models/Job');
-const Profile = require('../models/Profile');
-const { learnFromOpen } = require('../utils/learningEngine');
-
-async function getProfile() {
-  const profile = await Profile.findOne();
-  return profile || {};
+const { verify } = require('../utils/signedLinks');
+function trackedClaims(req, purpose) {
+  const claims = verify(req.query.token, purpose);
+  if (claims.jobId !== req.params.jobId) throw new Error('Invalid tracking link');
+  return claims;
 }
-
 router.get('/track-open/:jobId', async (req, res) => {
-  const { jobId } = req.params;
-  const userAgent = req.headers['user-agent'] || '';
-
-  const botAgents = ['googleimageproxy', 'applemail/proxy', 'barracuda', 'mimecast', 'yahoomailproxy'];
-  const isBot = botAgents.some(bot => userAgent.toLowerCase().includes(bot));
-
   try {
-    const job = await Job.findOne({ id: jobId });
-
-    const timeSinceSent = job && job.sentAt ? Date.now() - job.sentAt.getTime() : 16000;
-
-    if (job && job.status !== 'Bounced') {
-      if (!isBot && timeSinceSent > 15000) {
-        job.status = 'Opened';
-        await job.save();
-        await learnFromOpen(job.company, job.emailRecipient);
-        console.log(`[Tracking] Email opened for job: ${job.company}`);
-      } else {
-        console.log(`[Tracking] Ignored bot/early open for ${job.company} (Bot: ${isBot}, MsDelay: ${timeSinceSent})`);
-      }
-    }
-  } catch (err) { }
-
-  const buf = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
-  res.writeHead(200, {
-    'Content-Type': 'image/gif',
-    'Content-Length': buf.length,
-    'Cache-Control': 'no-cache, no-store, must-revalidate',
-  });
-  res.end(buf);
+    const claims = trackedClaims(req, 'open');
+    const isBot = /googleimageproxy|applemail|barracuda|mimecast|yahoomailproxy/i.test(req.headers['user-agent'] || '');
+    if (!isBot) await Job.updateOne({ userId: claims.userId, id: claims.jobId, isDeleted: { $ne: true }, status: { $in: ['Sent', 'Opened'] }, sentAt: { $lt: new Date(Date.now() - 15000) } }, { $set: { status: 'Opened' } });
+  } catch { /* Invalid links do not mutate data; pixels always return an image. */ }
+  const pixel = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
+  res.set({ 'Content-Type': 'image/gif', 'Cache-Control': 'no-store' }).send(pixel);
 });
-
 router.get('/track-click/:jobId', async (req, res) => {
-  const { jobId } = req.params;
-  const { url } = req.query;
-
+  let claims;
   try {
-    const job = await Job.findOne({ id: jobId });
-    if (job && job.status !== 'Bounced') {
-      job.status = 'Opened';
-      if (url && !job.clickedLinks.includes(url)) {
-        job.clickedLinks.push(url);
-      }
-      await job.save();
-      console.log(`[Tracking] Link clicked for job: ${job.company} -> ${url}`);
-    }
-  } catch (err) { }
-
-  if (url) {
-    let finalUrl = url;
-    if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
-      finalUrl = 'https://' + finalUrl;
-    }
-    res.redirect(finalUrl);
-  } else {
-    try {
-      const profile = await getProfile();
-      res.redirect(profile.linkedin || '/');
-    } catch {
-      res.redirect('/');
-    }
-  }
+    claims = trackedClaims(req, 'click');
+    const target = new URL(claims.url);
+    if (!['http:', 'https:'].includes(target.protocol) || target.username || target.password) throw new Error('Invalid destination');
+  } catch { return res.status(400).send('This link is invalid or expired.'); }
+  try {
+    await Job.updateOne({ userId: claims.userId, id: claims.jobId, isDeleted: { $ne: true }, status: { $in: ['Sent', 'Opened'] } }, { $set: { status: 'Opened' }, $addToSet: { clickedLinks: claims.url } });
+  } catch { /* Analytics failure must not break a valid signed destination. */ }
+  res.redirect(claims.url);
 });
-
 module.exports = router;

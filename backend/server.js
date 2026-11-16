@@ -47,7 +47,7 @@ app.use(cors({
     if (allowed.length === 0 || allowed.includes(origin) || origin.startsWith('http://localhost:')) {
       return callback(null, true);
     }
-    return callback(null, true);
+    return callback(null, false);
   },
   credentials: true
 }));
@@ -91,6 +91,14 @@ app.use('/api', followupRoutes); // send-followup, check-followups
 app.use('/api/ai', aiRoutes); // usage, credits, quotas, metrics
 app.use('/api/extension', extensionRoutes); // Extension profile, AI question answer, log job
 app.use('/api/blocklist', blocklistRoutes);
+app.use('/api/controls', require('./routes/controlRoutes'));
+app.use('/api/outreach', require('./routes/outreachRoutes'));
+app.use('/api/hr', require('./routes/hrRoutes'));
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : err.status || 500;
+  res.status(status).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'Resume must be smaller than 10 MB' : status < 500 ? err.message : 'The request could not be completed. Try again or check server logs.' });
+});
 
 // Keep-Alive Ping Endpoint
 app.get('/api/ping', (req, res) => {
@@ -188,8 +196,10 @@ cron.schedule('0 11 * * *', async () => {
 
     for (const user of users) {
       // Process incoming bounces for this user
-      await processBounces(user);
+      try { await processBounces(user); } catch (err) { console.warn('[Cron] Bounce check failed for a user:', err.message); }
 
+      const controls = require('./utils/safetyControls').controlsFor(user);
+      if (user.deleting) continue;
       const profile = await Profile.findOne({ userId: user._id });
       if (!profile) continue;
 
@@ -203,7 +213,7 @@ cron.schedule('0 11 * * *', async () => {
         if (!job.emailRecipient) continue;
 
         const daysSinceSent = Math.floor((Date.now() - new Date(job.sentAt || job.createdAt).getTime()) / (1000 * 60 * 60 * 24));
-        const targetDay = daysSinceSent >= 6 ? 6 : daysSinceSent >= 3 ? 3 : 0;
+        const targetDay = controls.followUpDays.filter(day => daysSinceSent >= day).at(-1) || 0;
 
         if (targetDay === 0) continue;
 
@@ -213,7 +223,9 @@ cron.schedule('0 11 * * *', async () => {
           continue; // Already sent this day's follow-up
         }
 
-        const hasReplied = await checkGmailForReply(user, job.emailRecipient);
+        let hasReplied;
+        try { hasReplied = await checkGmailForReply(user, job.emailRecipient); }
+        catch (err) { console.warn(`[Cron] ${job.id}: ${err.message}`); continue; }
         if (hasReplied) {
           job.status = 'Replied';
           await job.save();
@@ -250,7 +262,7 @@ cron.schedule('0 11 * * *', async () => {
         }
 
         // Send the email automatically ONLY if auto follow-up is enabled in user profile
-        if (profile.enableAutoFollowUp === false) {
+        if (!controls.autoFollowUp || controls.paused) {
           console.log(`[Cron] Auto follow-up is OFF for ${user.email}. Saved Day ${targetDay} draft in database/memory for ${job.company}, skipping auto-send.`);
           continue;
         }
@@ -275,20 +287,26 @@ cron.schedule('0 11 * * *', async () => {
               </div>
             `;
 
-            if ((!job.matchedThreadId || !job.rfcMessageId) && user.googleRefreshToken) {
+            if ((!job.matchedThreadId || !/^<[^<>\s]+@[^<>\s]+>$/.test(job.rfcMessageId || '')) && user.googleRefreshToken) {
               try {
                 const threadInfo = await findThreadForRecipient(user, job.emailRecipient, { role: job.role, company: job.company });
                 if (threadInfo) {
                   if (!job.matchedThreadId && threadInfo.threadId) job.matchedThreadId = threadInfo.threadId;
-                  if (!job.rfcMessageId && threadInfo.rfcMessageId) job.rfcMessageId = threadInfo.rfcMessageId;
+                  if (threadInfo.rfcMessageId) job.rfcMessageId = threadInfo.rfcMessageId;
+                  if (threadInfo.subject) job.emailSubject = threadInfo.subject;
                 }
               } catch (_) {}
+            }
+
+            if (!job.matchedThreadId || !/^<[^<>\s]+@[^<>\s]+>$/.test(job.rfcMessageId || '')) {
+              console.warn(`[Follow-up] Skipping ${job.id}: original email thread could not be recovered`);
+              continue;
             }
 
             const mailOptions = {
               from: user.email || process.env.EMAIL_USER,
               to: job.emailRecipient,
-              subject: `Re: Application for ${job.role} - ${profile.name}`,
+              subject: `Re: ${job.emailSubject || `Application for ${job.role} - ${profile.name}`}`,
               text: fullPlainText,
               html: htmlBody,
               replyTo: user.email || process.env.EMAIL_USER,
@@ -298,7 +316,7 @@ cron.schedule('0 11 * * *', async () => {
               messageId: `<${require('crypto').randomUUID()}@${(user.email || 'aijobfinder').split('@')[1] || 'aijobfinder.local'}>`
             };
 
-            const sendRes = await sendEmailViaAPI(user, mailOptions);
+            const sendRes = await sendEmailViaAPI(user, mailOptions, { jobId: job.id, kind: 'followup', idempotencyKey: `followup:${job._id}:${targetDay}` });
 
             // Mark as sent
             const fUpIndex = job.followUps.findIndex(f => f.day === targetDay);
@@ -330,9 +348,25 @@ cron.schedule('0 11 * * *', async () => {
     console.error('[Cron] Error during follow-up check:', err);
   }
 }, {
-  scheduled: true,
+  noOverlap: true,
   timezone: "Asia/Kolkata"
 });
+
+// Keep bounce protection active for every connected tenant, independently of follow-up settings.
+cron.schedule('*/15 * * * *', async () => {
+  const users = await User.find({ googleRefreshToken: { $exists: true, $nin: [null, ''] }, deleting: { $ne: true } });
+  for (const user of users) {
+    try { await processBounces(user); } catch (err) { console.warn('[Bounces] Check failed for a user:', err.message); }
+  }
+}, { noOverlap: true, timezone: 'Asia/Kolkata' });
+
+// Resume durable email lookups for every eligible account after restarts.
+cron.schedule('*/5 * * * *', async () => {
+  try {
+    const users = await User.find({ googleRefreshToken: { $exists: true, $ne: null }, deleting: { $ne: true } }).select('_id');
+    for (const user of users) require('./utils/recruiterEmailWorker').kick(user._id);
+  } catch (err) { console.warn('[HR email queue]', err.message); }
+}, { noOverlap: true, timezone: 'Asia/Kolkata' });
 
 app.listen(PORT, () => {
   console.log(`Backend server running on http://localhost:${PORT}`);

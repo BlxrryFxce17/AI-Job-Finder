@@ -6,7 +6,7 @@ const requireAuth = require('../middleware/requireAuth');
 router.get('/', requireAuth, async (req, res) => {
   try {
     const list = await Blocklist.find({ userId: req.user.id }).sort({ createdAt: -1 });
-    res.json({ success: true, blocklist: list });
+    res.json({ success: true, blocklist: list.map(item => ({ ...item.toObject(), source: require('../utils/recipientBatch').blockSource(item) })) });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch blocklist.' });
   }
@@ -15,7 +15,7 @@ router.get('/', requireAuth, async (req, res) => {
 router.post('/', requireAuth, async (req, res) => {
   try {
     const { value, type, reason } = req.body;
-    if (!value || !type) return res.status(400).json({ error: 'Value and type are required' });
+    if (typeof value !== 'string' || !['email', 'domain'].includes(type)) return res.status(400).json({ error: 'Value and type are required' });
     
     let cleanValue = value.trim().toLowerCase();
     if (type === 'domain') {
@@ -32,7 +32,8 @@ router.post('/', requireAuth, async (req, res) => {
       userId: req.user.id,
       value: cleanValue,
       type,
-      reason: reason || 'Manual block'
+      source: 'manual',
+      reason: typeof reason === 'string' && reason.trim() ? reason.trim().slice(0, 500) : 'Manual block'
     });
 
     await newItem.save();

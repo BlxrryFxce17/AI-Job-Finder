@@ -1,3 +1,4 @@
+import { API_BASE } from '../useAppLogic';
 import React, { useState, useEffect } from 'react';
 
 export default function BlocklistModal({ isOpen, onClose }) {
@@ -6,10 +7,6 @@ export default function BlocklistModal({ isOpen, onClose }) {
   const [newType, setNewType] = useState('email');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-
-  const API_BASE = process.env.NODE_ENV === 'production' 
-    ? 'https://ai-job-finder-7dr8.onrender.com' 
-    : 'http://localhost:5000';
 
   const fetchBlocklist = async () => {
     try {
@@ -93,10 +90,10 @@ export default function BlocklistModal({ isOpen, onClose }) {
         </div>
         
         <p style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '20px' }}>
-          Emails and domains added here will be permanently blocked from outbound AI emails and follow-ups.
+          Emails and domains added here are excluded from outbound emails and follow-ups until you remove the rule.
         </p>
 
-        <form onSubmit={handleAdd} style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+        <form onSubmit={handleAdd} style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '20px' }}>
           <select 
             value={newType} 
             onChange={e => setNewType(e.target.value)}
@@ -110,7 +107,7 @@ export default function BlocklistModal({ isOpen, onClose }) {
             placeholder={newType === 'email' ? 'e.g. hr@company.com' : 'e.g. company.com'}
             value={newValue}
             onChange={e => setNewValue(e.target.value)}
-            style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface-3)', color: 'var(--text-1)' }}
+            style={{ flex: '1 1 140px', minWidth: 0, padding: '8px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface-3)', color: 'var(--text-1)' }}
           />
           <button type="submit" disabled={loading} className="btn btn-primary" style={{ padding: '8px 16px', borderRadius: '6px' }}>
             {loading ? '...' : 'Block'}
@@ -130,7 +127,7 @@ export default function BlocklistModal({ isOpen, onClose }) {
                   <span style={{ fontSize: '12px', padding: '2px 6px', borderRadius: '4px', background: 'var(--surface-1)', border: '1px solid var(--border)', color: 'var(--text-1)' }}>
                     {item.type}
                   </span>
-                  <span style={{ fontSize: '14px', fontFamily: 'monospace', color: 'var(--text-1)' }}>{item.value}</span>
+                  <div style={{ minWidth: 0, overflowWrap: 'anywhere' }}><span style={{ fontSize: '14px', fontFamily: 'monospace', color: 'var(--text-1)' }}>{item.value}</span><div style={{ fontSize: '12px', color: 'var(--text-2)', marginTop: '6px' }}>{item.source === 'bounce' ? 'Automatic bounce protection' : item.source === 'manual' ? 'Manually blocked' : 'Older rule (source not recorded)'} · {item.createdAt ? new Date(item.createdAt).toLocaleString() : 'Date not recorded'}</div><div style={{ fontSize: '12px', color: 'var(--text-2)' }}>{item.reason || 'Reason not recorded'}</div></div>
                 </div>
                 <button 
                   onClick={() => handleDelete(item._id)}

@@ -1,0 +1,31 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const mongoose = require('mongoose');
+const User = require('../models/User');
+const DailyUsage = require('../models/DailyUsage');
+const { reserveUsage, defaults } = require('../utils/safetyControls');
+test('daily limits are atomic per tenant, and paused or deleting accounts cannot send', async () => {
+  const owners = [new mongoose.Types.ObjectId(), new mongoose.Types.ObjectId()];
+  const users = new Map(owners.map(id => [String(id), { _id: id, controls: { ...defaults, dailyEmailLimit: 1, dailyAiLimit: 2 } }]));
+  const buckets = new Map();
+  User.findById = async id => users.get(String(id));
+  DailyUsage.init = async () => {};
+  DailyUsage.updateOne = async filter => { const key = `${filter.userId}:${filter.day}`; if (!buckets.has(key)) buckets.set(key, { email: 0, ai: 0 }); };
+  DailyUsage.findOneAndUpdate = async (filter, update) => {
+    const bucket = buckets.get(`${filter.userId}:${filter.day}`);
+    const kind = Object.keys(update.$inc)[0];
+    assert.ok(filter.userId); assert.equal(typeof filter[kind].$lt, 'number');
+    if (bucket[kind] >= filter[kind].$lt) return null;
+    bucket[kind]++; return { ...bucket };
+  };
+  const concurrent = await Promise.allSettled([reserveUsage(owners[0], 'email'), reserveUsage(owners[0], 'email')]);
+  assert.equal(concurrent.filter(r => r.status === 'fulfilled').length, 1);
+  assert.match(concurrent.find(r => r.status === 'rejected').reason.message, /limit reached/);
+  await reserveUsage(owners[1], 'email');
+  await reserveUsage(owners[0], 'ai'); await reserveUsage(owners[0], 'ai');
+  await assert.rejects(reserveUsage(owners[0], 'ai'), /limit reached/);
+  users.get(String(owners[1])).controls.paused = true;
+  await assert.rejects(reserveUsage(owners[1], 'email'), /paused/);
+  users.get(String(owners[1])).deleting = true;
+  await assert.rejects(reserveUsage(owners[1], 'ai'), /unavailable/);
+});

@@ -8,7 +8,7 @@ const requireAuth = require('../middleware/requireAuth');
 const { callAIWithRetry } = require('../utils/ai');
 const { extractPortfolioUrl, getEffectivePortfolio } = require('../utils/email');
 
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 1 } });
 
 async function getProfile(userId, includePdf = false) {
   let query = Profile.findOne({ userId });
@@ -26,7 +26,7 @@ async function getProfile(userId, includePdf = false) {
 router.get('/', requireAuth, async (req, res) => {
   try {
     const profile = await getProfile(req.user.id, true);
-    const user = await User.findById(req.user.id).select('email gmailAppPassword');
+    const user = await User.findById(req.user.id).select('email gmailAppPassword controls');
 
     // Auto-detect portfolio from existing resumePdf annotations or resumeText if not yet set
     if (!profile.portfolio) {
@@ -65,6 +65,7 @@ router.get('/', requireAuth, async (req, res) => {
 
     const responseData = {
       ...profileObj,
+      enableAutoFollowUp: require('../utils/safetyControls').controlsFor(user).autoFollowUp,
       emailUser: user ? user.email : '',
       hasGmailAppPassword: Boolean(user && user.gmailAppPassword)
     };
@@ -80,7 +81,7 @@ const updateProfileHandler = async (req, res) => {
     const profile = await getProfile(req.user.id);
 
     const allowedFields = [
-      'name', 'title', 'phone', 'linkedin', 'github', 'portfolio', 'resumeUrl', 'projectUrl',
+      'name', 'excludeUnrelatedJobs', 'availability', 'desiredSalary', 'title', 'phone', 'linkedin', 'github', 'portfolio', 'resumeUrl', 'projectUrl',
       'githubToken', 'tone', 'experienceLevel', 'enableFlex', 
       'enableAutoFollowUp', 'aiInstructions', 'githubRepoLinkCount', 'selectedRepoNames',
       'skills', 'workExperience', 'education', 'fatherName', 'preferredName',
@@ -98,6 +99,10 @@ const updateProfileHandler = async (req, res) => {
 
     await profile.save();
     const user = await User.findById(req.user.id);
+    if (typeof req.body.enableAutoFollowUp === 'boolean') {
+      user.set('controls.autoFollowUp', req.body.enableAutoFollowUp);
+      await user.save();
+    }
 
     if (req.body.gmailAppPassword !== undefined && user) {
       const trimmedPass = req.body.gmailAppPassword.trim();
@@ -279,14 +284,26 @@ ${data.text.substring(0, 5000)}${linksContext}
 
 router.get('/resume-pdf', async (req, res) => {
   try {
-    const { userId } = req.query;
-    if (!userId) return res.status(400).send('Missing userId');
+    let userId;
+    if (req.query.token) {
+      try { userId = require('../utils/signedLinks').verify(req.query.token, 'resume').userId; }
+      catch { return res.status(401).send('This resume link is invalid or expired. Request a new link.'); }
+    } else {
+      let authenticated = false;
+      let authError;
+      await requireAuth(req, res, err => { if (err) authError = err; else authenticated = true; });
+      if (authError) throw authError;
+      if (!authenticated) return;
+      userId = req.user.id;
+    }
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     const profile = await Profile.findOne({ userId });
     if (!profile || !profile.resumePdf) {
       return res.status(404).send('No resume uploaded.');
     }
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="${profile.resumeFilename || 'resume.pdf'}"`);
+    res.setHeader('Content-Disposition', `inline; filename="${(profile.resumeFilename || 'resume.pdf').replace(/[\r\n"\\]/g, '_')}"`);
     res.send(profile.resumePdf);
   } catch (err) {
     res.status(500).send('Failed to fetch resume.');

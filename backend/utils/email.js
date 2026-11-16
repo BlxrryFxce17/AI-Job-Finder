@@ -61,6 +61,9 @@ function isDomainLexicallyMatchingCompany(companyName, domain) {
 
   if (!domainRoot) return false;
 
+  const explicitAlias = rawComp.match(/\(([a-z0-9]{2,8})\)/)?.[1];
+  if (explicitAlias && (domainRoot === explicitAlias || domainRoot === `${explicitAlias}in` || domainRoot === `${explicitAlias}global`)) return true;
+
   // Known corporate aliases and brands
   if (/bank of america/i.test(rawComp) && (domainRoot.includes('bankofamerica') || domainRoot.includes('bofa'))) return true;
   if (/nippon data/i.test(rawComp) && domainRoot.includes('nippondata')) return true;
@@ -74,27 +77,16 @@ function isDomainLexicallyMatchingCompany(companyName, domain) {
 
   const tokens = cleanComp.split(/\s+/).filter(t => t.length >= 3);
 
-  // Exact or near-exact match on company compact name
+  // A name prefix alone is not evidence of ownership (Renew != Renewed Vision).
+  // Permit exact stems and common corporate suffixes, rather than arbitrary substrings.
   const origCompact = cleanComp.replace(/[^a-z0-9]/g, '');
-  if (origCompact && (domainRoot.includes(origCompact) || (origCompact.length >= 4 && origCompact.includes(domainRoot)))) {
-    return true;
-  }
-
-  // If no distinctive tokens remain, check raw company name
-  if (tokens.length === 0) {
-    const rawCompact = rawComp.replace(/[^a-z0-9]/g, '');
-    return domainRoot.includes(rawCompact) || (rawCompact.length >= 4 && rawCompact.includes(domainRoot));
-  }
-
-  // Token match (e.g. 'kdots' in 'kdotsdigital')
-  for (const token of tokens) {
-    if (token.length >= 4 && domainRoot.includes(token)) {
-      return true;
-    }
-    if (domainRoot.length >= 4 && token.includes(domainRoot)) {
-      return true;
-    }
-  }
+  const corporateSuffix = /^(?:(?:tech|technology|technologies|solution|solutions|service|services|system|systems|group|global|india|industry|industries|energy|power|software|digital|consulting|consultancy|corp|corporation|inc|ltd|limited|holdings|enterprises|careers))+$/;
+  const matchesStem = stem => stem && (domainRoot === stem || (stem.length >= 4 && domainRoot.startsWith(stem) && corporateSuffix.test(domainRoot.slice(stem.length))));
+  if (matchesStem(origCompact)) return true;
+  if (tokens.some(token => token.length >= 4 && matchesStem(token))) return true;
+  // Multiword brands can omit a local subsidiary qualifier such as GCC.
+  const meaningful = tokens.filter(token => !['gcc', 'industries', 'industry'].includes(token));
+  if (meaningful.length > 1 && matchesStem(meaningful.join(''))) return true;
 
   // Acronym match (e.g. 'TSS Consultancy' -> 'tss')
   const words = companyName.trim().split(/\s+/);
@@ -113,6 +105,9 @@ function isDomainLexicallyMatchingCompany(companyName, domain) {
 
 async function resolveCompanyDomain(company, applyLink = null) {
   if (!company || typeof company !== 'string') return null;
+
+  const saved = await require('./companyDomains').savedDomain(company);
+  if (saved && (await checkMxRecords(saved.domain)).valid) return saved.domain;
 
   const rawComp = company.trim();
   const lowerComp = rawComp.toLowerCase();
@@ -175,6 +170,9 @@ async function resolveCompanyDomain(company, applyLink = null) {
     cleanName = rawComp.replace(/[^a-zA-Z0-9]/g, '');
   }
 
+  const pageDomain = await require('./companyDomains').domainFromJobPage(rawComp, applyLink, isDomainLexicallyMatchingCompany, isJobBoardOrAtsDomain, checkMxRecords);
+  if (pageDomain) return pageDomain;
+
   // 3. Clearbit Autocomplete (Free company domain lookup with strict lexical verification)
   try {
     const clearbitRes = await axios.get(`https://autocomplete.clearbit.com/v1/companies/suggest?query=${encodeURIComponent(cleanName || rawComp)}`, { timeout: 3500 });
@@ -182,7 +180,7 @@ async function resolveCompanyDomain(company, applyLink = null) {
       for (const entry of clearbitRes.data) {
         if (entry && entry.domain) {
           const cbDomain = entry.domain.toLowerCase().trim();
-          if (!isJobBoardOrAtsDomain(cbDomain, cleanName) && isDomainLexicallyMatchingCompany(cleanName, cbDomain)) {
+          if (!isJobBoardOrAtsDomain(cbDomain, cleanName) && isDomainLexicallyMatchingCompany(rawComp, cbDomain)) {
             const mx = await checkMxRecords(cbDomain);
             if (mx.valid) return finalizeDomain(cbDomain);
           }
@@ -204,7 +202,7 @@ async function resolveCompanyDomain(company, applyLink = null) {
         try {
           const u = new URL(o.url);
           const host = u.hostname.replace(/^www\./, '').toLowerCase();
-          if (!isJobBoardOrAtsDomain(host, cleanName) && isDomainLexicallyMatchingCompany(cleanName, host)) {
+          if (!isJobBoardOrAtsDomain(host, cleanName) && isDomainLexicallyMatchingCompany(rawComp, host)) {
             const mx = await checkMxRecords(host);
             if (mx.valid) return finalizeDomain(host);
           }
@@ -228,7 +226,7 @@ async function resolveCompanyDomain(company, applyLink = null) {
         try {
           const u = new URL(o.link);
           const host = u.hostname.replace(/^www\./, '').toLowerCase();
-          if (!isJobBoardOrAtsDomain(host, cleanName) && isDomainLexicallyMatchingCompany(cleanName, host)) {
+          if (!isJobBoardOrAtsDomain(host, cleanName) && isDomainLexicallyMatchingCompany(rawComp, host)) {
             const mx = await checkMxRecords(host);
             if (mx.valid) return finalizeDomain(host);
           }
@@ -255,7 +253,7 @@ async function resolveCompanyDomain(company, applyLink = null) {
   ].filter(Boolean);
 
   for (const dom of candidates) {
-    if (!isJobBoardOrAtsDomain(dom, cleanName) && isDomainLexicallyMatchingCompany(cleanName, dom)) {
+    if (!isJobBoardOrAtsDomain(dom, cleanName) && isDomainLexicallyMatchingCompany(rawComp, dom)) {
       const mx = await checkMxRecords(dom);
       if (mx.valid) return finalizeDomain(dom);
     }
@@ -265,8 +263,31 @@ async function resolveCompanyDomain(company, applyLink = null) {
   return finalizeDomain(null);
 }
 
+const managedDispatch = require('./dispatchService').createDispatcher();
 async function sendEmailViaAPI(user, mailOptions, sendOptions = {}) {
-  const recipient = (mailOptions.to || '').trim();
+  const onState = async (pipelineStage, pipelineError = '') => {
+    if (!sendOptions.jobId) return;
+    await require('../models/Job').updateOne({ userId: user._id || user.id, id: sendOptions.jobId }, { $set: { pipelineStage, pipelineError } }).catch(() => {});
+  };
+  try {
+    const result = await managedDispatch(user, mailOptions, { ...sendOptions, onState }, deliverEmail);
+    await onState('sent');
+    return result;
+  } catch (err) {
+    await onState('failed', err.message);
+    throw err;
+  }
+}
+
+async function deliverEmail(user, mailOptions, sendOptions = {}) {
+  const recipient = typeof mailOptions.to === 'string' ? mailOptions.to.trim() : '';
+  if (!user || !(user._id || user.id)) throw new Error('An authenticated sender is required.');
+  if (!/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(recipient) || mailOptions.cc || mailOptions.bcc) {
+    throw new Error('Send exactly one recipient per email without CC or BCC.');
+  }
+  if (/^re:/i.test(mailOptions.subject || '') && (!mailOptions.threadId || !mailOptions.inReplyTo || !mailOptions.references)) {
+    throw new Error('Replies require the original thread and RFC message headers.');
+  }
   if (!recipient) {
     console.warn('❌ [Send Guard] Aborted: Recipient address is empty');
     throw new Error('Email send aborted: Recipient email address is empty.');
@@ -275,25 +296,7 @@ async function sendEmailViaAPI(user, mailOptions, sendOptions = {}) {
   console.log(`\n======================================================`);
   console.log(`📤 [Outbound Outreach] Preparing email to: ${recipient}`);
 
-  // Enforce Blocklist
-  const Blocklist = require('../models/Blocklist');
-  const userId = user._id || user.id;
-  if (userId) {
-    const domain = recipient.split('@')[1]?.toLowerCase();
-    const cleanRecipient = recipient.toLowerCase();
-    const blocked = await Blocklist.findOne({
-      userId,
-      $or: [
-        { type: 'email', value: cleanRecipient },
-        { type: 'domain', value: domain }
-      ]
-    });
-    if (blocked) {
-      console.error(`🛑 [Blocklist] BLOCKED: "${recipient}" matched ${blocked.type} rule: ${blocked.value}`);
-      console.log(`======================================================\n`);
-      throw new Error(`Email send aborted: "${recipient}" is on your personal blocklist.`);
-    }
-  }
+  await require('./blocklistGuard').enforceBlocklist(user._id || user.id, recipient);
 
   if (!sendOptions.skipVerification) {
     console.log(`🛡️ [Deliverability Guard] Pre-send reputation check initiated...`);
@@ -349,6 +352,7 @@ async function sendEmailViaAPI(user, mailOptions, sendOptions = {}) {
         .replace(/\//g, '_')
         .replace(/=+$/, '');
 
+      await sendOptions.beforeSubmit?.();
       const res = await gmail.users.messages.send({
         userId: 'me',
         requestBody: {
@@ -356,9 +360,10 @@ async function sendEmailViaAPI(user, mailOptions, sendOptions = {}) {
           threadId: mailOptions.threadId || undefined
         },
       });
-      return { messageId: res.data.id, threadId: res.data.threadId };
+      return { messageId: res.data.id, threadId: res.data.threadId, rfcMessageId: mailOptions.messageId };
     } catch (apiErr) {
-      console.warn(`[Gmail API Fallback] API send failed for ${userEmail} (${apiErr.message}). Attempting SMTP dispatch.`);
+      // Gmail may have accepted a request before a timeout. Do not retry another transport.
+      throw apiErr;
     }
   }
 
@@ -392,9 +397,10 @@ async function sendEmailViaAPI(user, mailOptions, sendOptions = {}) {
         greetingTimeout: 10000,
         socketTimeout: 15000
       });
+      await sendOptions.beforeSubmit?.();
       return await transporter465.sendMail(mailOpts);
     } catch (err465) {
-      console.warn(`⚠️ [SMTP SSL Port 465] Dispatch failed (${err465.message}). Retrying on Port 587 (STARTTLS)...`);
+      if (!['CONN', 'AUTH', 'EHLO', 'STARTTLS'].includes(err465.command)) throw err465;
       const transporter587 = nodemailer.createTransport({
         host: smtpHost,
         port: 587,
@@ -405,6 +411,7 @@ async function sendEmailViaAPI(user, mailOptions, sendOptions = {}) {
         greetingTimeout: 10000,
         socketTimeout: 15000
       });
+      await sendOptions.beforeSubmit?.();
       return await transporter587.sendMail(mailOpts);
     }
   }
@@ -455,8 +462,8 @@ async function checkGmailForReply(user, recipientEmail) {
 
     return res.data.messages && res.data.messages.length > 0;
   } catch (err) {
-    console.error('Error checking Gmail for reply:', err);
-    return false;
+    console.error('Error checking Gmail for reply:', err.message);
+    throw new Error('Could not check recruiter replies. Follow-up stopped until Gmail is available.');
   }
 }
 
@@ -552,6 +559,7 @@ async function autoBlockBouncedEmail(userId, email, company = '') {
         userId: cleanUserId,
         value: cleanEmail,
         type: 'email',
+        source: 'bounce',
         reason: company ? `Automatic: Email bounced for ${company}` : 'Automatic: Email bounced'
       });
       console.log(`🛑 [Blocklist] Automatically added bounced email "${cleanEmail}" to Blocklist for user ${cleanUserId}`);
@@ -849,6 +857,7 @@ async function getInboxReplies(user, options = {}) {
 
               multiMessages.push({
                 id: tMsg.id,
+                rfcMessageId: tHeaders.find(h => h.name.toLowerCase() === 'message-id')?.value || '',
                 from: tFrom,
                 date: tDate,
                 timestamp: tParsedDate || tInternalDate || 0,
@@ -941,6 +950,7 @@ async function getInboxReplies(user, options = {}) {
 
             return {
               messageId: latestMsg.id,
+              rfcMessageId: latestMsg.rfcMessageId,
               threadId: threadId,
               from: rawFromEmail,
               fromFull: displayFromFull,
@@ -978,14 +988,15 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
   let source = '';
   let verificationInfo = null;
 
-  let cleanDomain = (domain || '').toLowerCase().trim();
-  if (!cleanDomain || cleanDomain.includes('unknown') || isJobBoardOrAtsDomain(cleanDomain) || cleanDomain.startsWith('http') || cleanDomain.includes('recruiter') || cleanDomain.includes('agency')) {
+  const savedEmployer = await require('./companyDomains').savedDomain(company);
+  let cleanDomain = (savedEmployer?.domain || domain || '').toLowerCase().trim();
+  if (!cleanDomain || cleanDomain.includes('unknown') || isJobBoardOrAtsDomain(cleanDomain) || cleanDomain.startsWith('http') || cleanDomain.includes('recruiter') || cleanDomain.includes('agency') || (!savedEmployer && !isDomainLexicallyMatchingCompany(company, cleanDomain))) {
     cleanDomain = await resolveCompanyDomain(company, applyLink);
   }
 
   if (!cleanDomain) {
     console.log(`[Email Discovery] ${company} -> NONE (No verified domain resolved)`);
-    return { email: null, source: 'No verified domain resolved', verification: null };
+    return { email: null, allRecipients: [], source: 'No verified domain resolved', deliverabilityStatus: 'unknown', deliverabilityScore: 0, deliverabilityReason: 'Could not resolve the employer email domain. Check the company name and official application URL.', verification: null };
   }
 
   // Dynamic Learning Engine: Check learned company memory first
@@ -1025,6 +1036,7 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
 
   const allDiscoveredRecipients = [];
   const seenEmails = new Set();
+  const rejectedReasons = new Set();
 
   function addDiscoveredRecipient(email, recipientHrName, type, deliverabilityScore, reason) {
     const cleanEmail = email.toLowerCase().trim();
@@ -1110,6 +1122,7 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
       }
       return true;
     }
+    if (result.reason) rejectedReasons.add(result.reason);
     console.log(`[Email Rejected] Candidate ${cleanCand} failed deliverability check (Status: ${result.status}, Score: ${result.deliverabilityScore}%, Reason: ${result.reason})`);
     return false;
   }
@@ -1303,7 +1316,7 @@ async function discoverEmailForJob(company, domain, jd, failedEmails = [], callA
     source: 'No deliverable mailbox discovered', 
     deliverabilityScore: 0,
     deliverabilityStatus: 'undeliverable',
-    deliverabilityReason: 'No verified recipient mailbox found. Recommend using company application link or LinkedIn outreach to prevent email bouncing.',
+    deliverabilityReason: rejectedReasons.size ? [...rejectedReasons].slice(0, 3).join('; ') : 'No company mailbox could be confirmed from the available sources. Use the official application link or add a published recruiter contact.',
     verification: null 
   };
 }
@@ -1574,7 +1587,7 @@ CRITICAL RULES (ABSOLUTE COMPLIANCE REQUIRED):
 ${greeting}
 6. OUTPUT FORMAT: Return strictly the plain-text email body. No markdown fences (\`\`\`), no subject line, and no intro/outro commentary.`;
 
-  const response = await callAIWithRetry(prompt, 3, 2000);
+  const response = await callAIWithRetry(prompt, 3, 2000, { userId: profile.userId, action: 'Follow-up draft' });
   let rawText = response.text.replace(/```(?:html|json|markdown)?\s*([\s\S]*?)```/g, '$1').trim();
 
   // Strip any accidental email headers like "Subject: ..." or "Here is the follow-up:"
@@ -1742,6 +1755,7 @@ function tailorDraftForRecipient(baseDraft, recipient, company, role, profile = 
 }
 
 module.exports = {
+  isDomainLexicallyMatchingCompany,
   sendEmailViaAPI,
   checkGmailForReply,
   findThreadForRecipient,

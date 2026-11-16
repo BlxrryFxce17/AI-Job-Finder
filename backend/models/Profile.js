@@ -3,6 +3,9 @@ const mongoose = require('mongoose');
 const profileSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
   name: { type: String, default: '' },
+  excludeUnrelatedJobs: { type: Boolean, default: true },
+  availability: { type: String, default: '' },
+  desiredSalary: { type: String, default: '' },
   title: { type: String, default: '' },
   phone: { type: String, default: '' },
   linkedin: { type: String, default: '' },

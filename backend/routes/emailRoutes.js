@@ -1,3 +1,4 @@
+const { resumeLink, trackingLink } = require('../utils/signedLinks');
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
@@ -6,7 +7,7 @@ const User = require('../models/User');
 const Profile = require('../models/Profile');
 const requireAuth = require('../middleware/requireAuth');
 const { callAIWithRetry } = require('../utils/ai');
-const { sendEmailViaAPI, discoverEmailForJob, resolveCompanyDomain, isJobBoardOrAtsDomain, getInboxReplies, verifyEmail, formatEmailTextToHtml, cleanDraftEmailText, stripSignOff, getEffectivePortfolio, buildSignatureLinks, buildPlainTextSignature, extractPortfolioUrl, tailorDraftForRecipient } = require('../utils/email');
+const { sendEmailViaAPI, discoverEmailForJob, resolveCompanyDomain, isJobBoardOrAtsDomain, getInboxReplies, verifyEmail, formatEmailTextToHtml, cleanDraftEmailText, stripSignOff, getEffectivePortfolio, buildSignatureLinks, buildPlainTextSignature, extractPortfolioUrl, tailorDraftForRecipient, isDomainLexicallyMatchingCompany } = require('../utils/email');
 const { findHROnLinkedIn } = require('../utils/scraper');
 const { generateTailoredResumePDF } = require('../utils/pdfGenerator');
 
@@ -40,7 +41,7 @@ async function attachResumeToMailOptions(mailOptions, profile, userId) {
   // If resume buffer is not loaded, fetch directly from database
   if (!resumeBuffer && (userId || profile?.userId || profile?._id)) {
     const targetUserId = userId || profile?.userId || profile?._id;
-    const fullProf = await Profile.findOne({ $or: [{ userId: targetUserId }, { _id: targetUserId }] }).select('resumePdf resumeFilename');
+    const fullProf = await Profile.findOne({ userId: targetUserId }).select('resumePdf resumeFilename');
     if (fullProf && fullProf.resumePdf) {
       resumeBuffer = fullProf.resumePdf;
       resumeFilename = fullProf.resumeFilename || resumeFilename;
@@ -209,9 +210,14 @@ router.post('/verify-email', requireAuth, async (req, res) => {
   res.json(result);
 });
 
+const recruiterLookup = require('../utils/recruiterLookup').createRecruiterLookup();
 router.post('/discover-email', requireAuth, async (req, res) => {
   const { company, jd, failedEmails = [], hrName = null, hrLinkedInUrl = null, applyLink = null, location = 'India' } = req.body;
   if (!company) return res.status(400).json({ error: 'Company name required' });
+
+  if (hrName && require('../utils/recruiterDiscovery').canonicalProfile(hrLinkedInUrl)) {
+    return recruiterLookup(req, res);
+  }
 
   let effectiveHrName = hrName;
   let effectiveHrLinkedIn = hrLinkedInUrl;
@@ -233,6 +239,7 @@ router.post('/discover-email', requireAuth, async (req, res) => {
   const result = await discoverEmailForJob(company, domain, jd, failedEmails, callAIWithRetry, effectiveHrName, effectiveHrLinkedIn, applyLink);
   res.json({
     ...result,
+    deliverabilityReason: result.deliverabilityReason || result.source || 'Discovery could not confirm a mailbox',
     hrName: effectiveHrName,
     hrLinkedIn: effectiveHrLinkedIn
   });
@@ -315,7 +322,10 @@ router.post('/generate-email', requireAuth, async (req, res) => {
   const { company, role, type, jd, hrName, recipientEmail, recipientType, isHr } = req.body;
 
   try {
+    if (typeof req.body.recipientEmail === 'string' && req.body.recipientEmail.trim()) await require('../utils/blocklistGuard').enforceBlocklist(req.user.id, req.body.recipientEmail);
     const profile = await getProfile(req.user.id);
+    const relevance = require('../utils/jobRelevance').scoreJob(req.body, profile);
+    if (relevance.excluded) return res.status(422).json({ error: `Profile relevance filter: ${relevance.reason}`, relevance });
     const tone = profile.tone || 'Professional';
     const skillsText = profile.skills && profile.skills.length > 0 ? `Core Skills: ${profile.skills.join(', ')}` : '';
     const achText = profile.achievements && profile.achievements.length > 0 ? `Key Achievements:\n- ${profile.achievements.join('\n- ')}` : '';
@@ -450,14 +460,18 @@ router.post('/send-email', requireAuth, async (req, res) => {
   const { jobId, to, subject, body, recipients, sendToAll } = req.body;
 
   try {
-    const job = await Job.findOne({ id: jobId, userId: req.user.id });
+    const job = jobId ? await Job.findOne({ ...require('../utils/jobIdentity').jobFilter(req.user.id, jobId), isDeleted: { $ne: true } }) : null;
+    if (jobId && (!job || job.isDeleted)) return res.status(404).json({ error: 'Application not found or removed. Refresh your applications before retrying.' });
     const profile = await getProfile(req.user.id, true);
     const user = await User.findById(req.user.id);
+    const relevance = require('../utils/jobRelevance').scoreJob(job || {}, profile);
+    if (relevance.excluded) return res.status(422).json({ error: `Profile relevance filter: ${relevance.reason}`, relevance });
 
+    const trackingJobId = job?.id || jobId;
     const baseUrl = process.env.PUBLIC_URL;
-    const resumeLinkUrl = baseUrl ? `${baseUrl}/api/profile/resume-pdf?userId=${req.user.id}` : null;
-    const trackClick = (url) => (baseUrl && url) ? `${baseUrl}/api/track-click/${jobId}?url=${encodeURIComponent(url)}` : (url || '');
-    const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${jobId}" width="1" height="1" style="display:none;" />` : '';
+    const resumeLinkUrl = resumeLink(baseUrl, req.user.id);
+    const trackClick = (url) => trackingLink(baseUrl, req.user.id, trackingJobId, url);
+    const trackingPixel = baseUrl ? `<img src="${trackingLink(baseUrl, req.user.id, trackingJobId)}" width="1" height="1" style="display:none;" />` : '';
 
     // Determine target recipients list
     let targetRecipients = [];
@@ -482,14 +496,27 @@ router.post('/send-email', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'No verified company mailbox found. Mismatched third-party domains were rejected.' });
     }
 
+    const rules = await require('../models/Blocklist').find({ userId: req.user.id }).lean();
+    const { allowed, blocked } = require('../utils/recipientBatch').partitionRecipients(targetRecipients, rules);
+    targetRecipients = allowed;
+
+    if (job?.company && !['company', 'unknown company', 'unknown', 'the team', 'the engineering team', 'direct recruiter / agency'].includes(job.company.trim().toLowerCase())) {
+      const saved = targetRecipients.some(rec => !isDomainLexicallyMatchingCompany(job.company, rec.email.split('@')[1] || '')) ? await require('../utils/companyDomains').savedDomain(job.company, req.user.id) : null;
+      const mismatched = targetRecipients.map(rec => typeof rec === 'string' ? rec : rec.email || '').filter(email => !isDomainLexicallyMatchingCompany(job.company, email.split('@')[1] || '') && !(saved && (email.split('@')[1] === saved.domain || email.split('@')[1]?.endsWith('.' + saved.domain))));
+      if (mismatched.length) {
+        for (const email of mismatched) blocked.push({ email, status: 'blocked', source: 'employer-match', reason: `Recipient domain does not match ${job.company}. Save the correct employer domain before retrying.` });
+        targetRecipients = targetRecipients.filter(rec => !mismatched.includes(rec.email));
+        if (!targetRecipients.length) await Job.updateOne({ _id: job._id, userId: req.user.id }, { $set: { emailRecipient: '', allRecipients: [], deliverabilityStatus: 'unverified', deliverabilityScore: 0, deliverabilityReason: 'Cached recipients did not match the employer. Rediscover the correct company contact.' } });
+      }
+    }
+
     const sentResults = [];
     let primaryDraftText = '';
     let primaryInfo = null;
 
-    for (let idx = 0; idx < targetRecipients.length; idx++) {
-      const rec = targetRecipients[idx];
+    const summary = await require('../utils/recipientBatch').runRecipientBatch(targetRecipients, async (rec, idx) => {
       const targetEmail = (typeof rec === 'string' ? rec : rec.email || '').trim();
-      if (!targetEmail) continue;
+      if (!targetEmail) throw new Error('Recipient is empty');
 
       // Generate minor content variations per recipient (greeting, department angle)
       const tailoredBodyText = tailorDraftForRecipient(body, rec, job?.company, job?.role);
@@ -515,9 +542,7 @@ router.post('/send-email', requireAuth, async (req, res) => {
       const plainTextSignature = buildPlainTextSignature(profile, trackClick);
       const fullPlainText = `${cleanBodyPlain}\n\n${plainTextSignature}`;
 
-      if (idx === 0) {
-        primaryDraftText = fullPlainText;
-      }
+
 
       const mailOptions = {
         from: user.email || process.env.EMAIL_USER,
@@ -530,55 +555,39 @@ router.post('/send-email', requireAuth, async (req, res) => {
       };
 
       await attachResumeToMailOptions(mailOptions, profile, req.user.id);
-      const info = await sendEmailViaAPI(user, mailOptions);
-      if (idx === 0) {
-        primaryInfo = info;
-      }
+      const info = await sendEmailViaAPI(user, mailOptions, { jobId: job?.id, idempotencyKey: job ? `application:${job._id}:${targetEmail.toLowerCase()}` : undefined });
+      if (!primaryInfo) { primaryInfo = info; primaryDraftText = fullPlainText; }
 
       sentResults.push({ email: targetEmail, messageId: info.messageId, threadId: info.threadId });
 
-      // Update recipient status on job.allRecipients if present
-      if (job && job.allRecipients) {
-        const matchRec = job.allRecipients.find(r => r.email.toLowerCase() === targetEmail.toLowerCase());
-        if (matchRec) {
-          matchRec.status = 'sent';
-          matchRec.sentAt = new Date();
-        }
+      return { messageId: info.messageId, threadId: info.threadId, rfcMessageId: info.rfcMessageId, alreadySent: info.alreadySent };
+    }, { blocked, onResult: async result => {
+      if (!job) return;
+      job.recipientResults = [...(job.recipientResults || []).filter(r => r.email !== result.email), { ...result, ...(result.status === 'sent' ? { sentAt: new Date() } : {}) }];
+      const rec = job.allRecipients?.find(r => r.email.toLowerCase() === result.email);
+      if (rec) { rec.status = result.status; rec.reason = result.reason || ''; if (result.status === 'sent') rec.sentAt = new Date(); }
+      if (result.status === 'sent') {
+        if (!job.sentAt) { job.emailRecipient = result.email; job.rfcMessageId = result.rfcMessageId; job.matchedThreadId = result.threadId || ''; }
+        if (['Found', 'HR_Found', 'Drafting'].includes(job.status)) job.status = 'Sent';
+        job.sentAt = job.sentAt || new Date();
+        job.emailDraft = primaryDraftText || body;
       }
-
-      // Pacing delay between sequential dispatches to protect sender reputation
-      if (idx < targetRecipients.length - 1) {
-        await new Promise(r => setTimeout(r, 1200));
-      }
-    }
+      await job.save();
+    } });
 
     if (job) {
-      job.status = 'Sent';
-      job.sentAt = new Date();
+      job.emailSubject = subject || `Application for ${job.role} - ${profile.name}`;
+      job.sendSummary = { sentCount: summary.sentCount, blockedCount: summary.blockedCount, failedCount: summary.failedCount, partial: summary.partial };
+      job.recipientResults = job.recipientResults || [];
+      for (const result of summary.results) if (!job.recipientResults?.some(r => r.email === result.email)) job.recipientResults.push(result);
+      job.pipelineStage = summary.partial ? 'partial' : summary.success ? 'sent' : 'failed';
+      job.pipelineError = summary.results.filter(r => r.status !== 'sent').map(r => `${r.email}: ${r.reason}`).join('; ');
       job.tracked = !!baseUrl;
-      job.emailDraft = primaryDraftText || body;
-      if (primaryInfo?.threadId) {
-        job.matchedThreadId = primaryInfo.threadId;
-      }
-      if (primaryInfo?.messageId) {
-        job.rfcMessageId = primaryInfo.messageId;
-      }
-      if (to && to !== job.emailRecipient) {
-        job.emailRecipient = to;
-      }
-      job.deliverabilityStatus = 'deliverable';
-      await job.save();
+      await job.save().catch(err => summary.persistenceWarnings.push(err.message));
     }
+    const message = `${summary.sentCount} sent, ${summary.blockedCount} blocked, ${summary.failedCount} failed or uncertain`;
+    res.json({ ...summary, message, error: summary.success ? undefined : message, tracked: !!baseUrl, emailDraft: primaryDraftText, messageId: primaryInfo?.messageId, sentRecipients: sentResults });
 
-    res.json({
-      success: true,
-      tracked: !!baseUrl,
-      emailDraft: primaryDraftText,
-      message: sentResults.length > 1 ? `Sent ${sentResults.length} personalized emails successfully!` : 'Email sent successfully!',
-      messageId: primaryInfo?.messageId,
-      sentCount: sentResults.length,
-      sentRecipients: sentResults
-    });
   } catch (error) {
     console.error('Error sending email:', error);
     let readableError = error.message || 'Failed to send email. Check credentials.';
@@ -599,7 +608,10 @@ router.post('/single-draft', requireAuth, async (req, res) => {
   const { company, role, jd, recipientEmail, hrName, recipientType, isHr } = req.body;
 
   try {
+    if (typeof req.body.recipientEmail === 'string' && req.body.recipientEmail.trim()) await require('../utils/blocklistGuard').enforceBlocklist(req.user.id, req.body.recipientEmail);
     const profile = await getProfile(req.user.id, true);
+    const relevance = require('../utils/jobRelevance').scoreJob(req.body, profile);
+    if (relevance.excluded) return res.status(422).json({ error: `Profile relevance filter: ${relevance.reason}`, relevance });
     const user = await User.findById(req.user.id);
 
     const tone = profile.tone || 'Professional';
@@ -717,10 +729,10 @@ ${hrName ? `Hi ${hrName.split(' ')[0]},` : (isHrTarget ? `Hi ${targetCompany} Re
       draftText = draftText.substring(emailStartMatch.index + emailStartMatch[0].length).trim();
     }
     const baseUrl = process.env.PUBLIC_URL;
-    const resumeLinkUrl = baseUrl ? `${baseUrl}/api/profile/resume-pdf?userId=${req.user.id}` : null;
+    const resumeLinkUrl = resumeLink(baseUrl, req.user.id);
     const jobId = Date.now().toString() + Math.random().toString().substring(2, 6);
-    const trackClick = (url) => (baseUrl && url) ? `${baseUrl}/api/track-click/${jobId}?url=${encodeURIComponent(url)}` : (url || '');
-    const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${jobId}" width="1" height="1" style="display:none;" />` : '';
+    const trackClick = (url) => trackingLink(baseUrl, req.user.id, jobId, url);
+    const trackingPixel = baseUrl ? `<img src="${trackingLink(baseUrl, req.user.id, jobId)}" width="1" height="1" style="display:none;" />` : '';
 
     const cleanBodyPlain = stripSignOff(cleanDraftEmailText(draftText, profile, extractedCompany, extractedRole, { preserveMarkdownLinks: false }), profile);
     const plainTextSignature = buildPlainTextSignature(profile, trackClick);
@@ -735,60 +747,8 @@ ${hrName ? `Hi ${hrName.split(' ')[0]},` : (isHrTarget ? `Hi ${targetCompany} Re
 
     const emailSubject = extractedSubject || `Application for ${extractedRole} - ${profile.name}`;
 
-    if (!finalRecipientEmail) {
-      return res.json({
-        success: true,
-        draft: fullPlainText,
-        company: extractedCompany,
-        role: extractedRole,
-        subject: emailSubject,
-        message: 'Draft generated successfully! Add a recipient email to send directly.'
-      });
-    }
-
-    const formattedDraft = formatEmailTextToHtml(cleanBodyHtml, resumeLinkUrl);
-    const linksHtml = buildSignatureLinks(profile, trackClick);
-    const htmlBody = `
-      <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
-        ${formattedDraft}
-        <br/><br/>
-        Best Regards,<br/>
-        ${profile.name ? `<b>${profile.name}</b><br/>` : ''}
-        ${profile.phone ? `${profile.phone}<br/>` : ''}
-        ${linksHtml}
-        <br/>
-        ${trackingPixel}
-      </div>
-    `;
-
-    const mailOptions = {
-      from: user.email || process.env.EMAIL_USER,
-      to: finalRecipientEmail,
-      subject: emailSubject,
-      text: fullPlainText,
-      html: htmlBody,
-      attachments: []
-    };
-
-    await attachResumeToMailOptions(mailOptions, profile, req.user.id);
-
-    await sendEmailViaAPI(user, mailOptions, { skipVerification: true });
-
-    const newJob = new Job({
-      userId: req.user.id,
-      id: jobId,
-      company: extractedCompany,
-      role: extractedRole,
-      jd: jd,
-      status: 'Sent',
-      emailRecipient: finalRecipientEmail,
-      emailDraft: fullPlainText,
-      tracked: !!baseUrl,
-      sentAt: new Date()
-    });
-    await newJob.save();
-
-    res.json({ success: true, message: 'Email sent and job tracked!', job: newJob });
+    const draftJob = await Job.create({ userId: req.user.id, id: require('crypto').randomUUID(), company: extractedCompany, role: extractedRole, jd, status: 'Drafting', emailRecipient: finalRecipientEmail, emailSubject, emailDraft: cleanBodyPlain, pipelineStage: 'drafted' });
+    res.json({ success: true, draft: cleanBodyPlain, subject: emailSubject, company: extractedCompany, role: extractedRole, jobId: draftJob.id, to: finalRecipientEmail, message: 'Draft ready for review' });
   } catch (error) {
     console.error('Error in Single Mail Drafter:', error.message || error);
     res.status(500).json({ error: error.message || 'Failed to draft and send email.' });
@@ -839,12 +799,12 @@ ${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructio
     const cleanBodyHtml = stripSignOff(cleanDraftEmailText(draftText.trim(), profile, company, role, { preserveMarkdownLinks: true }), profile);
 
     const baseUrl = process.env.PUBLIC_URL;
-    const resumeLinkUrl = baseUrl ? `${baseUrl}/api/profile/resume-pdf?userId=${req.user.id}` : null;
+    const resumeLinkUrl = resumeLink(baseUrl, req.user.id);
     const formattedDraft = formatEmailTextToHtml(cleanBodyHtml, resumeLinkUrl);
 
     const testJobId = Date.now().toString();
-    const trackClick = (url) => (baseUrl && url) ? `${baseUrl}/api/track-click/${testJobId}?url=${encodeURIComponent(url)}` : (url || '');
-    const trackingPixel = baseUrl ? `<img src="${baseUrl}/api/track-open/${testJobId}" width="1" height="1" style="display:none;" />` : '';
+    const trackClick = (url) => trackingLink(baseUrl, req.user.id, testJobId, url);
+    const trackingPixel = baseUrl ? `<img src="${trackingLink(baseUrl, req.user.id, testJobId)}" width="1" height="1" style="display:none;" />` : '';
 
     const linksHtml = buildSignatureLinks(profile, trackClick);
     const htmlBody = `
@@ -873,11 +833,14 @@ ${profile.aiInstructions ? `\nEXTRA CUSTOM INSTRUCTIONS:\n${profile.aiInstructio
 
     await attachResumeToMailOptions(mailOptions, profile, req.user.id);
 
-    await sendEmailViaAPI(user, mailOptions);
+    const testInfo = await sendEmailViaAPI(user, mailOptions);
 
     const testJob = new Job({
       userId: req.user.id,
       id: testJobId,
+      emailSubject: mailOptions.subject,
+      rfcMessageId: testInfo.rfcMessageId,
+      matchedThreadId: testInfo.threadId || '',
       company: company,
       role: role,
       jd: jd,
@@ -1188,18 +1151,18 @@ router.post('/inbox/draft-reply', requireAuth, async (req, res) => {
 
     let intentGuidance = 'Draft 3 distinct, highly professional, and concise replies to this email.';
     if (intent === 'interview_accept') {
-      intentGuidance = 'Express sincere gratitude and enthusiasm for the interview invitation. Confirm availability and propose 2-3 specific time windows (morning and afternoon) over the coming 2-3 business days. Mention looking forward to discussing your engineering skills.';
+      intentGuidance = 'Thank the recruiter for the interview invitation. Ask for available interview slots unless the candidate provided confirmed availability. Do not invent dates or times.';
     } else if (intent === 'info_confirm') {
-      intentGuidance = 'Politely and clearly confirm your details: available to start immediately or on short 15-day notice, current location, open and flexible to discuss compensation according to standard benchmarks, and attach/reiterate your portfolio/GitHub.';
+      intentGuidance = 'Confirm only details explicitly present in the profile. If availability, notice period, or compensation is requested and missing, ask the candidate to provide it. Never invent these details.';
     } else if (intent === 'polite_inquiry') {
       intentGuidance = 'Thank the recruiter warmly, confirm interest in the role, and ask 1-2 thoughtful, insightful questions regarding the team technical stack, engineering culture, or next steps in the process.';
     }
 
     const prompt = `You are an elite software engineer named ${profile.name || 'Candidate'}.
 Candidate Title: ${profile.title || 'Software Developer'}
-Candidate Skills: ${(profile.skills || []).join(', ') || 'React, Node.js, Python, MongoDB'}
+Candidate Skills: ${(profile.skills || []).join(', ') || 'Not provided'}
 Candidate Phone: ${profile.phone || ''}
-Candidate Location: ${profile.location || 'India'}
+Candidate Location: ${profile.location || [profile.city, profile.state, profile.country].filter(Boolean).join(', ') || 'Not provided'}
 Candidate Portfolio: ${profile.portfolio || ''}
 Candidate GitHub: ${profile.github || ''}
 Candidate LinkedIn: ${profile.linkedin || ''}

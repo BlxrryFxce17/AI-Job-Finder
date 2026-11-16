@@ -1,3 +1,5 @@
+import RecruiterEvidence from './components/RecruiterEvidence';
+import SafetyCenter from './components/SafetyCenter';
 import React from 'react';
 import { NAV, API_BASE } from './useAppLogic.jsx';
 import GitHubPortfolioCard from './GitHubPortfolioCard';
@@ -114,7 +116,7 @@ function EmailMessageBody({ text, quotedText }) {
   );
 }
 
-function FollowUpRow({ job, f, API_BASE, token, setJobs, jobs, notify, profile }) {
+function FollowUpRow({ job, f, API_BASE, token, setJobs, jobs, notify, profile, apiFetch }) {
   const [expanded, setExpanded] = React.useState(false);
   const [sending, setSending] = React.useState(false);
 
@@ -179,7 +181,7 @@ function FollowUpRow({ job, f, API_BASE, token, setJobs, jobs, notify, profile }
                 e.stopPropagation();
                 setSending(true);
                 try {
-                  const res = await fetch(`${API_BASE}/api/send-followup`, {
+                  const res = await apiFetch(`${API_BASE}/api/send-followup`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                     body: JSON.stringify({ jobId: job.id, day: f.day })
@@ -227,13 +229,13 @@ function FollowUpRow({ job, f, API_BASE, token, setJobs, jobs, notify, profile }
                 Sent to: <strong style={{ color: 'var(--text-2)' }}>{job.emailRecipient || job.recruiterEmail || 'Recruiter'}</strong>
               </span>
               <button
-                className="btn btn-secondary"
+                className="btn btn-secondary" disabled title="This follow-up has already been sent"
                 style={{ padding: '4px 12px', fontSize: '12px' }}
                 onClick={async (e) => {
                   e.stopPropagation();
                   if (!window.confirm(`Resend Day ${f.day} follow-up to ${job.emailRecipient || job.recruiterEmail || 'recruiter'}?`)) return;
                   try {
-                    const res = await fetch(`${API_BASE}/api/send-followup`, {
+                    const res = await apiFetch(`${API_BASE}/api/send-followup`, {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                       body: JSON.stringify({ jobId: job.id, day: f.day })
@@ -248,7 +250,7 @@ function FollowUpRow({ job, f, API_BASE, token, setJobs, jobs, notify, profile }
                   }
                 }}
               >
-                Resend ✈️
+                Already sent
               </button>
             </div>
           )}
@@ -501,11 +503,9 @@ export default function DesktopApp(props) {
 
   React.useEffect(() => {
     const handleClickOutside = (event) => {
+      if (hrLocationPickerRef.current && !hrLocationPickerRef.current.contains(event.target)) setShowHrLocationPicker(false);
       if (locationPickerRef.current && !locationPickerRef.current.contains(event.target)) {
         setShowLocationPicker(false);
-      }
-      if (hrLocationPickerRef.current && !hrLocationPickerRef.current.contains(event.target)) {
-        setShowHrLocationPicker(false);
       }
     };
     if (showLocationPicker || showHrLocationPicker) {
@@ -593,7 +593,7 @@ export default function DesktopApp(props) {
           createNew,
           company,
           role,
-          messageId: currentReply.messageId,
+          messageId: currentReply.rfcMessageId || currentReply.messageId,
           threadId: currentReply.threadId,
           fromEmail: currentReply.from
         })
@@ -748,6 +748,12 @@ export default function DesktopApp(props) {
   const handleDeepDiscoverHrEmail = async (job) => {
     setDiscoveringHrId(job.id);
     try {
+      if (job.hrLinkedIn) {
+        const response = await props.apiFetch(`${API_BASE}/api/hr/email-lookup`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobId: job._id || job.id }) });
+        const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Could not queue lookup');
+        notify(result.message); await loadJobs(); return;
+      }
+
       const targetLabel = job.hrName ? `${job.hrName} at ${job.company}` : (job.company || 'company');
       notify(`🔍 Scanning web & pattern databases for ${targetLabel}...`, 'info');
       const effectiveLoc = job.location || (locationFilter === 'Custom' ? customLocation : locationFilter) || 'India';
@@ -855,6 +861,7 @@ export default function DesktopApp(props) {
       });
       const data = await res.json();
       if (data && data.success) {
+        if (data.queued) { notify(data.message, 'info'); await loadJobs(); return; }
         if (data.updatedJobs && data.updatedJobs.length > 0) {
           const updateMap = new Map(data.updatedJobs.map(uj => [uj.id, uj]));
           setJobs(prev => prev.map(j => {
@@ -1182,6 +1189,12 @@ export default function DesktopApp(props) {
             </button>
           </div>
         </div>
+
+        {tab === 'safety' && (
+          <div className="safety-page-scroll" tabIndex={0} aria-label="Safety and activity settings">
+            <SafetyCenter {...props} />
+          </div>
+        )}
 
         {tab === 'inbox' && (() => {
           const categoryCounts = {
@@ -1858,7 +1871,7 @@ export default function DesktopApp(props) {
                                     onClick={async () => {
                                       setSendingReply(true);
                                       try {
-                                        const res = await fetch(`${API_BASE}/api/inbox/send-reply`, {
+                                        const res = await props.apiFetch(`${API_BASE}/api/inbox/send-reply`, {
                                           method: 'POST',
                                           headers: {
                                             'Content-Type': 'application/json',
@@ -1868,7 +1881,7 @@ export default function DesktopApp(props) {
                                             to: currentReply.fromFull || currentReply.from,
                                             subject: currentReply.subject,
                                             body: selectedDraft,
-                                            messageId: currentReply.messageId,
+                                            messageId: currentReply.rfcMessageId || currentReply.messageId,
                                             threadId: currentReply.threadId
                                           })
                                         });
@@ -2414,7 +2427,7 @@ export default function DesktopApp(props) {
                     </span>
                   </h2>
                   <p style={{ color: 'var(--text-2)', fontSize: '13px', margin: '4px 0 0 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    Track, trigger, and review Day 3 and Day 6 follow-up emails for jobs awaiting recruiter replies.
+                    Track, trigger, and review scheduled follow-up emails for jobs awaiting recruiter replies.
                   </p>
                 </div>
 
@@ -2710,6 +2723,7 @@ export default function DesktopApp(props) {
               <div style={{ display: 'flex', flexDirection: 'column' }}>
                 {filteredFollowUps.slice(0, followUpLimit).map(({ job, f }) => (
                   <FollowUpRow
+                    apiFetch={props.apiFetch}
                     key={`${job.id}-${f.day}`}
                     job={job}
                     f={f}
@@ -2778,19 +2792,12 @@ export default function DesktopApp(props) {
                   </>
                 )}
 
-                <button className="btn btn-secondary" onClick={() => {
-                  const hrJobs = jobs.filter(j => j.status === 'HR_Found');
-                  if (selectedJobs.length === hrJobs.length && hrJobs.length > 0) setSelectedJobs([]);
-                  else setSelectedJobs(hrJobs.map(j => j.id));
-                }}>
-                  {selectedJobs.length === jobs.filter(j => j.status === 'HR_Found').length && jobs.filter(j => j.status === 'HR_Found').length > 0 ? 'Deselect All' : 'Select All'}
-                </button>
-
+                <select className="form-input" aria-label="Recruiter search mode" value={props.hrSearchMode} onChange={e => props.setHrSearchMode(e.target.value)} style={{ width: 'auto' }}><option value="role">Recruiting specialty</option><option value="company">Company</option></select>
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
                     const q = hrQuery.trim() || (fetchQueries && fetchQueries[0]) || (props.profile && props.profile.title) || 'software developer';
-                    handleScrapeHR({ query: q, locations: hrLocations, experience: experienceFilter });
+                    handleScrapeHR({ query: q, locations: hrLocations, mode: props.hrSearchMode, experience: experienceFilter });
                   }}
                   style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', position: 'relative', zIndex: 30 }}
                 >
@@ -3139,19 +3146,19 @@ export default function DesktopApp(props) {
                     {activeHrJobs.length > 0 && (
                       <button
                         onClick={() => {
-                          const activeIds = activeHrJobs.map(j => j.id || j._id).filter(Boolean);
-                          const allSelected = activeIds.length > 0 && activeIds.every(id => selectedJobs.includes(id));
+                          const isSelected = job => selectedJobs.some(id => String(id) === String(job.id) || String(id) === String(job._id));
+                          const allSelected = activeHrJobs.every(isSelected);
                           if (allSelected) {
-                            const activeSet = new Set(activeIds);
-                            setSelectedJobs(prev => prev.filter(id => !activeSet.has(id)));
+                            const activeSet = new Set(activeHrJobs.flatMap(j => [j.id, j._id]).filter(Boolean).map(String));
+                            setSelectedJobs(prev => prev.filter(id => !activeSet.has(String(id))));
                           } else {
-                            setSelectedJobs(prev => [...new Set([...prev, ...activeIds])]);
+                            setSelectedJobs(prev => [...prev, ...activeHrJobs.filter(job => !isSelected(job)).map(j => j.id || j._id)]);
                           }
                         }}
                         className="btn btn-secondary"
                         style={{ marginLeft: 'auto', fontSize: '12px', padding: '6px 12px' }}
                       >
-                        {activeHrJobs.every(j => selectedJobs.includes(j.id || j._id)) ? 'Deselect All HR' : `Select All HR (${activeHrJobs.length})`}
+                        {activeHrJobs.every(j => selectedJobs.some(id => String(id) === String(j.id) || String(id) === String(j._id))) ? 'Deselect All HR' : `Select All HR (${activeHrJobs.length})`}
                       </button>
                     )}
                   </div>
@@ -3281,7 +3288,7 @@ export default function DesktopApp(props) {
                     </div>
 
                     {/* Email Box / Inline Editor */}
-                    <div style={{
+                    <div className="recruiter-email-row" style={{
                       fontSize: '12px',
                       background: 'var(--surface-1)',
                       padding: '8px 12px',
@@ -3328,7 +3335,7 @@ export default function DesktopApp(props) {
                         <>
                           <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '4px' }}>
                             <strong style={{ color: 'var(--text-2)' }}>Email: </strong>
-                            {hasEmail ? (
+                        {hasEmail ? (
                               <>
                                 <span style={{ color: 'var(--text-1)', fontWeight: 500 }}>{job.emailRecipient}</span>
                                 {job.status === 'Bounced' || job.deliverabilityStatus === 'bounced' ? (
@@ -3369,6 +3376,8 @@ export default function DesktopApp(props) {
                         </>
                       )}
                     </div>
+
+                    <RecruiterEvidence job={job} apiFetch={props.apiFetch} notify={notify} loadJobs={loadJobs} />
 
                     {/* Action Buttons */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: 'auto', paddingTop: '6px' }}>
@@ -3487,6 +3496,7 @@ export default function DesktopApp(props) {
             </div>
           </div>
         )}
+
 
         {tab === 'applications' && (
           <div className="add-job-bar" style={{ position: 'relative', zIndex: showLocationPicker ? 1000 : 50, overflow: 'visible' }}>
@@ -4505,7 +4515,7 @@ export default function DesktopApp(props) {
         ) : tab === 'single_drafter' ? (
           <div className="single-drafter-section" style={{ padding: '24px', background: 'var(--surface-2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', flex: 1, overflowY: 'auto', margin: '20px 28px' }}>
             <h2 style={{ fontSize: '20px', marginBottom: '8px', color: 'var(--text-1)' }}>Single Mail Drafter</h2>
-            <p style={{ color: 'var(--text-2)', marginBottom: '24px', fontSize: '14px' }}>Paste a Job Description below, and the AI will draft and send a highly personalized cold email instantly.</p>
+            <p style={{ color: 'var(--text-2)', marginBottom: '24px', fontSize: '14px' }}>Paste a Job Description below, and the AI will draft and send your email directly to the recipient.</p>
 
             <form onSubmit={async (e) => {
               e.preventDefault();
@@ -4520,8 +4530,12 @@ export default function DesktopApp(props) {
                 });
                 const result = await res.json();
                 if (result.success) {
-                  notify('Email Drafted and Sent! 🚀');
-                  e.target.reset();
+                  await loadJobs();
+                  if (result.to) {
+                    const sent = await props.apiFetch(`${API_BASE}/api/send-email`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobId: result.jobId, to: result.to, subject: result.subject, body: result.draft }) });
+                    const outcome = await sent.json();
+                    notify(outcome.success ? 'Email sent' : outcome.error, outcome.success ? 'success' : 'info');
+                  } else notify('Draft saved. Add a recipient in your applications to send it.');
                   loadJobs();
                 } else {
                   notify(result.error || 'Failed to send', 'error');
@@ -5030,6 +5044,7 @@ export default function DesktopApp(props) {
                                   {level === 'Junior' ? '🟢 Jr' : level === 'Senior' ? '🟣 Sr' : '🟡 Mid'}
                                 </span>
                               </div>
+                              {job.relevance && <span title={job.relevance.reason} style={{ fontSize: '11px', color: 'var(--text-2)' }}>Profile match: {job.relevance.score}%</span>}
                               {meta.length > 0 && (
                                 <div style={{ display: 'flex', gap: '3px', flexWrap: 'nowrap', overflow: 'hidden', maxWidth: '100%' }}>
                                   {meta.slice(0, 2).map((m, idx) => (

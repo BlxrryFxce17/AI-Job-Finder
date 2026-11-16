@@ -111,80 +111,17 @@ async function sanitizeExistingHRLeads(userId) {
 
 router.get('/', requireAuth, async (req, res) => {
   try {
+    // Apply the same exclusion policy to leads completed before this feature.
+    await Job.updateMany({ ...require('../utils/recruiterExclusions').noEmailFilter(req.user.id), isDeleted: { $ne: true } }, { $set: { isDeleted: true } });
     // Fetch non-deleted jobs
     const jobs = await Job.find({ userId: req.user.id, isDeleted: { $ne: true } })
       .sort({ sentAt: -1, publishedAt: -1, createdAt: -1, updatedAt: -1 })
       .lean();
 
-    const seenKeys = new Map(); // key -> index in uniqueJobs
-    const uniqueJobs = [];
-    const duplicateIdsToPrune = [];
-
-    const getJobPriority = (j) => {
-      let score = 0;
-      if (j.status === 'Sent') score += 100;
-      else if (j.status === 'Drafting') score += 50;
-      else if (j.status === 'Found' || j.status === 'HR_Found') score += 10;
-      if (j.emailRecipient) score += 20;
-      if (j.deliverabilityScore) score += j.deliverabilityScore / 10;
-      if (j.sentAt) score += 5;
-      return score;
-    };
-
-    for (const j of jobs) {
-      const isHR = j.status === 'HR_Found' || !!j.hrLinkedIn || !!j.hrName;
-      let primaryKey = '';
-      let secondaryKey = '';
-
-      if (isHR) {
-        const handle = extractLinkedInHandle(j.hrLinkedIn || j.applyLink);
-        if (handle) primaryKey = `hr_handle_${handle}`;
-        const normName = normalizeHrName(j.hrName);
-        const compKey = normalizeCompanyKey(j.company);
-        if (normName) secondaryKey = `hr_name_${compKey || 'none'}_${normName}`;
-      } else {
-        const normUrl = normalizeApplyUrl(j.applyLink);
-        if (normUrl) primaryKey = `job_url_${normUrl}`;
-        const compKey = normalizeCompanyKey(j.company);
-        const roleKey = normalizeRoleKey(j.role);
-        if (compKey && roleKey) secondaryKey = `job_crole_${compKey}_${roleKey}`;
-      }
-
-      const matchedKey = (primaryKey && seenKeys.has(primaryKey))
-        ? primaryKey
-        : ((secondaryKey && seenKeys.has(secondaryKey)) ? secondaryKey : null);
-
-      if (matchedKey) {
-        const existingIdx = seenKeys.get(matchedKey);
-        const existing = uniqueJobs[existingIdx];
-        if (getJobPriority(j) > getJobPriority(existing)) {
-          duplicateIdsToPrune.push(existing._id);
-          uniqueJobs[existingIdx] = j;
-          if (primaryKey) seenKeys.set(primaryKey, existingIdx);
-          if (secondaryKey) seenKeys.set(secondaryKey, existingIdx);
-        } else {
-          duplicateIdsToPrune.push(j._id);
-        }
-      } else {
-        const newIdx = uniqueJobs.length;
-        uniqueJobs.push(j);
-        if (primaryKey) seenKeys.set(primaryKey, newIdx);
-        if (secondaryKey) seenKeys.set(secondaryKey, newIdx);
-      }
-    }
-
-    // Soft-delete duplicate jobs in background
-    if (duplicateIdsToPrune.length > 0) {
-      Job.updateMany(
-        { _id: { $in: duplicateIdsToPrune } },
-        { $set: { isDeleted: true, deletedAt: new Date() } }
-      ).catch(() => { });
-    }
-
-    const normalized = uniqueJobs.map(j => ({
-      ...j,
-      id: j.id || (j._id ? j._id.toString() : '')
-    }));
+    const profile = await Profile.findOne({ userId: req.user.id }).select('-resumePdf').lean();
+    const rules = jobs.some(j => j.hrLinkedIn) ? await require('../models/Blocklist').find({ userId: req.user.id }).lean() : [];
+    const contactState = job => /replied/i.test(job.status) ? 'Replied' : /bounced/i.test(job.status) ? 'Bounced' : job.sentAt || /Sent|Opened|Connected/.test(job.status) ? 'Already contacted' : job.hrEmailLookup?.state === 'blocked' || (job.emailRecipient && !require('../utils/recipientBatch').partitionRecipients([job.emailRecipient], rules).allowed.length) ? 'Blocked' : 'New';
+    const normalized = jobs.map(j => ({ ...j, hrContactState: j.hrLinkedIn ? contactState(j) : undefined, id: j.id || String(j._id), relevance: require('../utils/jobRelevance').scoreJob(j, profile || {}) }));
     res.json(normalized);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch jobs' });
@@ -229,6 +166,13 @@ router.post('/check-all-emails', requireAuth, async (req, res) => {
     }
 
     const candidateJobs = await Job.find(queryFilter).limit(35);
+    if (scope === 'hr') {
+      const ids = candidateJobs.filter(j => j.hrLinkedIn && !j.sentAt && j.hrEmailLookup?.state !== 'running').map(j => j._id);
+      await Job.updateMany({ userId: req.user.id, _id: { $in: ids }, status: 'HR_Found', isDeleted: { $ne: true } }, { $set: { 'hrEmailLookup.state': 'queued', 'hrEmailLookup.attempts': 0 } });
+      require('../utils/recruiterEmailWorker').kick(req.user.id);
+      return res.json({ success: true, queued: true, count: ids.length, message: `${ids.length} recruiter email lookups queued. Profiles will update as they complete.` });
+    }
+
     let checkedCount = 0;
     let foundCount = 0;
     const updatedJobs = [];
@@ -307,7 +251,7 @@ router.post('/check-all-emails', requireAuth, async (req, res) => {
 
 router.post('/', requireAuth, async (req, res) => {
   try {
-    const job = new Job({ ...req.body, id: Date.now().toString(), userId: req.user.id });
+    const job = new Job({ ...req.body, id: require('crypto').randomUUID(), userId: req.user.id });
     await job.save();
     res.json(job);
   } catch (err) {
@@ -331,6 +275,8 @@ router.put('/:id', requireAuth, async (req, res) => {
     const job = await Job.findOne(filter);
     if (!job) return res.status(404).json({ error: 'Job not found' });
 
+    if (status === 'HR_Found' && job.hrLinkedIn && job.status !== 'HR_Found') return res.status(409).json({ error: 'Contact history is preserved. Editing a recruiter must not reset a contacted application.' });
+
     if (status) {
       if (status === 'Sent' && job.status !== 'Sent') {
         job.sentAt = new Date();
@@ -347,6 +293,9 @@ router.put('/:id', requireAuth, async (req, res) => {
       }
     }
     if (tracked !== undefined) job.tracked = tracked;
+    if (['queued', 'discovering', 'verifying', 'drafting', 'drafted', 'sending', 'sent', 'partial', 'filtered', 'failed', 'paused'].includes(req.body.pipelineStage)) job.pipelineStage = req.body.pipelineStage;
+    if (typeof req.body.pipelineError === 'string') job.pipelineError = req.body.pipelineError.slice(0, 1000);
+    if (typeof req.body.emailSubject === 'string') job.emailSubject = req.body.emailSubject.slice(0, 200);
     if (req.body.role !== undefined) job.role = req.body.role;
     if (req.body.company !== undefined) job.company = req.body.company;
     if (req.body.jd !== undefined) job.jd = req.body.jd;
@@ -856,7 +805,7 @@ router.post('/fetch-jobs', requireAuth, async (req, res) => {
 
             const newJob = new Job({
               userId: req.user.id,
-              id: Date.now().toString() + Math.random().toString().substring(2, 6),
+              id: require('crypto').randomUUID() + Math.random().toString().substring(2, 6),
               company: fj.company,
               role: fj.role,
               jd: fj.jd,
@@ -1021,196 +970,7 @@ router.get('/check-bounces', requireAuth, async (req, res) => {
   }
 });
 
-router.post('/scrape-hr', requireAuth, async (req, res) => {
-  let clientAborted = false;
-  res.on('close', () => {
-    if (!res.writableFinished) clientAborted = true;
-  });
-
-  const query = (req.body.query || 'software engineer').trim();
-  const rawLoc = req.body.locations || req.body.location || 'India';
-  const location = (Array.isArray(rawLoc) ? rawLoc.join(', ') : String(rawLoc)).trim();
-  const targetExperience = req.body.experience || '';
-
-  try {
-    // Pre-load past active HR leads to prevent duplicates (exclude deleted)
-    const allUserJobs = await Job.find(
-      { userId: req.user.id, isDeleted: { $ne: true } },
-      { hrLinkedIn: 1, hrName: 1, company: 1, applyLink: 1, status: 1 }
-    ).lean();
-
-    const existingUrls = [];
-    const existingHandles = new Set();
-    const existingNames = new Set();
-    const existingCompanyHr = new Set();
-
-    for (const j of allUserJobs) {
-      if (j.hrLinkedIn) {
-        existingUrls.push(j.hrLinkedIn);
-        const h = extractLinkedInHandle(j.hrLinkedIn);
-        if (h) existingHandles.add(h);
-      }
-      if (j.applyLink && j.applyLink.includes('linkedin.com/in/')) {
-        existingUrls.push(j.applyLink);
-        const h = extractLinkedInHandle(j.applyLink);
-        if (h) existingHandles.add(h);
-      }
-      if (j.hrName) {
-        const n = normalizeHrName(j.hrName);
-        if (n) {
-          existingNames.add(n);
-          const c = normalizeCompanyKey(j.company);
-          if (c) existingCompanyHr.add(`${c}__${n}`);
-        }
-      }
-    }
-
-    console.log(`[Scrape-HR] Discovering fresh unique HR leads for query: "${query}", location: "${location}"...`);
-
-    // Discover HR recruiters on LinkedIn
-    let hrProfiles = await discoverHRProfiles(
-      query,
-      location,
-      existingUrls,
-      Array.from(existingNames),
-      Array.from(existingHandles)
-    );
-
-    // Fallback search by query/company name ONLY if 0 profiles found
-    if (hrProfiles.length === 0) {
-      try {
-        const companyHr = await Promise.race([
-          findHROnLinkedIn(query, location),
-          new Promise(resolve => setTimeout(() => resolve(null), 8000))
-        ]);
-        if (companyHr && companyHr.name) {
-          const normName = normalizeHrName(companyHr.name);
-          const handle = extractLinkedInHandle(companyHr.linkedinUrl);
-          if ((!normName || !existingNames.has(normName)) && (!handle || !existingHandles.has(handle))) {
-            hrProfiles.push({
-              name: companyHr.name,
-              role: 'Talent Acquisition / HR Recruiter',
-              company: query,
-              link: companyHr.linkedinUrl,
-              snippet: companyHr.snippet || `HR & Hiring for ${query}`,
-              location: location
-            });
-          }
-        }
-      } catch (compErr) {
-        console.warn('[Scrape-HR] Fast fallback HR error:', compErr.message);
-      }
-    }
-
-    // Select up to 10 unique candidates
-    const candidates = [];
-    for (const hr of hrProfiles) {
-      if (candidates.length >= 10) break;
-      const normName = normalizeHrName(hr.name);
-      if (!normName || existingNames.has(normName)) continue;
-      const handle = extractLinkedInHandle(hr.link);
-      if (handle && existingHandles.has(handle)) continue;
-      const compKey = normalizeCompanyKey(hr.company);
-      const compHrKey = `${compKey}__${normName}`;
-      if (compKey && existingCompanyHr.has(compHrKey)) continue;
-
-      existingNames.add(normName);
-      if (handle) existingHandles.add(handle);
-      if (compKey) existingCompanyHr.add(compHrKey);
-      candidates.push(hr);
-    }
-
-    // If candidates is empty because all scraped profiles were previously seen, provide guaranteed fresh directory leads
-    if (candidates.length === 0) {
-      console.log('[Scrape-HR] All candidates were previously seen. Generating guaranteed fresh leads from directory...');
-      const fallbackList = discoverHRProfilesFromDirectory(query, location, [], [], []);
-      const freshFallback = fallbackList.filter(hr => {
-        const norm = normalizeHrName(hr.name);
-        return norm && !existingNames.has(norm);
-      });
-      const toUse = freshFallback.length > 0 ? freshFallback.slice(0, 8) : fallbackList.slice(0, 8);
-      for (const f of toUse) {
-        candidates.push(f);
-      }
-    }
-
-    if (clientAborted) {
-      console.log('[Scrape-HR] Request aborted by client before lead dispatch.');
-      if (!res.writableEnded) {
-        return res.json({ success: true, count: 0, jobs: [] });
-      }
-      return;
-    }
-
-    // Process all candidates in parallel with 2.5s timeout per lead
-    const results = await Promise.all(
-      candidates.map(async (hr) => {
-        let discoveredEmail = '';
-        let deliverabilityScore = 0;
-        let deliverabilityStatus = 'unverified';
-        let deliverabilityReason = '';
-
-        const isGenuineCompany = hr.company && !isInvalidCompany(hr.company) && hr.company !== 'Direct Recruiter / Agency';
-        if (isGenuineCompany) {
-          try {
-            const domain = await resolveCompanyDomain(hr.company, hr.link);
-            if (domain && domain !== 'unknown.com') {
-              const emailPromise = discoverEmailForJob(
-                hr.company,
-                domain,
-                hr.snippet || '',
-                [],
-                callAIWithRetry,
-                hr.name,
-                hr.link,
-                hr.link
-              );
-              const timeoutPromise = new Promise(resolve => setTimeout(() => resolve({ email: null }), 2500));
-              const emailRes = await Promise.race([emailPromise, timeoutPromise]);
-              if (emailRes && emailRes.email && (emailRes.deliverabilityScore >= 65 || emailRes.verification?.canAutoSend)) {
-                discoveredEmail = emailRes.email;
-                deliverabilityScore = emailRes.deliverabilityScore || 80;
-                deliverabilityStatus = emailRes.deliverabilityStatus || 'deliverable';
-                deliverabilityReason = emailRes.deliverabilityReason || 'Verified corporate email';
-              }
-            }
-          } catch (emailErr) {
-            // Silently skip email resolution errors to keep lead ingestion fast
-          }
-        }
-
-        const newJob = new Job({
-          userId: req.user.id,
-          id: Date.now().toString() + Math.random().toString().substring(2, 6),
-          company: isGenuineCompany ? hr.company : 'Direct Recruiter / Agency',
-          role: hr.role || 'Technical Recruiter',
-          jd: hr.snippet || `Talent Acquisition & Hiring for ${query}${isGenuineCompany ? ' at ' + hr.company : ''}`,
-          status: 'HR_Found',
-          applyLink: hr.link || '',
-          location: hr.location || location,
-          source: 'LinkedIn',
-          experienceLevel: targetExperience || 'Mid',
-          emailRecipient: discoveredEmail,
-          deliverabilityScore: deliverabilityScore || (discoveredEmail ? 80 : 0),
-          deliverabilityStatus: deliverabilityStatus || (discoveredEmail ? 'deliverable' : 'unverified'),
-          deliverabilityReason: deliverabilityReason || '',
-          hrName: hr.name,
-          hrLinkedIn: hr.link || '',
-          publishedAt: new Date()
-        });
-
-        await newJob.save();
-        return newJob;
-      })
-    );
-
-    console.log(`[Scrape-HR] Successfully discovered ${results.length} fresh unique HR leads!`);
-    res.json({ success: true, count: results.length, jobs: results });
-  } catch (err) {
-    console.error('[Scrape-HR] Error:', err);
-    res.status(500).json({ error: 'Failed to discover HRs' });
-  }
-});
+router.post('/scrape-hr', requireAuth, require('./hrRoutes').searchHandler);
 
 // Purge all Senior / Lead jobs for current user
 router.post('/purge-senior', requireAuth, async (req, res) => {
